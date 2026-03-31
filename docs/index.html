@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Netlify Agent Runner - GitHub Action</title>
+  <style>
+    :root {
+      --teal: #00AD9F;
+      --teal-dark: #008F84;
+      --bg: #0e1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --code-bg: #1c2129;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    a { color: var(--teal); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .container { max-width: 800px; margin: 0 auto; padding: 0 24px; }
+
+    /* Hero */
+    .hero {
+      text-align: center;
+      padding: 80px 24px 60px;
+      border-bottom: 1px solid var(--border);
+    }
+    .hero h1 { font-size: 2.5rem; margin-bottom: 16px; }
+    .hero h1 span { color: var(--teal); }
+    .hero p { font-size: 1.2rem; color: var(--text-muted); max-width: 600px; margin: 0 auto 32px; }
+    .hero-code {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 28px;
+      display: inline-block;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+      font-size: 0.95rem;
+      text-align: left;
+      color: var(--text-muted);
+    }
+    .hero-code .key { color: var(--teal); }
+    .hero-code .val { color: #f0883e; }
+
+    /* Nav */
+    nav {
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+      padding: 12px 0;
+    }
+    nav .container {
+      display: flex;
+      gap: 24px;
+      overflow-x: auto;
+    }
+    nav a { color: var(--text-muted); font-size: 0.9rem; white-space: nowrap; }
+    nav a:hover { color: var(--text); text-decoration: none; }
+
+    /* Sections */
+    section { padding: 48px 0; border-bottom: 1px solid var(--border); }
+    section:last-child { border-bottom: none; }
+    h2 { font-size: 1.6rem; margin-bottom: 24px; }
+    h3 { font-size: 1.15rem; margin: 24px 0 12px; color: var(--teal); }
+    p, li { color: var(--text-muted); margin-bottom: 12px; }
+    ul, ol { padding-left: 24px; }
+
+    /* Code blocks */
+    pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px 20px;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      margin: 16px 0;
+      line-height: 1.5;
+    }
+    code {
+      font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 0.85em;
+    }
+    pre code { background: none; padding: 0; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td {
+      text-align: left;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+    th { background: var(--surface); color: var(--text); }
+    td { color: var(--text-muted); }
+    td code { font-size: 0.8rem; }
+
+    /* Steps */
+    .step {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin: 16px 0;
+    }
+    .step-number {
+      display: inline-block;
+      background: var(--teal);
+      color: var(--bg);
+      font-weight: 700;
+      width: 28px;
+      height: 28px;
+      line-height: 28px;
+      text-align: center;
+      border-radius: 50%;
+      margin-right: 12px;
+      font-size: 0.85rem;
+    }
+    .step h3 { display: inline; color: var(--text); margin: 0; }
+
+    /* Troubleshooting */
+    .trouble-item { margin-bottom: 20px; }
+    .trouble-item strong { color: var(--text); }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 40px 24px;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Netlify <span>Agent Runner</span></h1>
+  <p>Trigger Netlify Agents from GitHub issues and pull requests. Just mention <code>@netlify</code> and the agent builds your site.</p>
+  <div class="hero-code">
+    <span class="key">- uses:</span> <span class="val">netlify/agent-runner@v1</span><br>
+    <span class="key">&nbsp; with:</span><br>
+    <span class="key">&nbsp;&nbsp;&nbsp; netlify-auth-token:</span> <span class="val">${{ secrets.NETLIFY_AUTH_TOKEN }}</span><br>
+    <span class="key">&nbsp;&nbsp;&nbsp; netlify-site-id:</span> <span class="val">${{ secrets.NETLIFY_SITE_ID }}</span>
+  </div>
+</div>
+
+<nav>
+  <div class="container">
+    <a href="#setup">Setup</a>
+    <a href="#usage">Usage</a>
+    <a href="#inputs">Inputs</a>
+    <a href="#outputs">Outputs</a>
+    <a href="#how-it-works">How it Works</a>
+    <a href="#troubleshooting">Troubleshooting</a>
+  </div>
+</nav>
+
+<div class="container">
+
+<section id="setup">
+  <h2>Setup</h2>
+
+  <div class="step">
+    <span class="step-number">1</span>
+    <h3>Install the GitHub App</h3>
+    <p>Install <a href="https://github.com/apps/netlify-coding">netlify-coding</a> on your repository. This lets the agent create commits and pull requests.</p>
+  </div>
+
+  <div class="step">
+    <span class="step-number">2</span>
+    <h3>Create a Netlify site</h3>
+    <p>Link your repo to a Netlify site. Note the <strong>Site ID</strong> from Site configuration &gt; General.</p>
+    <pre><code>netlify init</code></pre>
+  </div>
+
+  <div class="step">
+    <span class="step-number">3</span>
+    <h3>Add repository secrets</h3>
+    <p>Go to <strong>Settings &gt; Secrets and variables &gt; Actions</strong> and add:</p>
+    <table>
+      <tr><th>Secret</th><th>Description</th></tr>
+      <tr><td><code>NETLIFY_AUTH_TOKEN</code></td><td>Your <a href="https://app.netlify.com/user/applications#personal-access-tokens">Netlify personal access token</a></td></tr>
+      <tr><td><code>NETLIFY_SITE_ID</code></td><td>Your Netlify site ID</td></tr>
+    </table>
+  </div>
+
+  <div class="step">
+    <span class="step-number">4</span>
+    <h3>Add the workflow</h3>
+    <p>Create <code>.github/workflows/netlify-agents.yml</code>:</p>
+    <pre><code>name: Netlify Agents
+
+on:
+  issues:
+    types: [opened, assigned, edited]
+  issue_comment:
+    types: [created, edited]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted, edited]
+
+concurrency:
+  group: netlify-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  netlify-agent:
+    if: &gt;-
+      github.event.sender.login != 'github-actions[bot]' &amp;&amp;
+      github.event.sender.login != 'netlify-coding[bot]' &amp;&amp;
+      github.event.sender.login != 'netlify[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: netlify/agent-runner@v1
+        with:
+          netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}</code></pre>
+  </div>
+</section>
+
+<section id="usage">
+  <h2>Usage</h2>
+  <h3>From an issue</h3>
+  <p>Create an issue with <code>@netlify</code> in the body:</p>
+  <pre><code>@netlify Build a landing page for a coffee shop with a menu and contact form</code></pre>
+
+  <h3>Choose a model</h3>
+  <p>Specify <code>claude</code>, <code>codex</code>, or <code>gemini</code> after <code>@netlify</code>:</p>
+  <pre><code>@netlify claude Add a dark mode toggle
+@netlify codex Make the hero section responsive
+@netlify gemini Add a testimonials carousel</code></pre>
+  <p>Default model is <code>codex</code>. You can change the default with the <code>default-model</code> input.</p>
+
+  <h3>Follow-up prompts</h3>
+  <p>After the first run creates a PR, add follow-up <code>@netlify</code> comments on the PR to iterate. The agent continues from where it left off.</p>
+
+  <h3>Preview mode</h3>
+  <p>Use <code>@netlify preview</code> to run the agent without creating a PR or committing changes:</p>
+  <pre><code>@netlify preview Add a footer with social links</code></pre>
+
+  <h3>Typo-tolerant</h3>
+  <p>Common typos are recognized: <code>@nelify</code>, <code>@netlfy</code>, <code>@netify</code>, <code>@netlif</code>, <code>@netfly</code>. Aliases like <code>@netlify-agent</code> and <code>@netlify-ai</code> also work.</p>
+</section>
+
+<section id="inputs">
+  <h2>Inputs</h2>
+  <table>
+    <tr><th>Input</th><th>Required</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>netlify-auth-token</code></td><td>Yes</td><td>&mdash;</td><td>Netlify personal access token</td></tr>
+    <tr><td><code>netlify-site-id</code></td><td>Yes</td><td>&mdash;</td><td>Netlify site ID</td></tr>
+    <tr><td><code>github-token</code></td><td>No</td><td><code>github.token</code></td><td>GitHub token for API calls</td></tr>
+    <tr><td><code>allowed-users</code></td><td>No</td><td><code>''</code></td><td>Comma-separated usernames allowed to trigger</td></tr>
+    <tr><td><code>default-model</code></td><td>No</td><td><code>codex</code></td><td>Default AI model (<code>claude</code>, <code>codex</code>, <code>gemini</code>)</td></tr>
+    <tr><td><code>manage-labels</code></td><td>No</td><td><code>false</code></td><td>Auto-create and apply labels on runs</td></tr>
+    <tr><td><code>timeout-minutes</code></td><td>No</td><td><code>10</code></td><td>Max minutes to wait for agent</td></tr>
+    <tr><td><code>netlify-cli-version</code></td><td>No</td><td><code>24.8.1</code></td><td>Pinned Netlify CLI version</td></tr>
+    <tr><td><code>dry-run</code></td><td>No</td><td><code>false</code></td><td>Preview mode (skip PR/commits)</td></tr>
+    <tr><td><code>debug</code></td><td>No</td><td><code>false</code></td><td>Enable debug API logging</td></tr>
+  </table>
+</section>
+
+<section id="outputs">
+  <h2>Outputs</h2>
+  <p>Use these in subsequent workflow steps for custom automation:</p>
+  <table>
+    <tr><th>Output</th><th>Description</th></tr>
+    <tr><td><code>agent-id</code></td><td>Netlify agent runner ID</td></tr>
+    <tr><td><code>outcome</code></td><td><code>success</code>, <code>failure</code>, or <code>timeout</code></td></tr>
+    <tr><td><code>agent-result</code></td><td>Agent result summary text</td></tr>
+    <tr><td><code>agent-pr-url</code></td><td>Pull request URL (if created)</td></tr>
+    <tr><td><code>agent-deploy-url</code></td><td>Deploy preview URL</td></tr>
+    <tr><td><code>model</code></td><td>AI model that was used</td></tr>
+    <tr><td><code>trigger-text</code></td><td>Cleaned trigger prompt</td></tr>
+    <tr><td><code>is-pr</code></td><td><code>true</code> / <code>false</code></td></tr>
+    <tr><td><code>issue-number</code></td><td>Issue or PR number</td></tr>
+    <tr><td><code>is-dry-run</code></td><td><code>true</code> / <code>false</code></td></tr>
+  </table>
+  <h3>Example: run tests after agent</h3>
+  <pre><code>steps:
+  - uses: netlify/agent-runner@v1
+    id: agent
+    with:
+      netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
+
+  - name: Run tests on agent PR
+    if: steps.agent.outputs.outcome == 'success'
+    run: echo "PR created at ${{ steps.agent.outputs.agent-pr-url }}"</code></pre>
+</section>
+
+<section id="how-it-works">
+  <h2>How it Works</h2>
+  <ol>
+    <li>You mention <code>@netlify</code> in an issue, PR, or comment</li>
+    <li>The action reacts with eyes emoji and posts an in-progress status comment</li>
+    <li>It creates a Netlify Agent runner with your prompt</li>
+    <li>The agent builds or modifies your site</li>
+    <li>On completion, the status comment is updated with a result summary, screenshot, and deploy preview link</li>
+    <li>If triggered from an issue, a pull request is automatically created with the changes</li>
+  </ol>
+  <h3>Security</h3>
+  <ul>
+    <li>Only repository collaborators, members, and owners can trigger</li>
+    <li>Bot accounts are excluded to prevent loops</li>
+    <li>Concurrency control ensures one run per issue/PR at a time</li>
+    <li>The <code>allowed-users</code> input can further restrict access</li>
+  </ul>
+</section>
+
+<section id="troubleshooting">
+  <h2>Troubleshooting</h2>
+
+  <div class="trouble-item">
+    <strong>Missing NETLIFY_AUTH_TOKEN or NETLIFY_SITE_ID</strong>
+    <p>Go to <strong>Settings &gt; Secrets</strong> in your repo and add both secrets. <a href="https://app.netlify.com/user/applications#personal-access-tokens">Create a token here</a>. Find your Site ID in the Netlify dashboard under Site configuration &gt; General.</p>
+  </div>
+
+  <div class="trouble-item">
+    <strong>"The project can't be found"</strong>
+    <p>The <code>NETLIFY_SITE_ID</code> secret points to a site that doesn't exist or that your token can't access. Verify the site ID in the Netlify dashboard and regenerate your token if needed.</p>
+  </div>
+
+  <div class="trouble-item">
+    <strong>Agent timed out</strong>
+    <p>The default timeout is 10 minutes. For complex prompts, increase it with <code>timeout-minutes: '15'</code>. You can also break large tasks into smaller follow-up prompts.</p>
+  </div>
+
+  <div class="trouble-item">
+    <strong>"Agent Runner [model] is not available"</strong>
+    <p>The AI provider is temporarily down. Try a different model: <code>@netlify claude</code>, <code>@netlify codex</code>, or <code>@netlify gemini</code>.</p>
+  </div>
+
+  <div class="trouble-item">
+    <strong>Bot triggered the workflow</strong>
+    <p>Add a job-level <code>if:</code> guard to skip bot senders. The example workflow includes this by default. See the <a href="#setup">setup section</a>.</p>
+  </div>
+
+  <div class="trouble-item">
+    <strong>Node.js 20 deprecation warning</strong>
+    <p>Update the action dependencies in <code>action.yml</code> to their latest versions (v5/v6/v8). The published action already uses Node 24-compatible versions.</p>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  <p>Netlify Agent Runner &middot; <a href="https://github.com/netlify/agent-runner">GitHub</a> &middot; <a href="https://www.netlify.com/products/agents/">Netlify Agents</a></p>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,80 @@
+// Generate the run history comment body.
+// Sets output: comment-body
+
+/**
+ * @typedef {import('./types').ActionContext} ActionContext
+ * @typedef {import('./types').ActionCore} ActionCore
+ * @typedef {import('./types').AgentSession} AgentSession
+ * @typedef {import('./types').SessionDataMap} SessionDataMap
+ */
+
+const fs = require('fs');
+const utils = require('./utils');
+
+/**
+ * @param {{context: ActionContext, core: ActionCore}} params
+ * @returns {Promise<void>}
+ */
+module.exports = async function generateHistoryComment({ context, core }) {
+  const agentId = process.env.AGENT_ID || '';
+  let agentSessionsJson = '[]';
+  try {
+    agentSessionsJson = fs.readFileSync(
+      `${process.env.RUNNER_TEMP}/agent-sessions-${agentId}.json`, 'utf8'
+    );
+  } catch (_) { /* no file */ }
+
+  const siteName = process.env.SITE_NAME || context.repo.repo;
+  /** @type {AgentSession[]} */
+  let sessions = [];
+  try { sessions = JSON.parse(agentSessionsJson); } catch (_) { /* invalid */ }
+  /** @type {SessionDataMap} */
+  let sessionDataMap = {};
+  try { sessionDataMap = JSON.parse(process.env.SESSION_DATA_MAP || '{}'); } catch (_) { /* invalid */ }
+
+  if (sessions.length === 0) {
+    core.setOutput('comment-body', '');
+    return;
+  }
+
+  const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}`;
+  let message = `### Netlify Agent Run History\n\nView the full history in [Netlify Agent Run dashboard](${agentRunUrl})\n\n---\n\n`;
+
+  const reversed = [...sessions].reverse();
+  reversed.forEach((session, idx) => {
+    const runNum = sessions.length - idx;
+    const isLatest = idx === 0;
+    const model = (session.agent_config && session.agent_config.agent) || 'codex';
+    const data = sessionDataMap[session.id] || {};
+    const screenshot = data.screenshot || '';
+    const ghUrl = data.gh_action_url || '';
+    const deployUrl = session.deploy_url || '';
+    const isFailed = session.state === 'failed' || session.state === 'error';
+    let cleanPrompt = utils.cleanPrompt(session.prompt || '');
+    if (cleanPrompt.length > 450) cleanPrompt = cleanPrompt.substring(0, 450) + '...';
+
+    if (isFailed) {
+      message += `**Run ${runNum}** Model \`${model}\` - ❌ Failed\n\n`;
+      if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
+      if (ghUrl) message += `[GitHub Action logs](${ghUrl})\n\n`;
+    } else {
+      const title = session.title || '';
+      const tag = isLatest ? ' (latest)' : '';
+      if (screenshot && deployUrl) {
+        message += `<a href="${deployUrl}"><img src="${screenshot}" alt="Preview" width="180" align="right"></a>`;
+      }
+      message += `**Run ${runNum}${tag}** Model \`${model}\` - ${title} ✅\n\n`;
+      if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
+      /** @type {string[]} */
+      const links = [];
+      if (deployUrl) links.push(`[Preview URL](${deployUrl})`);
+      links.push(`[Netlify Agents run](${agentRunUrl})`);
+      if (ghUrl) links.push(`[GitHub Action logs](${ghUrl})`);
+      message += links.join(' • ') + '\n\n';
+    }
+    message += `---\n\n`;
+  });
+
+  message += `<!-- netlify-agent-run-history -->`;
+  core.setOutput('comment-body', message);
+};

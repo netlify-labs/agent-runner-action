@@ -1,0 +1,896 @@
+name: 'Netlify Agents'
+description: 'Run Netlify Agents from GitHub Issues and Pull Requests via @netlify mentions'
+branding:
+  icon: 'zap'
+  color: 'green'
+
+# ---------------------------------------------------------------------------
+# Inputs
+# ---------------------------------------------------------------------------
+inputs:
+  netlify-auth-token:
+    description: 'Netlify personal access token (NETLIFY_AUTH_TOKEN)'
+    required: true
+  netlify-site-id:
+    description: 'Netlify site ID (NETLIFY_SITE_ID)'
+    required: true
+  github-token:
+    description: 'GitHub token for API calls (defaults to GITHUB_TOKEN)'
+    required: false
+    default: ${{ github.token }}
+  allowed-users:
+    description: 'Comma-separated list of GitHub usernames allowed to trigger the agent (optional — defaults to repo collaborators)'
+    required: false
+    default: ''
+  default-model:
+    description: 'Default AI model to use (claude, codex, or gemini)'
+    required: false
+    default: 'codex'
+  manage-labels:
+    description: 'Automatically create and apply labels on agent runs (opt-in)'
+    required: false
+    default: 'false'
+  timeout-minutes:
+    description: 'Maximum minutes to wait for the agent to complete'
+    required: false
+    default: '10'
+  netlify-cli-version:
+    description: 'Netlify CLI version to install (pinned for stability)'
+    required: false
+    default: '24.8.1'
+  dry-run:
+    description: 'Preview mode — run the agent but skip PR creation and commits'
+    required: false
+    default: 'false'
+  debug:
+    description: 'Enable debug logging of Netlify API responses'
+    required: false
+    default: 'false'
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+outputs:
+  agent-id:
+    description: 'The Netlify agent runner ID'
+    value: ${{ steps.netlify-agent.outputs.agent-id }}
+  outcome:
+    description: 'Agent outcome: success, failure, or timeout'
+    value: ${{ steps.netlify-agent.outputs.outcome }}
+  agent-result:
+    description: 'The agent result summary text'
+    value: ${{ steps.netlify-agent.outputs.agent-result }}
+  agent-pr-url:
+    description: 'Pull request URL if the agent created one'
+    value: ${{ steps.netlify-agent.outputs.agent-pr-url }}
+  agent-deploy-url:
+    description: 'Deploy preview URL'
+    value: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
+  model:
+    description: 'The AI model that was used'
+    value: ${{ steps.context-info.outputs.model }}
+  trigger-text:
+    description: 'The cleaned trigger text / prompt'
+    value: ${{ steps.context-info.outputs.trigger-text }}
+  is-pr:
+    description: 'Whether the trigger came from a PR (true/false)'
+    value: ${{ steps.context-info.outputs.is-pr }}
+  issue-number:
+    description: 'The issue or PR number'
+    value: ${{ steps.context-info.outputs.issue-number }}
+  is-dry-run:
+    description: 'Whether this was a preview/dry-run (true/false)'
+    value: ${{ steps.context-info.outputs.is-dry-run }}
+
+# ---------------------------------------------------------------------------
+# Composite action steps
+# ---------------------------------------------------------------------------
+runs:
+  using: 'composite'
+  steps:
+    # -----------------------------------------------------------------------
+    # 1. Trigger detection — should this event activate the agent?
+    # -----------------------------------------------------------------------
+    - name: Check trigger
+      id: trigger-check
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        ALLOWED_USERS: ${{ inputs.allowed-users }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/check-trigger.js`);
+          await run({ github, context, core });
+
+    # -----------------------------------------------------------------------
+    # 2. React with 👀 to acknowledge
+    # -----------------------------------------------------------------------
+    - name: Acknowledge trigger
+      if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch'
+      uses: actions/github-script@v8
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const event = context.eventName;
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          try {
+            if (event === 'issue_comment' || event === 'pull_request_review_comment') {
+              await github.rest.reactions.createForIssueComment({
+                owner, repo, comment_id: context.payload.comment.id, content: 'eyes'
+              });
+            } else if (event === 'issues') {
+              await github.rest.reactions.createForIssue({
+                owner, repo, issue_number: context.payload.issue.number, content: 'eyes'
+              });
+            } else if (event === 'pull_request_target') {
+              await github.rest.reactions.createForIssue({
+                owner, repo, issue_number: context.payload.pull_request.number, content: 'eyes'
+              });
+            }
+          } catch (e) {
+            console.log(`Could not add reaction: ${e.message}`);
+          }
+
+    # -----------------------------------------------------------------------
+    # 3. Extract context from the event
+    # -----------------------------------------------------------------------
+    - name: Get context information
+      id: context-info
+      if: steps.trigger-check.outputs.should-run == 'true'
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        DEFAULT_MODEL: ${{ inputs.default-model }}
+        DRY_RUN: ${{ inputs.dry-run }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/get-context.js`);
+          await run({ github, context, core });
+
+    # -----------------------------------------------------------------------
+    # 4. Validate required secrets
+    # -----------------------------------------------------------------------
+    - name: Validate environment
+      if: steps.trigger-check.outputs.should-run == 'true'
+      shell: bash
+      env:
+        NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
+        NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
+      run: |
+        MISSING=0
+        if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+          echo "::error title=Missing netlify-auth-token::Add the netlify-auth-token input (from NETLIFY_AUTH_TOKEN secret). Create a token at https://app.netlify.com/user/applications#personal-access-tokens"
+          MISSING=1
+        fi
+        if [ -z "$NETLIFY_SITE_ID" ]; then
+          echo "::error title=Missing netlify-site-id::Add the netlify-site-id input (from NETLIFY_SITE_ID secret). Find your Site ID at Site configuration > General > Site ID in the Netlify dashboard."
+          MISSING=1
+        fi
+        if [ "$MISSING" -ne 0 ]; then
+          exit 1
+        fi
+        echo "✅ Environment validated"
+
+    # -----------------------------------------------------------------------
+    # 5. Find or create the sticky status comment
+    # -----------------------------------------------------------------------
+    - name: Find existing status comment
+      if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch' && steps.context-info.outputs.issue-number != ''
+      uses: peter-evans/find-comment@v4
+      id: find_comment
+      with:
+        issue-number: ${{ steps.context-info.outputs.issue-number }}
+        comment-author: 'github-actions[bot]'
+        body-includes: '<!-- netlify-agent-run-status -->'
+
+    - name: Find existing history comment
+      if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch' && steps.context-info.outputs.is-pr == 'true'
+      uses: peter-evans/find-comment@v4
+      id: find_history_comment
+      with:
+        issue-number: ${{ steps.context-info.outputs.issue-number }}
+        comment-author: 'github-actions[bot]'
+        body-includes: '<!-- netlify-agent-run-history -->'
+
+    - name: Extract existing agent runner ID
+      id: extract-agent-id
+      if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch'
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/extract-agent-id.js`);
+          await run({
+            github, context, core,
+            inputs: {
+              isPR: '${{ steps.context-info.outputs.is-pr }}',
+              commentId: '${{ steps.find_comment.outputs.comment-id }}',
+              prNumber: '${{ steps.context-info.outputs.pr-number }}'
+            }
+          });
+
+    # -----------------------------------------------------------------------
+    # 6. Exit early if issue already has a linked PR
+    # -----------------------------------------------------------------------
+    - name: Check linked PR
+      id: should-continue
+      if: steps.trigger-check.outputs.should-run == 'true'
+      shell: bash
+      run: |
+        IS_PR="${{ steps.context-info.outputs.is-pr }}"
+        HAS_LINKED_PR="${{ steps.extract-agent-id.outputs.has-linked-pr == 'true' && 'true' || steps.context-info.outputs.has-linked-pr }}"
+        if [[ "$IS_PR" == "false" && "$HAS_LINKED_PR" == "true" ]]; then
+          echo "⚠️ Issue already has a linked PR"
+          echo "should-continue=false" >> $GITHUB_OUTPUT
+        else
+          echo "should-continue=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Redirect to PR if issue has linked PR
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'false' && steps.extract-agent-id.outputs.linked-pr-number != ''
+      uses: peter-evans/create-or-update-comment@v5
+      with:
+        issue-number: ${{ steps.context-info.outputs.issue-number }}
+        body: |
+          > This issue already has a linked pull request. Please add follow-up `@netlify` prompts on PR #${{ steps.extract-agent-id.outputs.linked-pr-number }}, or use the [Netlify Agents dashboard](${{ steps.extract-agent-id.outputs.agent-run-url }}).
+
+    # -----------------------------------------------------------------------
+    # 7. Create initial status comment
+    # -----------------------------------------------------------------------
+    - name: Create initial status comment
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.should-continue.outputs.should-continue == 'true'
+        && steps.find_comment.outputs.comment-id == ''
+        && github.event_name != 'workflow_dispatch'
+      uses: actions/github-script@v8
+      id: create_comment
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const utils = require(`${process.env.ACTION_DIR}/src/utils.js`);
+          const triggerText = ${{ toJSON(steps.context-info.outputs.trigger-text) }} || '';
+          const model = ${{ toJSON(steps.context-info.outputs.model) }} || 'codex';
+          const isDryRun = '${{ steps.context-info.outputs.is-dry-run }}' === 'true';
+          const dryRunTag = isDryRun ? ' (preview)' : '';
+          const body = utils.buildInProgressComment({ prompt: triggerText, model }) +
+            (isDryRun ? '\n\n> **Preview mode** — no changes will be committed.\n' : '');
+          const { data: comment } = await github.rest.issues.createComment({
+            owner: context.repo.owner, repo: context.repo.repo,
+            issue_number: ${{ steps.context-info.outputs.issue-number }},
+            body
+          });
+          core.setOutput('comment-id', comment.id);
+
+    # -----------------------------------------------------------------------
+    # 8. Checkout repository
+    # -----------------------------------------------------------------------
+    - name: Checkout repository
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ steps.context-info.outputs.head-sha || github.ref }}
+        fetch-depth: ${{ steps.context-info.outputs.is-pr == 'true' && '0' || '1' }}
+        token: ${{ inputs.github-token }}
+
+    - name: Fetch base branch
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.should-continue.outputs.should-continue == 'true'
+        && steps.context-info.outputs.is-pr == 'true'
+        && steps.context-info.outputs.base-ref != ''
+      shell: bash
+      env:
+        BASE_REF: ${{ steps.context-info.outputs.base-ref }}
+      run: |
+        git fetch origin "$BASE_REF":"$BASE_REF"
+        echo "📋 Changed files:"
+        git diff --name-only "origin/$BASE_REF"..HEAD || true
+
+    # -----------------------------------------------------------------------
+    # 9. Detect project type
+    # -----------------------------------------------------------------------
+    - name: Detect project type
+      id: project-info
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
+      shell: bash
+      run: |
+        framework=""
+        if [ -f "package.json" ]; then
+          if grep -q "next" package.json; then framework="Next.js"
+          elif grep -q "react" package.json; then framework="React"
+          elif grep -q "vue" package.json; then framework="Vue.js"
+          elif grep -q "angular" package.json; then framework="Angular"
+          elif grep -q "express" package.json; then framework="Express"
+          else framework="Node.js"; fi
+        elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then framework="Python"
+        elif [ -f "Cargo.toml" ]; then framework="Rust"
+        elif [ -f "go.mod" ]; then framework="Go"
+        elif [ -f "pom.xml" ] || [ -f "build.gradle" ]; then framework="Java"
+        fi
+        echo "framework=$framework" >> $GITHUB_OUTPUT
+        total_files=$(find . -maxdepth 4 -not -path '*/.*' -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/dist/*' -type f \( -name "*.js" -o -name "*.ts" -o -name "*.jsx" -o -name "*.tsx" -o -name "*.py" -o -name "*.rs" -o -name "*.go" -o -name "*.java" \) | wc -l)
+        echo "total-files=$total_files" >> $GITHUB_OUTPUT
+        echo "📊 Project: ${framework:-unknown} ($total_files files)"
+
+    # -----------------------------------------------------------------------
+    # 10. Install Netlify CLI (version-pinned)
+    # -----------------------------------------------------------------------
+    - name: Setup Bun
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
+      uses: oven-sh/setup-bun@v2
+
+    - name: Cache Netlify CLI
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
+      id: cache-netlify
+      uses: actions/cache@v5
+      with:
+        path: ~/.bun/install/global
+        key: netlify-cli-bun-${{ runner.os }}-${{ inputs.netlify-cli-version }}
+
+    - name: Install Netlify CLI
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.should-continue.outputs.should-continue == 'true'
+        && steps.cache-netlify.outputs.cache-hit != 'true'
+      shell: bash
+      run: bun install -g netlify-cli@${{ inputs.netlify-cli-version }}
+
+    # -----------------------------------------------------------------------
+    # 11. Resolve Netlify site name
+    # -----------------------------------------------------------------------
+    - name: Resolve Netlify site name
+      id: resolve-site-name
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
+      shell: bash
+      env:
+        NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
+        NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
+        DEBUG_AGENT: ${{ inputs.debug }}
+      run: |
+        # Ensure netlify CLI is on PATH (GITHUB_PATH may not have taken effect yet)
+        export PATH="$HOME/.bun/bin:$PATH"
+
+        SITE_NAME=""
+        for ATTEMPT in 1 2; do
+          SITE_STDERR=$(mktemp)
+          SITE_RESULT=$(netlify api getSite --data "{\"site_id\": \"$NETLIFY_SITE_ID\"}" 2>"$SITE_STDERR" || true)
+          SITE_NAME=$(echo "$SITE_RESULT" | jq -r '.name // empty' || true)
+
+          if [ -n "$SITE_NAME" ]; then
+            break
+          fi
+
+          if [ "$ATTEMPT" -eq 1 ]; then
+            echo "⚠️ getSite attempt 1 failed, retrying in 2s..."
+            if [ -s "$SITE_STDERR" ]; then cat "$SITE_STDERR" >&2; fi
+            rm -f "$SITE_STDERR"
+            sleep 2
+          fi
+        done
+
+        if [ "$DEBUG_AGENT" = "true" ] || [ -z "$SITE_NAME" ]; then
+          echo "::group::DEBUG: getSite"
+          echo "$SITE_RESULT" | jq . 2>/dev/null || echo "$SITE_RESULT"
+          if [ -s "$SITE_STDERR" ]; then
+            echo "STDERR:"
+            cat "$SITE_STDERR"
+          fi
+          echo "::endgroup::"
+        fi
+        rm -f "$SITE_STDERR"
+        echo "site-name=${SITE_NAME:-unknown}" >> $GITHUB_OUTPUT
+        echo "Resolved site: ${SITE_NAME:-unknown}"
+
+    # -----------------------------------------------------------------------
+    # 12. Update status comment for follow-up runs
+    # -----------------------------------------------------------------------
+    - name: Update status to in-progress
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.should-continue.outputs.should-continue == 'true'
+        && (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) != ''
+        && steps.extract-agent-id.outputs.agent-runner-id != ''
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const utils = require(`${process.env.ACTION_DIR}/src/utils.js`);
+          const model = ${{ toJSON(steps.context-info.outputs.model) }} || 'codex';
+          const runnerId = ${{ toJSON(steps.extract-agent-id.outputs.agent-runner-id) }};
+          const commentId = ${{ toJSON(steps.find_comment.outputs.comment-id) }} || ${{ toJSON(steps.create_comment.outputs.comment-id) }};
+          const siteName = ${{ toJSON(steps.resolve-site-name.outputs.site-name) }} || 'unknown';
+          const triggerText = ${{ toJSON(steps.context-info.outputs.trigger-text) }} || '';
+          const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${runnerId}`;
+          const ghActionUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+          const body = utils.buildInProgressComment({
+            agentRunUrl, prompt: triggerText, model, runnerId
+          }) + `\n[GitHub Action logs](${ghActionUrl})`;
+          await github.rest.issues.updateComment({
+            owner: context.repo.owner, repo: context.repo.repo,
+            comment_id: parseInt(commentId), body
+          });
+
+    # -----------------------------------------------------------------------
+    # 13. Run the Netlify Agent (create runner, poll for completion)
+    #     Dry-run mode skips PR creation and commits.
+    # -----------------------------------------------------------------------
+    - name: Run Netlify Agent
+      id: netlify-agent
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
+      shell: bash
+      env:
+        NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
+        NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
+        AGENT_MODEL: ${{ steps.context-info.outputs.model }}
+        EXISTING_RUNNER_ID: ${{ steps.extract-agent-id.outputs.agent-runner-id }}
+        HEAD_BRANCH: ${{ steps.context-info.outputs.head-ref }}
+        REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        REPOSITORY_NAME: ${{ github.repository }}
+        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
+        WORKFLOW_RUN_ID: ${{ github.run_id }}
+        STATUS_COMMENT_ID: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
+        DEBUG_AGENT: ${{ inputs.debug }}
+        MAX_WAIT_MINUTES: ${{ inputs.timeout-minutes }}
+        IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
+        ACTION_DIR: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+
+        debug_log() {
+          if [ "${DEBUG_AGENT:-}" = "true" ]; then
+            echo "::group::DEBUG: $1"
+            echo "$2" | jq . 2>/dev/null || echo "$2"
+            echo "::endgroup::"
+          fi
+        }
+
+        # Ensure netlify CLI is on PATH
+        export PATH="$HOME/.bun/bin:$PATH"
+
+        echo "🚀 Starting Netlify Agent..."
+        echo "Model: $AGENT_MODEL | Site: ${SITE_NAME:-unknown} | Dry-run: ${IS_DRY_RUN:-false}"
+
+        # Build agent args
+        AGENT_ARGS=(--json --agent "$AGENT_MODEL")
+        if [ -n "${HEAD_BRANCH:-}" ]; then
+          AGENT_ARGS+=(--branch "$HEAD_BRANCH")
+        elif [ -n "${REPOSITORY_DEFAULT_BRANCH:-}" ]; then
+          AGENT_ARGS+=(--branch "$REPOSITORY_DEFAULT_BRANCH")
+        fi
+
+        # Create or reuse agent runner
+        if [ -n "${EXISTING_RUNNER_ID:-}" ]; then
+          echo "🔄 Follow-up session on runner: $EXISTING_RUNNER_ID"
+          SAFE_PROMPT=$(echo "$TRIGGER_TEXT" | jq -Rs .)
+          SESSION_CREATED=false
+          for ATTEMPT in 1 2 3; do
+            echo "  Attempt $ATTEMPT/3..."
+            SESSION_RESULT=$(netlify api createAgentRunnerSession \
+              --data "{\"agent_runner_id\": \"$EXISTING_RUNNER_ID\", \"body\": {\"prompt\": $SAFE_PROMPT, \"agent\": \"$AGENT_MODEL\"}}" 2>/dev/null || true)
+            debug_log "createAgentRunnerSession (attempt $ATTEMPT)" "$SESSION_RESULT"
+            SESSION_STATE=$(echo "$SESSION_RESULT" | jq -r '.state // empty')
+            if [ "$SESSION_STATE" = "running" ]; then
+              SESSION_CREATED=true
+              AGENT_ID="$EXISTING_RUNNER_ID"
+              echo "✅ Follow-up session created"
+              break
+            fi
+            echo "  ⚠️ Attempt $ATTEMPT failed (state: ${SESSION_STATE:-empty})"
+            [ $ATTEMPT -lt 3 ] && sleep 5
+          done
+          if [ "$SESSION_CREATED" = "false" ]; then
+            echo "❌ Failed to create follow-up session after 3 attempts"
+            echo "outcome=failure" >> $GITHUB_OUTPUT
+            echo "agent-id=$EXISTING_RUNNER_ID" >> $GITHUB_OUTPUT
+            echo "agent-error=Failed to create follow-up session after 3 attempts" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+        else
+          echo "📡 Creating new agent runner..."
+          AGENT_STDERR=$(mktemp)
+          AGENT_OUTPUT=$(netlify agents:create "$TRIGGER_TEXT" "${AGENT_ARGS[@]}" 2>"$AGENT_STDERR" || true)
+          debug_log "agents:create" "$AGENT_OUTPUT"
+          AGENT_ID=$(echo "$AGENT_OUTPUT" | jq -r '.id // empty' 2>/dev/null || true)
+          if [ -z "$AGENT_ID" ]; then
+            echo "❌ Failed to create agent task"
+            AGENT_ERR_MSG=$(cat "$AGENT_STDERR" | sed 's/\x1b\[[0-9;]*m//g' | grep -i "error" | head -1 | sed 's/^[[:space:]]*›[[:space:]]*//')
+            echo "${AGENT_ERR_MSG:-$AGENT_OUTPUT}"
+            echo "outcome=failure" >> $GITHUB_OUTPUT
+            echo "agent-error=${AGENT_ERR_MSG:-Failed to create agent task}" >> $GITHUB_OUTPUT
+            rm -f "$AGENT_STDERR"
+            exit 1
+          fi
+          echo "✅ Agent created: $AGENT_ID"
+        fi
+
+        echo "agent-id=$AGENT_ID" >> $GITHUB_OUTPUT
+
+        # Update status comment with agent run link (uses Node.js to avoid bash/JS duplication)
+        if [ -n "$STATUS_COMMENT_ID" ]; then
+          export AGENT_LINK="https://app.netlify.com/projects/${SITE_NAME:-unknown}/agent-runs/$AGENT_ID"
+          export ACTION_LINK="https://github.com/$REPOSITORY_NAME/actions/runs/$WORKFLOW_RUN_ID"
+          export AGENT_ID
+          UPDATE_BODY=$(bun "$ACTION_DIR/src/format-comment.js" in-progress)
+          GH_TOKEN="${GITHUB_TOKEN}" gh api "repos/$REPOSITORY_NAME/issues/comments/$STATUS_COMMENT_ID" \
+            --method PATCH --field body="$UPDATE_BODY" > /dev/null 2>&1 || true
+        fi
+
+        # Poll for completion
+        # Wait 50s before first poll (agent always takes >1min), then 15s→20s→25s→30s cap
+        MAX_WAIT=$((${MAX_WAIT_MINUTES:-10} * 60))
+        INITIAL_WAIT=50
+        ELAPSED=0
+        POLL_INTERVAL=15
+        AGENT_LINK="https://app.netlify.com/projects/${SITE_NAME:-unknown}/agent-runs/$AGENT_ID"
+        echo "⏳ Waiting for completion (timeout: ${MAX_WAIT}s, first check in ${INITIAL_WAIT}s)..."
+        sleep $INITIAL_WAIT
+        ELAPSED=$INITIAL_WAIT
+
+        while [ $ELAPSED -lt $MAX_WAIT ]; do
+          AGENT_RESULT=$(netlify agents:show "$AGENT_ID" --json 2>/dev/null || true)
+          STATE=$(echo "$AGENT_RESULT" | jq -r '.state // empty' 2>/dev/null)
+          echo "  [$ELAPSED/${MAX_WAIT}s] Status: ${STATE:-unknown}"
+          debug_log "agents:show (poll $ELAPSED)" "$AGENT_RESULT"
+
+          case "$STATE" in
+            completed|done)
+              echo "✅ Agent completed"
+              echo "outcome=success" >> $GITHUB_OUTPUT
+
+              # Fetch session details
+              SESSION_OUTPUT=$(netlify api listAgentRunnerSessions --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
+              debug_log "listAgentRunnerSessions" "$SESSION_OUTPUT"
+              if [ -n "$SESSION_OUTPUT" ]; then
+                echo "agent-result<<AGENT_RESULT_EOF" >> $GITHUB_OUTPUT
+                echo "$SESSION_OUTPUT" | jq -r '.[-1].result // empty' >> $GITHUB_OUTPUT
+                echo "AGENT_RESULT_EOF" >> $GITHUB_OUTPUT
+                AGENT_DEPLOY_URL=$(echo "$SESSION_OUTPUT" | jq -r '.[-1].deploy_url // empty')
+                echo "agent-title=$(echo "$SESSION_OUTPUT" | jq -r '.[-1].title // empty')" >> $GITHUB_OUTPUT
+                echo "agent-sessions<<AGENT_SESSIONS_EOF" >> $GITHUB_OUTPUT
+                echo "$SESSION_OUTPUT" >> $GITHUB_OUTPUT
+                echo "AGENT_SESSIONS_EOF" >> $GITHUB_OUTPUT
+                echo "$SESSION_OUTPUT" > "$RUNNER_TEMP/agent-sessions-${AGENT_ID}.json"
+              fi
+
+              # Re-fetch runner
+              AGENT_RESULT=$(netlify agents:show "$AGENT_ID" --json 2>/dev/null || true)
+              debug_log "agents:show (post-completion)" "$AGENT_RESULT"
+              echo "agent-has-diff=$(echo "$AGENT_RESULT" | jq -r '.has_result_diff // false')" >> $GITHUB_OUTPUT
+
+              # Validate deploy URL
+              if [ -n "$AGENT_DEPLOY_URL" ]; then
+                DEPLOY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$AGENT_DEPLOY_URL" || echo "000")
+                if [ "$DEPLOY_STATUS" != "200" ]; then
+                  AGENT_DEPLOY_URL=""
+                fi
+              fi
+              echo "agent-deploy-url=$AGENT_DEPLOY_URL" >> $GITHUB_OUTPUT
+
+              # Screenshot
+              DEPLOY_ID=$(echo "$SESSION_OUTPUT" | jq -r '.[-1].deploy_id // empty')
+              if [ -n "$DEPLOY_ID" ] && [ -n "$AGENT_DEPLOY_URL" ]; then
+                DEPLOY_RESULT=$(netlify api getDeploy --data "{\"deploy_id\": \"$DEPLOY_ID\"}" 2>/dev/null || true)
+                debug_log "getDeploy" "$DEPLOY_RESULT"
+                echo "agent-screenshot-url=$(echo "$DEPLOY_RESULT" | jq -r '.screenshot_url // empty')" >> $GITHUB_OUTPUT
+              else
+                echo "agent-screenshot-url=" >> $GITHUB_OUTPUT
+              fi
+
+              # --- Dry-run mode: skip PR creation and commits ---
+              if [ "$IS_DRY_RUN" = "true" ]; then
+                echo "🔍 Preview mode — skipping PR creation and commits"
+                echo "agent-pr-url=" >> $GITHUB_OUTPUT
+                echo "agent-pr-branch=" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+
+              # Handle diffs — commit to existing PR or create new PR
+              HAS_DIFF=$(echo "$AGENT_RESULT" | jq -r '.has_result_diff // false')
+              EXISTING_PR=$(echo "$AGENT_RESULT" | jq -r '.pr_url // empty')
+              PR_BRANCH=$(echo "$AGENT_RESULT" | jq -r '.pr_branch // empty')
+
+              if [ "$HAS_DIFF" = "true" ] && [ -n "$EXISTING_PR" ] && [ -n "$PR_BRANCH" ]; then
+                echo "📦 Committing to branch: $PR_BRANCH"
+                COMMIT_API_RESULT=$(netlify api agentRunnerCommitToBranch \
+                  --data "{\"agent_runner_id\": \"$AGENT_ID\", \"target_branch\": \"$PR_BRANCH\", \"body\": {\"target_branch\": \"$PR_BRANCH\"}}" 2>/dev/null || true)
+                debug_log "agentRunnerCommitToBranch" "$COMMIT_API_RESULT"
+
+                COMMIT_WAIT=0
+                while [ $COMMIT_WAIT -lt 30 ]; do
+                  sleep 5
+                  COMMIT_WAIT=$((COMMIT_WAIT + 5))
+                  COMMIT_CHECK=$(netlify api getAgentRunner --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
+                  MERGE_SHA=$(echo "$COMMIT_CHECK" | jq -r '.merge_commit_sha // empty')
+                  if [ -n "$MERGE_SHA" ]; then
+                    echo "✅ Committed: $MERGE_SHA"
+                    break
+                  fi
+                  MERGE_CREATING=$(echo "$COMMIT_CHECK" | jq -r '.merge_commit_is_being_created // false')
+                  if [ "$MERGE_CREATING" = "false" ]; then
+                    MERGE_ERROR=$(echo "$COMMIT_CHECK" | jq -r '.merge_commit_error // empty')
+                    [ -n "$MERGE_ERROR" ] && echo "⚠️ Commit error: $MERGE_ERROR"
+                    break
+                  fi
+                  echo "  [${COMMIT_WAIT}/30s] Waiting for commit..."
+                done
+                echo "agent-pr-url=$EXISTING_PR" >> $GITHUB_OUTPUT
+                echo "agent-pr-branch=$PR_BRANCH" >> $GITHUB_OUTPUT
+
+              elif [ "$HAS_DIFF" = "true" ] && [ -z "$EXISTING_PR" ]; then
+                echo "🔀 Creating pull request..."
+                PR_API_RESULT=$(netlify api agentRunnerPullRequest --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
+                debug_log "agentRunnerPullRequest" "$PR_API_RESULT"
+
+                PR_WAIT=0
+                PR_URL=""
+                while [ $PR_WAIT -lt 60 ]; do
+                  sleep 5
+                  PR_WAIT=$((PR_WAIT + 5))
+                  PR_CHECK=$(netlify api getAgentRunner --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
+                  PR_URL=$(echo "$PR_CHECK" | jq -r '.pr_url // empty')
+                  PR_CREATING=$(echo "$PR_CHECK" | jq -r '.pr_is_being_created // false')
+                  if [ -n "$PR_URL" ]; then
+                    echo "✅ PR created: $PR_URL"
+                    echo "agent-pr-url=$PR_URL" >> $GITHUB_OUTPUT
+                    echo "agent-pr-branch=$(echo "$PR_CHECK" | jq -r '.pr_branch // empty')" >> $GITHUB_OUTPUT
+
+                    PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+                    if [ -n "$PR_NUM" ]; then
+                      EXISTING_TITLE=$(GH_TOKEN="${GITHUB_TOKEN}" gh pr view "$PR_NUM" --json title --jq '.title' 2>/dev/null || true)
+                      CLEAN_TITLE=$(echo "$EXISTING_TITLE" | sed -E 's/@(netlify|nelify|netlfy|netify|netlif|netfly)([_-](agents?([_-]runs?)?|ai))?\s+((with|using|use|via)\s+)?(claude|codex|gemini)?\s*//; s/^\s+//')
+                      if [ -n "$CLEAN_TITLE" ] && [ "$CLEAN_TITLE" != "$EXISTING_TITLE" ]; then
+                        GH_TOKEN="${GITHUB_TOKEN}" gh pr edit "$PR_NUM" --title "$CLEAN_TITLE" 2>/dev/null || true
+                      fi
+                      if [ -n "${ISSUE_NUMBER:-}" ]; then
+                        EXISTING_BODY=$(GH_TOKEN="${GITHUB_TOKEN}" gh pr view "$PR_NUM" --json body --jq '.body' 2>/dev/null || true)
+                        NEW_BODY=$(printf '%s\n\n---\nResolves #%s\n<!-- netlify-agent-runner-id:%s -->' "$EXISTING_BODY" "$ISSUE_NUMBER" "$AGENT_ID")
+                        GH_TOKEN="${GITHUB_TOKEN}" gh pr edit "$PR_NUM" --body "$NEW_BODY" 2>/dev/null || true
+                      fi
+                    fi
+                    break
+                  fi
+                  if [ "$PR_CREATING" = "false" ]; then
+                    echo "⚠️ PR creation finished but no URL returned"
+                    break
+                  fi
+                  echo "  [${PR_WAIT}/60s] Waiting for PR..."
+                done
+                if [ -z "$PR_URL" ]; then
+                  echo "agent-pr-url=" >> $GITHUB_OUTPUT
+                  echo "agent-pr-branch=" >> $GITHUB_OUTPUT
+                fi
+              else
+                echo "agent-pr-url=$(echo "$AGENT_RESULT" | jq -r '.pr_url // empty')" >> $GITHUB_OUTPUT
+                echo "agent-pr-branch=$(echo "$AGENT_RESULT" | jq -r '.pr_branch // empty')" >> $GITHUB_OUTPUT
+              fi
+              exit 0
+              ;;
+            failed|error|cancelled)
+              echo "❌ Agent finished with state: $STATE"
+              AGENT_ERROR_MSG=$(echo "$AGENT_RESULT" | jq -r '.error_message // empty' 2>/dev/null)
+              echo "outcome=failure" >> $GITHUB_OUTPUT
+              echo "agent-error=${AGENT_ERROR_MSG:-Agent finished with state: $STATE}" >> $GITHUB_OUTPUT
+              exit 1
+              ;;
+          esac
+
+          sleep $POLL_INTERVAL
+          ELAPSED=$((ELAPSED + POLL_INTERVAL))
+
+          # Gradual backoff: 15s → 20s → 25s → 30s cap
+          if [ $POLL_INTERVAL -lt 30 ]; then
+            POLL_INTERVAL=$((POLL_INTERVAL + 5))
+          fi
+        done
+
+        echo "❌ Agent timed out after ${MAX_WAIT}s (last state: ${STATE:-unknown})"
+        echo "outcome=timeout" >> $GITHUB_OUTPUT
+        echo "agent-error=Agent timed out after ${MAX_WAIT}s (last state: ${STATE:-unknown})" >> $GITHUB_OUTPUT
+        exit 1
+
+    # -----------------------------------------------------------------------
+    # 14. Label management (opt-in)
+    # -----------------------------------------------------------------------
+    - name: Manage labels
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.netlify-agent.outputs.outcome == 'success'
+        && inputs.manage-labels == 'true'
+        && steps.context-info.outputs.issue-number != ''
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const issueNumber = parseInt('${{ steps.context-info.outputs.issue-number }}');
+          const triggerText = (process.env.TRIGGER_TEXT || '').toLowerCase();
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          const label = { name: 'netlify-agent', color: '00AD9F', description: 'Items created or modified by Netlify Agent' };
+          try { await github.rest.issues.createLabel({ owner, repo, ...label }); } catch (e) { /* exists */ }
+          const autoLabels = ['netlify-agent'];
+          if (triggerText.includes('security')) autoLabels.push('security-fix');
+          if (triggerText.includes('performance')) autoLabels.push('performance');
+          await github.rest.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: autoLabels });
+
+    # -----------------------------------------------------------------------
+    # 15. Generate and post success / error / history comments
+    # -----------------------------------------------------------------------
+    - name: Generate success comment
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.netlify-agent.outputs.outcome == 'success'
+        && steps.context-info.outputs.issue-number != ''
+      id: generate_success_comment
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
+        AGENT_SCREENSHOT_URL: ${{ steps.netlify-agent.outputs.agent-screenshot-url }}
+        AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
+        AGENT_PR_BRANCH: ${{ steps.netlify-agent.outputs.agent-pr-branch }}
+        AGENT_TITLE: ${{ steps.netlify-agent.outputs.agent-title }}
+        AGENT_RESULT: ${{ steps.netlify-agent.outputs.agent-result }}
+        TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
+        SESSION_DATA_MAP: ${{ steps.extract-agent-id.outputs.session-data-map }}
+        IS_PR: ${{ steps.context-info.outputs.is-pr }}
+        IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
+        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
+        GH_ACTION_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/generate-success-comment.js`);
+          await run({ context, core });
+
+    - name: Generate history comment
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.netlify-agent.outputs.outcome == 'success'
+        && steps.context-info.outputs.issue-number != ''
+      id: generate_history_comment
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
+        SESSION_DATA_MAP: ${{ steps.generate_success_comment.outputs.session-data-map }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/generate-history-comment.js`);
+          await run({ context, core });
+
+    - name: Generate error comment
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.netlify-agent.outputs.outcome != 'success'
+        && steps.context-info.outputs.issue-number != ''
+      id: generate_error_comment
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        AGENT_ERROR: ${{ steps.netlify-agent.outputs.agent-error }}
+        AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
+        IS_PR: ${{ steps.context-info.outputs.is-pr }}
+        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+        GH_ACTION_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/generate-error-comment.js`);
+          await run({ core });
+
+    # -----------------------------------------------------------------------
+    # 16. Post / update comments
+    # -----------------------------------------------------------------------
+    - name: Post or update status comment
+      if: >-
+        always()
+        && steps.trigger-check.outputs.should-run == 'true'
+        && (steps.generate_success_comment.outputs.comment-body || steps.generate_error_comment.outputs.comment-body)
+        && (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) != ''
+      continue-on-error: true
+      uses: peter-evans/create-or-update-comment@v5
+      with:
+        issue-number: ${{ steps.context-info.outputs.issue-number }}
+        comment-id: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
+        body: |
+          ${{ steps.generate_success_comment.outputs.comment-body || steps.generate_error_comment.outputs.comment-body }}
+        edit-mode: replace
+
+    - name: Post or update history comment
+      if: >-
+        always()
+        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.context-info.outputs.is-pr == 'true'
+        && steps.generate_history_comment.outputs.comment-body != ''
+        && steps.context-info.outputs.issue-number != ''
+      continue-on-error: true
+      uses: peter-evans/create-or-update-comment@v5
+      with:
+        issue-number: ${{ steps.context-info.outputs.issue-number }}
+        comment-id: ${{ steps.find_history_comment.outputs.comment-id }}
+        body: |
+          ${{ steps.generate_history_comment.outputs.comment-body }}
+        edit-mode: replace
+
+    - name: Cross-post to PR and update issue
+      if: >-
+        always()
+        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.context-info.outputs.is-pr != 'true'
+        && steps.netlify-agent.outputs.agent-pr-url != ''
+        && (steps.generate_success_comment.outputs.comment-body || steps.generate_error_comment.outputs.comment-body)
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
+        AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
+        STATUS_BODY: ${{ steps.generate_success_comment.outputs.comment-body || steps.generate_error_comment.outputs.comment-body }}
+        HISTORY_BODY: ${{ steps.generate_history_comment.outputs.comment-body }}
+        STATUS_COMMENT_ID: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/cross-post-to-pr.js`);
+          await run({ github, context, core });
+
+    - name: Fallback status update
+      if: >-
+        always()
+        && steps.trigger-check.outputs.should-run == 'true'
+        && (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) != ''
+        && steps.generate_success_comment.outcome != 'success'
+        && steps.generate_error_comment.outcome != 'success'
+      continue-on-error: true
+      uses: peter-evans/create-or-update-comment@v5
+      with:
+        issue-number: ${{ steps.context-info.outputs.issue-number }}
+        comment-id: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
+        body: |
+          Netlify Agent run completed (status reporting encountered an error).
+          [GitHub Action logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          <!-- netlify-agent-run-status -->
+        edit-mode: replace
+
+    - name: Execution summary
+      if: always() && steps.trigger-check.outputs.should-run == 'true'
+      shell: bash
+      env:
+        OUTCOME: ${{ steps.netlify-agent.outputs.outcome }}
+        IS_PR: ${{ steps.context-info.outputs.is-pr }}
+        ISSUE_NUM: ${{ steps.context-info.outputs.issue-number }}
+        MODEL: ${{ steps.context-info.outputs.model }}
+        FRAMEWORK: ${{ steps.project-info.outputs.framework }}
+        IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
+      run: |
+        echo "📊 ===== Execution Summary ====="
+        echo "Status: ${OUTCOME:-skipped}"
+        echo "Context: $([ "$IS_PR" = 'true' ] && echo 'PR' || echo 'Issue') #${ISSUE_NUM}"
+        echo "Model: $MODEL"
+        echo "Project: ${FRAMEWORK:-Unknown}"
+        echo "Dry-run: ${IS_DRY_RUN:-false}"
+        echo "=============================="

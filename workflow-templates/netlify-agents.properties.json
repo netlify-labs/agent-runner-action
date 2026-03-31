@@ -1,0 +1,6 @@
+{
+  "name": "Netlify Agents",
+  "description": "Trigger Netlify Agents from GitHub issues and pull requests using @netlify mentions.",
+  "iconName": "zap",
+  "categories": ["Automation", "Deployment"]
+}

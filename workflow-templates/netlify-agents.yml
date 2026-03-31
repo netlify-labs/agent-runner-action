@@ -1,0 +1,58 @@
+name: Netlify Agents
+
+on:
+  workflow_dispatch:
+    inputs:
+      trigger_text:
+        description: 'What should the agent build or change? (e.g. "Add a dark mode toggle")'
+        required: true
+        type: string
+        default: '@netlify'
+      actor:
+        description: 'GitHub username to attribute this run to'
+        required: true
+        type: string
+      model:
+        description: 'AI model to use'
+        required: false
+        type: choice
+        options:
+          - codex
+          - claude
+          - gemini
+        default: 'codex'
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted, edited]
+  issues:
+    types: [opened, assigned, edited]
+  issue_comment:
+    types: [created, edited]
+
+concurrency:
+  group: netlify-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  netlify-agent:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.sender.login != 'github-actions[bot]' &&
+        github.event.sender.login != 'netlify-coding[bot]' &&
+        github.event.sender.login != 'netlify[bot]'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: netlify-labs/agent-runner-action@v1
+        with:
+          netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
