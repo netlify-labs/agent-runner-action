@@ -84,10 +84,16 @@ module.exports = async function generateSuccessComment({ context, core }) {
 
   /** @type {string[]} */
   const links = [];
-  if (sourceUrl) links.push(sourceUrl);
-  links.push(`[Netlify agent run](${agentRunUrl})`);
-  if (agentDeployUrl) links.push(`[Deploy preview](${agentDeployUrl})`);
+  if (agentDeployUrl) links.push(`[Open Preview URL](${agentDeployUrl})`);
+  links.push(`[Netlify Agents run](${agentRunUrl})`);
+  if (agentCommitSha && agentPrUrl) {
+    const prNum = agentPrUrl.match(/\/pull\/(\d+)/);
+    if (prNum) {
+      links.push(`[Code Changes](https://github.com/${repoName}/pull/${prNum[1]}/commits/${agentCommitSha})`);
+    }
+  }
   links.push(`[GitHub Action logs](${ghActionUrl})`);
+  if (sourceUrl) links.push(sourceUrl);
   message += links.join(' • ') + '\n\n';
 
   if (!isPR && agentPrUrl) {
