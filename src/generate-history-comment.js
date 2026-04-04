@@ -67,10 +67,21 @@ module.exports = async function generateHistoryComment({ context, core }) {
       }
       message += `✅ **Run ${runNum}**${dateSuffix} - Model \`${model}\`\n${title}\n\n`;
       if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
+      const commitSha = data.commit_sha || '';
+      const prUrl = data.pr_url || '';
+      const repoFullName = `${context.repo.owner}/${context.repo.repo}`;
       /** @type {string[]} */
       const links = [];
       if (deployUrl) links.push(`[Preview URL](${deployUrl})`);
       links.push(`[Netlify Agents run](${agentRunUrl})`);
+      if (commitSha && prUrl) {
+        const prNum = prUrl.match(/\/pull\/(\d+)/);
+        if (prNum) {
+          links.push(`[Code Changes](https://github.com/${repoFullName}/pull/${prNum[1]}/commits/${commitSha})`);
+        }
+      } else if (commitSha) {
+        links.push(`[Code Changes](https://github.com/${repoFullName}/commit/${commitSha})`);
+      }
       if (ghUrl) links.push(`[GitHub Action logs](${ghUrl})`);
       message += links.join(' • ') + '\n\n';
     }

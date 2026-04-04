@@ -105,7 +105,7 @@
 
 /**
  * Map of session IDs to supplementary data carried across runs.
- * @typedef {Record<string, {screenshot?: string, gh_action_url?: string}>} SessionDataMap
+ * @typedef {Record<string, {screenshot?: string, gh_action_url?: string, commit_sha?: string, pr_url?: string}>} SessionDataMap
  */
 
 module.exports = {};

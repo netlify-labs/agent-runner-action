@@ -635,6 +635,7 @@ runs:
                 done
                 echo "agent-pr-url=$EXISTING_PR" >> $GITHUB_OUTPUT
                 echo "agent-pr-branch=$PR_BRANCH" >> $GITHUB_OUTPUT
+                echo "agent-commit-sha=${MERGE_SHA:-}" >> $GITHUB_OUTPUT
 
               elif [ "$HAS_DIFF" = "true" ] && [ -z "$EXISTING_PR" ]; then
                 echo "🔀 Creating pull request..."
@@ -653,6 +654,7 @@ runs:
                     echo "✅ PR created: $PR_URL"
                     echo "agent-pr-url=$PR_URL" >> $GITHUB_OUTPUT
                     echo "agent-pr-branch=$(echo "$PR_CHECK" | jq -r '.pr_branch // empty')" >> $GITHUB_OUTPUT
+                    echo "agent-commit-sha=$(echo "$PR_CHECK" | jq -r '.merge_commit_sha // empty')" >> $GITHUB_OUTPUT
 
                     PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
                     if [ -n "$PR_NUM" ]; then
@@ -753,6 +755,7 @@ runs:
         AGENT_SCREENSHOT_URL: ${{ steps.netlify-agent.outputs.agent-screenshot-url }}
         AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
         AGENT_PR_BRANCH: ${{ steps.netlify-agent.outputs.agent-pr-branch }}
+        AGENT_COMMIT_SHA: ${{ steps.netlify-agent.outputs.agent-commit-sha }}
         AGENT_TITLE: ${{ steps.netlify-agent.outputs.agent-title }}
         AGENT_RESULT: ${{ steps.netlify-agent.outputs.agent-result }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
@@ -760,6 +763,7 @@ runs:
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
         SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
+        REPOSITORY_NAME: ${{ github.repository }}
         GH_ACTION_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
       with:
         github-token: ${{ inputs.github-token }}

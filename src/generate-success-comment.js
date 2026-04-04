@@ -23,6 +23,8 @@ module.exports = async function generateSuccessComment({ context, core }) {
   const agentScreenshotUrl = process.env.AGENT_SCREENSHOT_URL || '';
   const agentPrUrl = process.env.AGENT_PR_URL || '';
   const agentPrBranch = process.env.AGENT_PR_BRANCH || '';
+  const agentCommitSha = process.env.AGENT_COMMIT_SHA || '';
+  const repoName = process.env.REPOSITORY_NAME || `${context.repo.owner}/${repo}`;
   const isDryRun = process.env.IS_DRY_RUN === 'true';
 
   let agentSessionsJson = '[]';
@@ -49,10 +51,13 @@ module.exports = async function generateSuccessComment({ context, core }) {
   try { sessionDataMap = JSON.parse(process.env.SESSION_DATA_MAP || '{}'); } catch (_) { /* invalid */ }
 
   if (latestSession) {
-    sessionDataMap[latestSession.id] = {
+    const sessionData = {
       screenshot: agentScreenshotUrl || '',
       gh_action_url: ghActionUrl
     };
+    if (agentCommitSha) sessionData.commit_sha = agentCommitSha;
+    if (agentPrUrl) sessionData.pr_url = agentPrUrl;
+    sessionDataMap[latestSession.id] = sessionData;
   }
 
   const rawPrompt = (latestSession && latestSession.prompt) ? latestSession.prompt : triggerText;
