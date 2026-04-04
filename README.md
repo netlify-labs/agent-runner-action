@@ -1,5 +1,8 @@
 # Netlify Agent Runner
 
+> [!NOTE]
+> The action is currently in beta, under active development
+
 A GitHub Action that lets you trigger [Netlify Agents](https://www.netlify.com/products/agents/) directly from GitHub issues and pull requests using `@netlify` mentions.
 
 ## How it works
