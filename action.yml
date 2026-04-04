@@ -789,6 +789,7 @@ runs:
     - name: Generate error comment
       if: >-
         steps.trigger-check.outputs.should-run == 'true'
+        && steps.should-continue.outputs.should-continue == 'true'
         && steps.netlify-agent.outputs.outcome != 'success'
         && steps.context-info.outputs.issue-number != ''
       id: generate_error_comment
@@ -869,6 +870,7 @@ runs:
       if: >-
         always()
         && steps.trigger-check.outputs.should-run == 'true'
+        && steps.should-continue.outputs.should-continue == 'true'
         && (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) != ''
         && steps.generate_success_comment.outcome != 'success'
         && steps.generate_error_comment.outcome != 'success'
