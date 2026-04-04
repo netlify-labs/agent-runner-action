@@ -911,6 +911,7 @@ runs:
         always()
         && steps.trigger-check.outputs.should-run == 'true'
         && steps.acknowledge.outputs.reaction-id != ''
+        && steps.netlify-agent.outputs.outcome == 'success'
       continue-on-error: true
       uses: actions/github-script@v8
       with:
@@ -921,8 +922,7 @@ runs:
           const reactionId = parseInt('${{ steps.acknowledge.outputs.reaction-id }}');
           const target = '${{ steps.acknowledge.outputs.reaction-target }}';
           const targetId = parseInt('${{ steps.acknowledge.outputs.reaction-target-id }}');
-          const outcome = '${{ steps.netlify-agent.outputs.outcome }}';
-          const emoji = outcome === 'success' ? 'rocket' : 'confused';
+          const emoji = Math.random() < 0.5 ? 'rocket' : 'hooray';
           try {
             // Remove 👀 reaction
             if (target === 'comment') {
@@ -930,7 +930,7 @@ runs:
             } else {
               await github.rest.reactions.deleteForIssue({ owner, repo, issue_number: targetId, reaction_id: reactionId });
             }
-            // Add completion reaction
+            // Add success reaction (🚀 or 🎉)
             if (target === 'comment') {
               await github.rest.reactions.createForIssueComment({ owner, repo, comment_id: targetId, content: emoji });
             } else {
