@@ -123,7 +123,8 @@ function formatRunDate(dateStr) {
   const tz = process.env.TZ || 'America/Los_Angeles';
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: tz, hour: 'numeric', minute: '2-digit',
-    month: 'long', day: 'numeric', year: 'numeric', hour12: true
+    month: 'long', day: 'numeric', year: 'numeric', hour12: true,
+    timeZoneName: 'short'
   }).formatToParts(d);
   const get = (/** @type {string} */ type) => (parts.find(p => p.type === type) || {}).value || '';
   const hours = get('hour');
@@ -132,9 +133,10 @@ function formatRunDate(dateStr) {
   const month = get('month');
   const date = parseInt(get('day'), 10);
   const year = get('year');
+  const tzAbbr = get('timeZoneName');
   const suffixes = ['th', 'st', 'nd', 'rd'];
   const suffix = (date % 100 >= 11 && date % 100 <= 13) ? 'th' : (suffixes[date % 10] || 'th');
-  return `${hours}:${minutes}${dayPeriod} on ${month} ${date}${suffix}, ${year}`;
+  return `${hours}:${minutes}${dayPeriod} ${tzAbbr} on ${month} ${date}${suffix}, ${year}`;
 }
 
 /**
