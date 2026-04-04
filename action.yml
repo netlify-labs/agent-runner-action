@@ -506,6 +506,11 @@ runs:
           AGENT_ID=$(echo "$AGENT_OUTPUT" | jq -r '.id // empty' 2>/dev/null || true)
           if [ -z "$AGENT_ID" ]; then
             echo "❌ Failed to create agent task"
+            echo "--- stderr ---"
+            cat "$AGENT_STDERR" | sed 's/\x1b\[[0-9;]*m//g' || true
+            echo "--- stdout ---"
+            echo "$AGENT_OUTPUT"
+            echo "---"
             AGENT_ERR_MSG=$(cat "$AGENT_STDERR" | sed 's/\x1b\[[0-9;]*m//g' | grep -i "error" | head -1 | sed 's/^[[:space:]]*›[[:space:]]*//')
             echo "${AGENT_ERR_MSG:-$AGENT_OUTPUT}"
             echo "outcome=failure" >> $GITHUB_OUTPUT
