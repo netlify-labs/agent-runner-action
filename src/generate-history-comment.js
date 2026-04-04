@@ -58,7 +58,7 @@ module.exports = async function generateHistoryComment({ context, core }) {
     const runHeader = `Run ${runNum}${datePart} using ${model}`;
 
     if (isFailed) {
-      message += `❌ \`${runHeader}\`\nFailed\n\n`;
+      message += `❌ \`${runHeader}\`\n\nFailed\n\n`;
       if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
       if (ghUrl) message += `[GitHub Action logs](${ghUrl})\n\n`;
     } else {
@@ -66,7 +66,7 @@ module.exports = async function generateHistoryComment({ context, core }) {
       if (screenshot && deployUrl) {
         message += `<a href="${deployUrl}"><img src="${screenshot}" alt="Preview" width="180" align="right"></a>`;
       }
-      message += `✅ \`${runHeader}\`\n${title}\n\n`;
+      message += `✅ \`${runHeader}\`\n\n${title}\n\n`;
       if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
       const commitSha = data.commit_sha || '';
       const prUrl = data.pr_url || '';
