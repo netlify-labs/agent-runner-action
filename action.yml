@@ -111,6 +111,7 @@ runs:
     # 2. React with 👀 to acknowledge
     # -----------------------------------------------------------------------
     - name: Acknowledge trigger
+      id: acknowledge
       if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch'
       uses: actions/github-script@v8
       with:
@@ -120,18 +121,28 @@ runs:
           const owner = context.repo.owner;
           const repo = context.repo.repo;
           try {
+            let result;
             if (event === 'issue_comment' || event === 'pull_request_review_comment') {
-              await github.rest.reactions.createForIssueComment({
+              result = await github.rest.reactions.createForIssueComment({
                 owner, repo, comment_id: context.payload.comment.id, content: 'eyes'
               });
+              core.setOutput('reaction-id', result.data.id);
+              core.setOutput('reaction-target', 'comment');
+              core.setOutput('reaction-target-id', context.payload.comment.id);
             } else if (event === 'issues') {
-              await github.rest.reactions.createForIssue({
+              result = await github.rest.reactions.createForIssue({
                 owner, repo, issue_number: context.payload.issue.number, content: 'eyes'
               });
+              core.setOutput('reaction-id', result.data.id);
+              core.setOutput('reaction-target', 'issue');
+              core.setOutput('reaction-target-id', context.payload.issue.number);
             } else if (event === 'pull_request_target') {
-              await github.rest.reactions.createForIssue({
+              result = await github.rest.reactions.createForIssue({
                 owner, repo, issue_number: context.payload.pull_request.number, content: 'eyes'
               });
+              core.setOutput('reaction-id', result.data.id);
+              core.setOutput('reaction-target', 'issue');
+              core.setOutput('reaction-target-id', context.payload.pull_request.number);
             }
           } catch (e) {
             console.log(`Could not add reaction: ${e.message}`);
@@ -894,6 +905,40 @@ runs:
           [GitHub Action logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
           <!-- netlify-agent-run-status -->
         edit-mode: replace
+
+    - name: Update reaction on completion
+      if: >-
+        always()
+        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.acknowledge.outputs.reaction-id != ''
+      continue-on-error: true
+      uses: actions/github-script@v8
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          const reactionId = parseInt('${{ steps.acknowledge.outputs.reaction-id }}');
+          const target = '${{ steps.acknowledge.outputs.reaction-target }}';
+          const targetId = parseInt('${{ steps.acknowledge.outputs.reaction-target-id }}');
+          const outcome = '${{ steps.netlify-agent.outputs.outcome }}';
+          const emoji = outcome === 'success' ? 'rocket' : 'confused';
+          try {
+            // Remove 👀 reaction
+            if (target === 'comment') {
+              await github.rest.reactions.deleteForIssueComment({ owner, repo, comment_id: targetId, reaction_id: reactionId });
+            } else {
+              await github.rest.reactions.deleteForIssue({ owner, repo, issue_number: targetId, reaction_id: reactionId });
+            }
+            // Add completion reaction
+            if (target === 'comment') {
+              await github.rest.reactions.createForIssueComment({ owner, repo, comment_id: targetId, content: emoji });
+            } else {
+              await github.rest.reactions.createForIssue({ owner, repo, issue_number: targetId, content: emoji });
+            }
+          } catch (e) {
+            console.log(`Could not update reaction: ${e.message}`);
+          }
 
     - name: Execution summary
       if: always() && steps.trigger-check.outputs.should-run == 'true'
