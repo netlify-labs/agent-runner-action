@@ -46,6 +46,10 @@ inputs:
     description: 'Enable debug logging of Netlify API responses'
     required: false
     default: 'false'
+  timezone:
+    description: 'Timezone for displaying dates (IANA format, e.g. America/New_York)'
+    required: false
+    default: 'America/Los_Angeles'
 
 # ---------------------------------------------------------------------------
 # Outputs
@@ -785,6 +789,7 @@ runs:
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
         SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
         SESSION_DATA_MAP: ${{ steps.generate_success_comment.outputs.session-data-map }}
+        TZ: ${{ inputs.timezone }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |

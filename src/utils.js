@@ -113,24 +113,28 @@ function formatPromptBlock(prompt) {
 }
 
 /**
- * Format a date string into "9:17pm on April 4th, 2026"
+ * Format a date string into "2:17pm on April 4th, 2026"
+ * Uses TZ environment variable for timezone (defaults to America/Los_Angeles).
  * @param {string} dateStr - ISO date string
  * @returns {string}
  */
 function formatRunDate(dateStr) {
   const d = new Date(dateStr);
-  const months = ['January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'];
-  const month = months[d.getUTCMonth()];
-  const date = d.getUTCDate();
-  const year = d.getUTCFullYear();
-  let hours = d.getUTCHours();
-  const minutes = d.getUTCMinutes().toString().padStart(2, '0');
-  const ampm = hours >= 12 ? 'pm' : 'am';
-  hours = hours % 12 || 12;
+  const tz = process.env.TZ || 'America/Los_Angeles';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: 'numeric', minute: '2-digit',
+    month: 'long', day: 'numeric', year: 'numeric', hour12: true
+  }).formatToParts(d);
+  const get = (/** @type {string} */ type) => (parts.find(p => p.type === type) || {}).value || '';
+  const hours = get('hour');
+  const minutes = get('minute');
+  const dayPeriod = get('dayPeriod').toLowerCase();
+  const month = get('month');
+  const date = parseInt(get('day'), 10);
+  const year = get('year');
   const suffixes = ['th', 'st', 'nd', 'rd'];
   const suffix = (date % 100 >= 11 && date % 100 <= 13) ? 'th' : (suffixes[date % 10] || 'th');
-  return `${hours}:${minutes}${ampm} on ${month} ${date}${suffix}, ${year}`;
+  return `${hours}:${minutes}${dayPeriod} on ${month} ${date}${suffix}, ${year}`;
 }
 
 /**
