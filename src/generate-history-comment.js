@@ -57,7 +57,7 @@ module.exports = async function generateHistoryComment({ context, core }) {
     const dateSuffix = runDate ? ` - ${runDate}` : '';
 
     if (isFailed) {
-      message += `**Run ${runNum}${dateSuffix}**\nModel \`${model}\` - ❌ Failed\n\n`;
+      message += `**Run ${runNum}${dateSuffix}** using \`${model}\` model\n❌ Failed\n\n`;
       if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
       if (ghUrl) message += `[GitHub Action logs](${ghUrl})\n\n`;
     } else {
@@ -65,7 +65,7 @@ module.exports = async function generateHistoryComment({ context, core }) {
       if (screenshot && deployUrl) {
         message += `<a href="${deployUrl}"><img src="${screenshot}" alt="Preview" width="180" align="right"></a>`;
       }
-      message += `**Run ${runNum}${dateSuffix}**\nModel \`${model}\` - ${title} ✅\n\n`;
+      message += `**Run ${runNum}${dateSuffix}** using \`${model}\` model\n${title} ✅\n\n`;
       if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
       /** @type {string[]} */
       const links = [];
