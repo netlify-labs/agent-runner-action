@@ -92,6 +92,10 @@ module.exports = async function getContext({ github, context, core }) {
           .filter(/** @param {import('./types').TimelineEvent} e */ e => e.event === 'cross-referenced')
           .filter(/** @param {import('./types').TimelineEvent} e */ e => e.source?.issue?.pull_request?.url);
         hasLinkedPR = linkedPRs.length > 0;
+        if (hasLinkedPR) {
+          const prNumber = linkedPRs[linkedPRs.length - 1].source?.issue?.number;
+          if (prNumber) core.setOutput('linked-pr-number', prNumber.toString());
+        }
         console.log(`Issue #${issueNumber}, linked PRs: ${linkedPRs.length}`);
       } catch (error) {
         console.error('Error checking linked PRs:', error);

@@ -232,12 +232,12 @@ runs:
         fi
 
     - name: Redirect to PR if issue has linked PR
-      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'false' && steps.extract-agent-id.outputs.linked-pr-number != ''
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'false' && (steps.extract-agent-id.outputs.linked-pr-number != '' || steps.context-info.outputs.linked-pr-number != '')
       uses: peter-evans/create-or-update-comment@v5
       with:
         issue-number: ${{ steps.context-info.outputs.issue-number }}
         body: |
-          > This issue already has a linked pull request. Please add follow-up `@netlify` prompts on PR #${{ steps.extract-agent-id.outputs.linked-pr-number }}, or use the [Netlify Agents dashboard](${{ steps.extract-agent-id.outputs.agent-run-url }}).
+          > This issue already has a linked pull request. Please add follow-up `@netlify` prompts on PR #${{ steps.extract-agent-id.outputs.linked-pr-number || steps.context-info.outputs.linked-pr-number }}${{ steps.extract-agent-id.outputs.agent-run-url && format(', or use the [Netlify Agents dashboard]({0})', steps.extract-agent-id.outputs.agent-run-url) || '' }}.
 
     # -----------------------------------------------------------------------
     # 7. Create initial status comment
