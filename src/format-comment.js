@@ -27,11 +27,8 @@ if (command === 'in-progress') {
     prompt: triggerText,
     model,
     runnerId: agentId,
+    ghActionUrl: actionLink,
   });
-
-  if (agentLink && actionLink) {
-    body += `\n[GitHub Action logs](${actionLink})`;
-  }
 
   if (isDryRun) {
     body += '\n\n> **Preview mode** — no changes will be committed.\n';

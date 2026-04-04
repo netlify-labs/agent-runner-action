@@ -260,7 +260,8 @@ runs:
           const model = ${{ toJSON(steps.context-info.outputs.model) }} || 'codex';
           const isDryRun = '${{ steps.context-info.outputs.is-dry-run }}' === 'true';
           const dryRunTag = isDryRun ? ' (preview)' : '';
-          const body = utils.buildInProgressComment({ prompt: triggerText, model }) +
+          const ghActionUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+          const body = utils.buildInProgressComment({ prompt: triggerText, model, ghActionUrl }) +
             (isDryRun ? '\n\n> **Preview mode** — no changes will be committed.\n' : '');
           const { data: comment } = await github.rest.issues.createComment({
             owner: context.repo.owner, repo: context.repo.repo,
@@ -415,8 +416,8 @@ runs:
           const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${runnerId}`;
           const ghActionUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
           const body = utils.buildInProgressComment({
-            agentRunUrl, prompt: triggerText, model, runnerId
-          }) + `\n[GitHub Action logs](${ghActionUrl})`;
+            agentRunUrl, prompt: triggerText, model, runnerId, ghActionUrl
+          });
           await github.rest.issues.updateComment({
             owner: context.repo.owner, repo: context.repo.repo,
             comment_id: parseInt(commentId), body

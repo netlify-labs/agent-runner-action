@@ -87,6 +87,7 @@
  * @property {string} prompt
  * @property {string} model
  * @property {string} [runnerId]
+ * @property {string} [ghActionUrl]
  */
 
 /**

@@ -137,7 +137,7 @@ function formatRunDate(dateStr) {
  * @param {InProgressCommentOptions} options
  * @returns {string}
  */
-function buildInProgressComment({ agentRunUrl, prompt, model, runnerId }) {
+function buildInProgressComment({ agentRunUrl, prompt, model, runnerId, ghActionUrl }) {
   const [flavor, emoji] = randomFlavor();
   const clean = cleanPrompt(prompt);
 
@@ -145,15 +145,17 @@ function buildInProgressComment({ agentRunUrl, prompt, model, runnerId }) {
     ? `### [Netlify Agent Runner ${flavor}](${agentRunUrl}) ${emoji}\n\n`
     : `### Netlify Agent Runner ${flavor} ${emoji}\n\n`;
 
+  body += `**Model:** \`${model}\`\n\n`;
   if (clean) body += formatPromptBlock(clean);
-  body += `**Model:** \`${model}\`\n`;
 
-  if (agentRunUrl) {
-    body += `\n[Netlify agent run](${agentRunUrl})`;
-  }
+  /** @type {string[]} */
+  const links = [];
+  if (agentRunUrl) links.push(`[View the in progress agent run in Netlify](${agentRunUrl})`);
+  if (ghActionUrl) links.push(`[GitHub Action logs](${ghActionUrl})`);
+  if (links.length) body += links.join(' • ') + '\n';
 
   if (runnerId) {
-    body += `\n<!-- netlify-agent-runner-id:${runnerId} -->`;
+    body += `<!-- netlify-agent-runner-id:${runnerId} -->`;
   }
   body += `\n<!-- netlify-agent-run-status -->`;
 
