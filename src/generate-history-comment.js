@@ -54,10 +54,11 @@ module.exports = async function generateHistoryComment({ context, core }) {
     if (cleanPrompt.length > 450) cleanPrompt = cleanPrompt.substring(0, 450) + '...';
 
     const runDate = session.created_at ? utils.formatRunDate(session.created_at) : '';
-    const dateSuffix = runDate ? ` - ${runDate}` : '';
+    const datePart = runDate ? ` at ${runDate}` : '';
+    const runHeader = `Run ${runNum}${datePart} using ${model}`;
 
     if (isFailed) {
-      message += `❌ **Run ${runNum}**${dateSuffix} - Model \`${model}\`\nFailed\n\n`;
+      message += `❌ \`${runHeader}\`\nFailed\n\n`;
       if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
       if (ghUrl) message += `[GitHub Action logs](${ghUrl})\n\n`;
     } else {
@@ -65,7 +66,7 @@ module.exports = async function generateHistoryComment({ context, core }) {
       if (screenshot && deployUrl) {
         message += `<a href="${deployUrl}"><img src="${screenshot}" alt="Preview" width="180" align="right"></a>`;
       }
-      message += `✅ **Run ${runNum}**${dateSuffix} - Model \`${model}\`\n${title}\n\n`;
+      message += `✅ \`${runHeader}\`\n${title}\n\n`;
       if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
       const commitSha = data.commit_sha || '';
       const prUrl = data.pr_url || '';

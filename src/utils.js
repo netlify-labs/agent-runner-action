@@ -113,23 +113,24 @@ function formatPromptBlock(prompt) {
 }
 
 /**
- * Format a date string into a human-friendly format like "Friday Apr 04, 2026 at 8:30pm"
+ * Format a date string into "9:17pm on April 4th, 2026"
  * @param {string} dateStr - ISO date string
  * @returns {string}
  */
 function formatRunDate(dateStr) {
   const d = new Date(dateStr);
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const day = days[d.getUTCDay()];
+  const months = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
   const month = months[d.getUTCMonth()];
-  const date = d.getUTCDate().toString().padStart(2, '0');
+  const date = d.getUTCDate();
   const year = d.getUTCFullYear();
   let hours = d.getUTCHours();
   const minutes = d.getUTCMinutes().toString().padStart(2, '0');
   const ampm = hours >= 12 ? 'pm' : 'am';
   hours = hours % 12 || 12;
-  return `${day} ${month} ${date}, ${year} at ${hours}:${minutes}${ampm}`;
+  const suffixes = ['th', 'st', 'nd', 'rd'];
+  const suffix = (date % 100 >= 11 && date % 100 <= 13) ? 'th' : (suffixes[date % 10] || 'th');
+  return `${hours}:${minutes}${ampm} on ${month} ${date}${suffix}, ${year}`;
 }
 
 /**
