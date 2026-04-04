@@ -73,7 +73,7 @@ module.exports = async function generateHistoryComment({ context, core }) {
       const repoFullName = `${context.repo.owner}/${context.repo.repo}`;
       /** @type {string[]} */
       const links = [];
-      if (deployUrl) links.push(`[Preview URL](${deployUrl})`);
+      if (deployUrl) links.push(`[Open Preview URL](${deployUrl})`);
       links.push(`[Netlify Agents run](${agentRunUrl})`);
       if (commitSha && prUrl) {
         const prNum = prUrl.match(/\/pull\/(\d+)/);
