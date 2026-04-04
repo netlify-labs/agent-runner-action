@@ -332,8 +332,10 @@ runs:
       id: cache-netlify
       uses: actions/cache@v5
       with:
-        path: ~/.bun/install/global
-        key: netlify-cli-bun-${{ runner.os }}-${{ inputs.netlify-cli-version }}
+        path: |
+          ~/.bun/install/global
+          ~/.bun/bin
+        key: netlify-cli-bun-${{ runner.os }}-${{ inputs.netlify-cli-version }}-v2
 
     - name: Install Netlify CLI
       if: >-
