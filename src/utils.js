@@ -100,15 +100,13 @@ function ghContainsExpressions(field) {
 
 /**
  * Format a prompt for display in a GitHub comment.
- * Bolds the first line and blockquotes all lines.
+ * Blockquotes all lines.
  * @param {string | null | undefined} prompt
  * @returns {string}
  */
 function formatPromptBlock(prompt) {
   if (!prompt) return '';
-  const lines = prompt.split('\n');
-  lines[0] = `**${lines[0]}**`;
-  const quoted = lines.map(l => `> ${l}`).join('\n');
+  const quoted = prompt.split('\n').map(l => `> ${l}`).join('\n');
   return `**Prompt:**\n\n${quoted}\n\n`;
 }
 
