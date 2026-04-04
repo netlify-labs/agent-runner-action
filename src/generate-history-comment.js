@@ -53,17 +53,19 @@ module.exports = async function generateHistoryComment({ context, core }) {
     let cleanPrompt = utils.cleanPrompt(session.prompt || '');
     if (cleanPrompt.length > 450) cleanPrompt = cleanPrompt.substring(0, 450) + '...';
 
+    const runDate = session.created_at ? utils.formatRunDate(session.created_at) : '';
+    const dateSuffix = runDate ? ` - ${runDate}` : '';
+
     if (isFailed) {
-      message += `**Run ${runNum}** Model \`${model}\` - ❌ Failed\n\n`;
+      message += `**Run ${runNum}${dateSuffix}**\nModel \`${model}\` - ❌ Failed\n\n`;
       if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
       if (ghUrl) message += `[GitHub Action logs](${ghUrl})\n\n`;
     } else {
       const title = session.title || '';
-      const tag = isLatest ? ' (latest)' : '';
       if (screenshot && deployUrl) {
         message += `<a href="${deployUrl}"><img src="${screenshot}" alt="Preview" width="180" align="right"></a>`;
       }
-      message += `**Run ${runNum}${tag}** Model \`${model}\` - ${title} ✅\n\n`;
+      message += `**Run ${runNum}${dateSuffix}**\nModel \`${model}\` - ${title} ✅\n\n`;
       if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
       /** @type {string[]} */
       const links = [];

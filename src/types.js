@@ -100,6 +100,7 @@
  * @property {string} [deploy_url]
  * @property {string} [deploy_id]
  * @property {{agent?: string}} [agent_config]
+ * @property {string} [created_at]
  */
 
 /**
