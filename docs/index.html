@@ -148,7 +148,7 @@
   <h1>Netlify <span>Agent Runner</span></h1>
   <p>Trigger Netlify Agents from GitHub issues and pull requests. Just mention <code>@netlify</code> and the agent builds your site.</p>
   <div class="hero-code">
-    <span class="key">- uses:</span> <span class="val">netlify/agent-runner@v1</span><br>
+    <span class="key">- uses:</span> <span class="val">netlify-labs/agent-runner-action@main</span><br>
     <span class="key">&nbsp; with:</span><br>
     <span class="key">&nbsp;&nbsp;&nbsp; netlify-auth-token:</span> <span class="val">${{ secrets.NETLIFY_AUTH_TOKEN }}</span><br>
     <span class="key">&nbsp;&nbsp;&nbsp; netlify-site-id:</span> <span class="val">${{ secrets.NETLIFY_SITE_ID }}</span>
@@ -202,16 +202,32 @@
     <pre><code>name: Netlify Agents
 
 on:
-  issues:
-    types: [opened, assigned, edited]
-  issue_comment:
-    types: [created, edited]
+  workflow_dispatch:
+    inputs:
+      trigger_text:
+        description: 'Prompt for the Netlify Agent'
+        required: true
+        type: string
+        default: '@netlify'
+      actor:
+        description: 'Actor triggering the agent'
+        required: true
+        type: string
+      model:
+        description: 'Model to use (claude, codex, gemini)'
+        required: false
+        type: string
+        default: 'codex'
   pull_request_target:
     types: [opened, synchronize, reopened]
   pull_request_review_comment:
     types: [created]
   pull_request_review:
     types: [submitted, edited]
+  issues:
+    types: [opened, assigned, edited]
+  issue_comment:
+    types: [created, edited]
 
 concurrency:
   group: netlify-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
@@ -219,10 +235,14 @@ concurrency:
 
 jobs:
   netlify-agent:
+    # Skip bot senders early to avoid burning Actions minutes
     if: &gt;-
-      github.event.sender.login != 'github-actions[bot]' &amp;&amp;
-      github.event.sender.login != 'netlify-coding[bot]' &amp;&amp;
-      github.event.sender.login != 'netlify[bot]'
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.sender.login != 'github-actions[bot]' &amp;&amp;
+        github.event.sender.login != 'netlify-coding[bot]' &amp;&amp;
+        github.event.sender.login != 'netlify[bot]'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -230,7 +250,7 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: netlify/agent-runner@v1
+      - uses: netlify-labs/agent-runner-action@main
         with:
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}</code></pre>
@@ -253,10 +273,6 @@ jobs:
   <h3>Follow-up prompts</h3>
   <p>After the first run creates a PR, add follow-up <code>@netlify</code> comments on the PR to iterate. The agent continues from where it left off.</p>
 
-  <h3>Preview mode</h3>
-  <p>Use <code>@netlify preview</code> to run the agent without creating a PR or committing changes:</p>
-  <pre><code>@netlify preview Add a footer with social links</code></pre>
-
   <h3>Typo-tolerant</h3>
   <p>Common typos are recognized: <code>@nelify</code>, <code>@netlfy</code>, <code>@netify</code>, <code>@netlif</code>, <code>@netfly</code>. Aliases like <code>@netlify-agent</code> and <code>@netlify-ai</code> also work.</p>
 </section>
@@ -272,8 +288,6 @@ jobs:
     <tr><td><code>default-model</code></td><td>No</td><td><code>codex</code></td><td>Default AI model (<code>claude</code>, <code>codex</code>, <code>gemini</code>)</td></tr>
     <tr><td><code>manage-labels</code></td><td>No</td><td><code>false</code></td><td>Auto-create and apply labels on runs</td></tr>
     <tr><td><code>timeout-minutes</code></td><td>No</td><td><code>10</code></td><td>Max minutes to wait for agent</td></tr>
-    <tr><td><code>netlify-cli-version</code></td><td>No</td><td><code>24.8.1</code></td><td>Pinned Netlify CLI version</td></tr>
-    <tr><td><code>dry-run</code></td><td>No</td><td><code>false</code></td><td>Preview mode (skip PR/commits)</td></tr>
     <tr><td><code>debug</code></td><td>No</td><td><code>false</code></td><td>Enable debug API logging</td></tr>
   </table>
 </section>
@@ -292,11 +306,10 @@ jobs:
     <tr><td><code>trigger-text</code></td><td>Cleaned trigger prompt</td></tr>
     <tr><td><code>is-pr</code></td><td><code>true</code> / <code>false</code></td></tr>
     <tr><td><code>issue-number</code></td><td>Issue or PR number</td></tr>
-    <tr><td><code>is-dry-run</code></td><td><code>true</code> / <code>false</code></td></tr>
   </table>
   <h3>Example: run tests after agent</h3>
   <pre><code>steps:
-  - uses: netlify/agent-runner@v1
+  - uses: netlify-labs/agent-runner-action@v1
     id: agent
     with:
       netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
@@ -363,7 +376,7 @@ jobs:
 </div>
 
 <footer>
-  <p>Netlify Agent Runner &middot; <a href="https://github.com/netlify/agent-runner">GitHub</a> &middot; <a href="https://www.netlify.com/products/agents/">Netlify Agents</a></p>
+  <p>Netlify Agent Runner &middot; <a href="https://github.com/netlify-labs/agent-runner-action">GitHub</a> &middot; <a href="https://www.netlify.com/products/agents/">Netlify Agents</a></p>
 </footer>
 
 </body>
