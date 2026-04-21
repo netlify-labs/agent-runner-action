@@ -40,10 +40,10 @@ describe('matchesTrigger', () => {
     assert.ok(!utils.matchesTrigger(undefined));
   });
 
-  it('matches @netlify even inside other text (mirrors GitHub contains())', () => {
-    // This is intentional — GitHub's contains() works the same way,
-    // so the permission check layer handles false positives.
-    assert.ok(utils.matchesTrigger('email me@netlify.com'));
+  it('does not match package scopes or email-like text', () => {
+    assert.ok(!utils.matchesTrigger('Install `@netlify/pkg` before testing'));
+    assert.ok(!utils.matchesTrigger('See @netlify-labs/test-dep for context'));
+    assert.ok(!utils.matchesTrigger('email me@netlify.com'));
   });
 
   it('matches trigger mid-text', () => {
@@ -220,6 +220,18 @@ describe('TRIGGER_PATTERN', () => {
     ];
     for (const s of shouldMatch) {
       assert.ok(utils.TRIGGER_PATTERN.test(s), `should match: ${s}`);
+    }
+  });
+
+  it('rejects partial matches inside longer identifiers', () => {
+    const shouldNotMatch = [
+      '@netlify/pkg',
+      '@netlify-labs',
+      '@netlify_agents_extra',
+      'me@netlify.com',
+    ];
+    for (const s of shouldNotMatch) {
+      assert.ok(!utils.TRIGGER_PATTERN.test(s), `should not match: ${s}`);
     }
   });
 });

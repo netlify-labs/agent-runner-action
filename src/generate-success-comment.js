@@ -51,6 +51,7 @@ module.exports = async function generateSuccessComment({ context, core }) {
   try { sessionDataMap = JSON.parse(process.env.SESSION_DATA_MAP || '{}'); } catch (_) { /* invalid */ }
 
   if (latestSession) {
+    /** @type {SessionDataMap[string]} */
     const sessionData = {
       screenshot: agentScreenshotUrl || '',
       gh_action_url: ghActionUrl

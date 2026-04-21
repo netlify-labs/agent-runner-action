@@ -19,8 +19,18 @@ const FLAVOR_MESSAGES = require(path.join(__dirname, 'flavor-messages.json'));
  */
 const TRIGGER_BASES = ['netlify', 'nelify', 'netlfy', 'netify', 'netlif', 'netfly'];
 
-/** Regex that matches @netlify (and typos) with optional suffixes like -agent, -agents, -ai */
-const TRIGGER_PATTERN = /@(?:netlify|nelify|netlfy|netify|netlif|netfly)(?:[_-](?:agents?(?:[_-]runs?)?|ai))?/i;
+const TRIGGER_BASE_PATTERN = `(?:${TRIGGER_BASES.join('|')})`;
+const TRIGGER_SUFFIX_PATTERN = '(?:[_-](?:agents?(?:[_-]runs?)?|ai))?';
+
+/**
+ * Standalone @netlify mention (and typos) with optional suffixes like -agent,
+ * -agents, or -ai. Rejects package scopes like @netlify/pkg and email-like
+ * strings such as me@netlify.com.
+ */
+const TRIGGER_PATTERN = new RegExp(
+  `(?<!\\w)@${TRIGGER_BASE_PATTERN}${TRIGGER_SUFFIX_PATTERN}(?![\\w./-])`,
+  'i'
+);
 
 // ---------------------------------------------------------------------------
 // Model handling
@@ -100,13 +110,15 @@ function ghContainsExpressions(field) {
 
 /**
  * Format a prompt for display in a GitHub comment.
- * Blockquotes all lines.
+ * Bolds the first line and blockquotes all lines.
  * @param {string | null | undefined} prompt
  * @returns {string}
  */
 function formatPromptBlock(prompt) {
   if (!prompt) return '';
-  const quoted = prompt.split('\n').map(l => `> ${l}`).join('\n');
+  const lines = prompt.split('\n');
+  lines[0] = `**${lines[0]}**`;
+  const quoted = lines.map(l => `> ${l}`).join('\n');
   return `**Prompt:**\n\n${quoted}\n\n`;
 }
 
