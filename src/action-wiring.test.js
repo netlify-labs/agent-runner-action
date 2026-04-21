@@ -133,6 +133,29 @@ describe('action.yml wiring', () => {
     }
   });
 
+  it('quotes expression env values that include hash placeholders', () => {
+    const unquoted = [];
+    for (const line of actionYml.split(/\r?\n/)) {
+      const match = line.match(/^\s+([A-Z0-9_]+):\s+(.+)$/);
+      if (!match) continue;
+
+      const [, name, rawValue] = match;
+      const value = rawValue.trim();
+      if (!value.includes('${{') || !value.includes('#{')) continue;
+
+      const isQuoted =
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"));
+      if (!isQuoted) unquoted.push(`${name}: ${value}`);
+    }
+
+    assert.deepEqual(
+      unquoted,
+      [],
+      `GitHub expressions containing # placeholders must be YAML-quoted: ${unquoted.join(', ')}`
+    );
+  });
+
   it('has at least the expected inputs', () => {
     const inputs = extractInputNames(actionYml);
     const expected = [
