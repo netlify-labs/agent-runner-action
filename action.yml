@@ -1182,7 +1182,7 @@ runs:
         EVENT_NAME: ${{ github.event_name }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         ISSUE_NUM: ${{ steps.context-info.outputs.issue-number }}
-        CONTEXT_LABEL: ${{ steps.context-info.outputs.is-pr == 'true' && format('PR #{0}', steps.context-info.outputs.issue-number) || format('Issue #{0}', steps.context-info.outputs.issue-number) }}
+        CONTEXT_LABEL: "${{ steps.context-info.outputs.is-pr == 'true' && format('PR #{0}', steps.context-info.outputs.issue-number) || format('Issue #{0}', steps.context-info.outputs.issue-number) }}"
         MODEL: ${{ steps.context-info.outputs.model }}
         IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
