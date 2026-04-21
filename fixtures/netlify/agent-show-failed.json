@@ -1,0 +1,10 @@
+{
+  "id": "runner_abc123",
+  "state": "failed",
+  "latest_session": {
+    "id": "session_2",
+    "state": "failed",
+    "result": "Build failed: npm test exited with code 1"
+  },
+  "error": "Agent finished with state: failed"
+}

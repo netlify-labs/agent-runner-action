@@ -1,0 +1,16 @@
+{
+  "sessions": [
+    {
+      "id": "session_1",
+      "state": "completed",
+      "prompt": "@netlify improve docs",
+      "title": "Updated docs",
+      "result": "Added setup steps"
+    },
+    {
+      "id": "session_2",
+      "state": "running",
+      "prompt": "@netlify add tests"
+    }
+  ]
+}

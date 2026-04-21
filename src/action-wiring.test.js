@@ -135,7 +135,16 @@ describe('action.yml wiring', () => {
 
   it('has at least the expected inputs', () => {
     const inputs = extractInputNames(actionYml);
-    const expected = ['netlify-auth-token', 'netlify-site-id', 'github-token', 'default-model', 'timeout-minutes', 'debug', 'dry-run'];
+    const expected = [
+      'netlify-auth-token',
+      'netlify-site-id',
+      'github-token',
+      'default-model',
+      'timeout-minutes',
+      'debug',
+      'dry-run',
+      'preflight-only',
+    ];
     for (const name of expected) {
       assert.ok(inputs.has(name), `Missing expected input: ${name}`);
     }
@@ -143,7 +152,21 @@ describe('action.yml wiring', () => {
 
   it('has at least the expected outputs', () => {
     const outputs = extractOutputNames(actionYml);
-    const expected = ['agent-id', 'outcome', 'model', 'trigger-text', 'is-pr', 'issue-number'];
+    const expected = [
+      'agent-id',
+      'outcome',
+      'model',
+      'trigger-text',
+      'is-pr',
+      'issue-number',
+      'preflight-ok',
+      'preflight-json',
+      'preflight-summary',
+      'should-continue',
+      'failure-category',
+      'failure-stage',
+      'agent-error',
+    ];
     for (const name of expected) {
       assert.ok(outputs.has(name), `Missing expected output: ${name}`);
     }

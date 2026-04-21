@@ -1,0 +1,16 @@
+{
+  "id": "runner_abc123",
+  "state": "completed",
+  "latest_session": {
+    "id": "session_1",
+    "state": "completed",
+    "title": "Implemented lint fixes",
+    "result": "Applied lint fixes and updated tests.",
+    "deploy_url": "https://deploy-preview-42--agent-runner-action-example.netlify.app",
+    "deploy_id": "dep_42",
+    "pull_request_url": "https://github.com/netlify-labs/agent-runner-action-example/pull/42",
+    "pull_request_branch": "netlify/agent/lint-fixes",
+    "merge_commit_sha": "abc123def456",
+    "screenshot_url": "https://images.netlify.com/screenshot.png"
+  }
+}

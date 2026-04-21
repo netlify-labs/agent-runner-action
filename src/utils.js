@@ -5,6 +5,7 @@
 /** @typedef {import('./types').InProgressCommentOptions} InProgressCommentOptions */
 
 const path = require('path');
+const { STATUS_COMMENT_MARKER, renderRunnerIdMarker } = require('./comment-markers');
 
 /** @type {[string, string][]} */
 const FLAVOR_MESSAGES = require(path.join(__dirname, 'flavor-messages.json'));
@@ -172,9 +173,9 @@ function buildInProgressComment({ agentRunUrl, prompt, model, runnerId, ghAction
   if (links.length) body += links.join(' • ') + '\n';
 
   if (runnerId) {
-    body += `<!-- netlify-agent-runner-id:${runnerId} -->`;
+    body += renderRunnerIdMarker(runnerId);
   }
-  body += `\n<!-- netlify-agent-run-status -->`;
+  body += `\n${STATUS_COMMENT_MARKER}`;
 
   return body;
 }

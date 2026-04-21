@@ -10,6 +10,11 @@
 
 const fs = require('fs');
 const utils = require('./utils');
+const {
+  STATUS_COMMENT_MARKER,
+  renderRunnerIdMarker,
+  renderSessionDataMarker,
+} = require('./comment-markers');
 
 /**
  * @param {{context: ActionContext, core: ActionCore}} params
@@ -106,9 +111,9 @@ module.exports = async function generateSuccessComment({ context, core }) {
     message += `Branch: \`${agentPrBranch}\`\n`;
   }
 
-  message += `\n<!-- netlify-agent-session-data:${JSON.stringify(sessionDataMap)} -->`;
-  message += `\n<!-- netlify-agent-runner-id:${agentId} -->`;
-  message += `\n<!-- netlify-agent-run-status -->`;
+  message += `\n${renderSessionDataMarker(sessionDataMap)}`;
+  message += `\n${renderRunnerIdMarker(agentId)}`;
+  message += `\n${STATUS_COMMENT_MARKER}`;
 
   core.setOutput('comment-body', message);
   core.setOutput('session-data-map', JSON.stringify(sessionDataMap));

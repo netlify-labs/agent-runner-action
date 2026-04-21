@@ -1,0 +1,12 @@
+{
+  "action": "opened",
+  "sender": { "login": "octocat" },
+  "repository": { "full_name": "netlify-labs/agent-runner-action-example" },
+  "issue": {
+    "number": 10,
+    "title": "Improve onboarding docs",
+    "body": "Can we make setup clearer?\n\n@netlify with codex add a quick-start section.",
+    "html_url": "https://github.com/netlify-labs/agent-runner-action-example/issues/10",
+    "author_association": "OWNER"
+  }
+}

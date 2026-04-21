@@ -1,0 +1,17 @@
+{
+  "action": "created",
+  "sender": { "login": "contributor" },
+  "repository": { "full_name": "netlify-labs/agent-runner-action-example" },
+  "issue": {
+    "number": 42,
+    "title": "CLI output formatting",
+    "body": "Needs better readability.",
+    "html_url": "https://github.com/netlify-labs/agent-runner-action-example/issues/42"
+  },
+  "comment": {
+    "id": 501,
+    "body": "@netlify claude tighten the bullet formatting",
+    "html_url": "https://github.com/netlify-labs/agent-runner-action-example/issues/42#issuecomment-501",
+    "author_association": "COLLABORATOR"
+  }
+}

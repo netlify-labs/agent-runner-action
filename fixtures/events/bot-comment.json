@@ -1,0 +1,17 @@
+{
+  "action": "created",
+  "sender": { "login": "github-actions[bot]" },
+  "repository": { "full_name": "netlify-labs/agent-runner-action-example" },
+  "issue": {
+    "number": 67,
+    "title": "Automation follow-up",
+    "body": "Bot update",
+    "html_url": "https://github.com/netlify-labs/agent-runner-action-example/issues/67"
+  },
+  "comment": {
+    "id": 503,
+    "body": "@netlify codex retry with latest changes",
+    "html_url": "https://github.com/netlify-labs/agent-runner-action-example/issues/67#issuecomment-503",
+    "author_association": "NONE"
+  }
+}

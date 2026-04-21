@@ -1,0 +1,5 @@
+{
+  "error": "Agent Runner gemini is not available",
+  "status": 422,
+  "code": "model_unavailable"
+}

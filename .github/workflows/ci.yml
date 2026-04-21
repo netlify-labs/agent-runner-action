@@ -3,9 +3,9 @@ name: CI
 on:
   push:
     branches: [master]
-    paths: ['src/**', 'action.yml', 'package.json', 'tsconfig.json']
+    paths: ['src/**', 'action.yml', 'package.json', 'tsconfig.json', 'README.md', 'docs/**', 'example-workflow.yml', 'workflow-templates/**']
   pull_request:
-    paths: ['src/**', 'action.yml', 'package.json', 'tsconfig.json']
+    paths: ['src/**', 'action.yml', 'package.json', 'tsconfig.json', 'README.md', 'docs/**', 'example-workflow.yml', 'workflow-templates/**']
 
 jobs:
   test:
@@ -15,4 +15,5 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install
       - run: bun test src/*.test.js
+      - run: bun run docs:check
       - run: bunx tsc --noEmit

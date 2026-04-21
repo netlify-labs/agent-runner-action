@@ -1,0 +1,19 @@
+{
+  "action": "opened",
+  "sender": { "login": "external-user" },
+  "repository": { "full_name": "netlify-labs/agent-runner-action-example" },
+  "pull_request": {
+    "number": 66,
+    "title": "Try action updates",
+    "body": "@netlify codex test this workflow",
+    "author_association": "NONE",
+    "head": {
+      "ref": "feature/from-fork",
+      "sha": "49bd9ca980b35f9209ecefaf88f13f0123abc999",
+      "repo": { "full_name": "external-user/agent-runner-action-example" }
+    },
+    "base": {
+      "ref": "main"
+    }
+  }
+}

@@ -116,8 +116,45 @@ Or comment `@netlify make it blue` on an existing PR.
 | `allowed-users` | No | `''` | Comma-separated usernames allowed to trigger (empty = repo collaborators) |
 | `default-model` | No | `codex` | Default AI model (`claude`, `codex`, or `gemini`) |
 | `manage-labels` | No | `false` | Auto-create and apply labels on agent runs |
+| `dry-run` | No | `false` | Run the agent but skip commit/PR creation |
+| `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent runner |
 | `timeout-minutes` | No | `10` | Max minutes to wait for agent completion |
+| `netlify-cli-version` | No | `24.8.1` | Netlify CLI version to install |
 | `debug` | No | `false` | Enable debug logging of API responses |
+| `timezone` | No | `America/Los_Angeles` | Timezone used for date/time rendering in comments |
+
+## Execution modes: `dry-run` vs `preflight-only`
+
+- `dry-run: 'true'` still starts a Netlify Agent run (external Netlify calls still happen), but it skips branch commits and pull request creation.
+- `preflight-only: 'true'` validates setup and permissions, then exits before creating/resuming any agent runner.
+- If both are set to `true`, `preflight-only` behavior wins and no agent is started.
+
+```yaml
+steps:
+  - uses: netlify-labs/agent-runner-action@v1
+    id: preflight
+    with:
+      netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
+      preflight-only: 'true' # setup validation only, no agent run
+
+  - uses: netlify-labs/agent-runner-action@v1
+    id: preview
+    with:
+      netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
+      dry-run: 'true' # agent runs, but no commits/PR creation
+```
+
+### Preflight troubleshooting
+
+If `preflight-only` fails, inspect `preflight-summary` and `preflight-json` outputs and check:
+
+- `netlify-auth-token` is present and valid
+- `netlify-site-id` matches a site your token can access
+- `default-model` is one of `claude`, `codex`, or `gemini`
+- `timeout-minutes` is a positive integer
+- workflow permissions include `contents: write`, `pull-requests: write`, and `issues: write`
 
 ## Outputs
 
@@ -134,21 +171,52 @@ Use these outputs in subsequent workflow steps for custom automation:
 | `trigger-text` | Cleaned trigger text / prompt |
 | `is-pr` | Whether triggered from a PR (`true`/`false`) |
 | `issue-number` | Issue or PR number |
+| `is-dry-run` | Whether the run used preview mode (`true`/`false`) |
+| `preflight-ok` | Whether preflight validation passed (`true`/`false`) |
+| `preflight-json` | Serialized preflight result payload (`ok`, `checks`, `warnings`, `failures`) |
+| `preflight-summary` | Human-readable summary of preflight status |
+| `should-continue` | Whether workflow execution should continue into agent runtime |
+| `failure-category` | Preflight/runtime failure taxonomy category when available |
+| `failure-stage` | Preflight/runtime failure stage when available |
+| `agent-error` | Sanitized runtime error summary emitted by agent orchestration |
 
 ### Using outputs
 
 ```yaml
 steps:
-  - uses: netlify/agent-runner@v1
+  - uses: netlify-labs/agent-runner-action@v1
     id: agent
     with:
       netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
+      # preflight-only: 'false' # Validate setup and stop before agent execution
 
   - name: Run tests on agent PR
     if: steps.agent.outputs.outcome == 'success' && steps.agent.outputs.agent-pr-url != ''
     run: echo "Agent created PR: ${{ steps.agent.outputs.agent-pr-url }}"
 ```
+
+## Maintainer simulator CLI
+
+Use the local simulator to preview action decisions from fixtures without GitHub Actions or live Netlify calls. The `simulate` package script wraps `src/simulate.js`.
+
+```bash
+# Human-readable run/skip decision for a fixture
+bun run simulate --fixture fixtures/events/issue-comment-on-pr.json
+
+# JSON for scripts and test debugging
+bun run simulate --fixture fixtures/events/workflow-dispatch.json --format json
+
+# Markdown for copying a scenario report into an issue or PR
+bun run simulate --fixture fixtures/events/issue-comment-on-pr.json --state-fixture /tmp/state.json --format markdown
+```
+
+Notes:
+- `--fixture` is required.
+- `--state-fixture` is optional and can inject prior status/PR state for runner recovery paths.
+- `--format` supports `human` (default), `json`, and `markdown`.
+- Each report includes the scenario name, run/skip decision, context, recovered state, and rendered comments.
+- Reconciliation warnings are included in simulator output under `Warnings`.
 
 ## What gets posted
 

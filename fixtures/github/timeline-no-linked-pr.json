@@ -1,0 +1,15 @@
+[
+  {
+    "event": "commented",
+    "actor": { "login": "maintainer" }
+  },
+  {
+    "event": "cross-referenced",
+    "source": {
+      "issue": {
+        "number": 200,
+        "title": "Related issue but not a PR"
+      }
+    }
+  }
+]

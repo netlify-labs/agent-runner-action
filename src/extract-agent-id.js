@@ -2,6 +2,8 @@
 // Sets outputs: agent-runner-id, session-data-map, agent-run-url, has-linked-pr, linked-pr-number
 
 /** @typedef {import('./types').ActionParams} ActionParams */
+const { RUNNER_ID_MARKER_PREFIX } = require('./comment-markers');
+const { reconcileAgentState } = require('./state-reconciliation');
 
 /**
  * @param {ActionParams & {inputs: {isPR: string, commentId: string, prNumber: string}}} params
@@ -11,38 +13,52 @@ module.exports = async function extractAgentId({ github, context, core, inputs }
   const isPR = inputs.isPR === 'true';
   const commentId = inputs.commentId;
   const prNumber = inputs.prNumber;
-  let body = '';
+  let statusCommentBody = '';
+  let prBody = '';
 
   // First try: status comment on this issue/PR
   if (commentId) {
     const comment = await github.rest.issues.getComment({
       owner: context.repo.owner, repo: context.repo.repo, comment_id: parseInt(commentId)
     });
-    body = comment.data.body;
+    statusCommentBody = comment.data.body || '';
   }
 
   // Fallback for PRs: check PR body
-  if (!body.includes('netlify-agent-runner-id') && isPR && prNumber) {
+  if (!statusCommentBody.includes(RUNNER_ID_MARKER_PREFIX) && isPR && prNumber) {
     const pr = await github.rest.pulls.get({
       owner: context.repo.owner, repo: context.repo.repo,
       pull_number: parseInt(prNumber)
     });
-    body = pr.data.body || '';
+    prBody = pr.data.body || '';
   }
 
-  const runnerMatch = body.match(/<!-- netlify-agent-runner-id:(\w+) -->/);
-  core.setOutput('agent-runner-id', runnerMatch ? runnerMatch[1] : '');
+  const reconciled = reconcileAgentState({
+    isPr: isPR,
+    statusCommentBody,
+    prBody,
+  });
 
-  const sessionMatch = body.match(/<!-- netlify-agent-session-data:(.*?) -->/);
-  core.setOutput('session-data-map', sessionMatch ? sessionMatch[1] : '{}');
+  if (reconciled.warnings.length > 0) {
+    console.log(
+      `State reconciliation warnings (confidence=${reconciled.confidence}, action=${reconciled.recoveryAction})`
+    );
+    for (const warning of reconciled.warnings) {
+      console.log(`- ${warning}`);
+    }
+  }
 
-  const urlMatch = body.match(/\[(?:View agent run|Netlify agent run)\]\((https:\/\/app\.netlify\.com\/projects\/[^)]+)\)/);
-  core.setOutput('agent-run-url', urlMatch ? urlMatch[1] : '');
+  core.setOutput('agent-runner-id', reconciled.runnerId);
+  core.setOutput('session-data-map', JSON.stringify(reconciled.sessionDataMap));
 
-  const prMatch = body.match(/(?:Changes in |📎 )(?:Pull Request #(\d+)|\[Pull Request\]\(https:\/\/github\.com\/[^)]+\/pull\/(\d+)\))/);
-  if (prMatch) {
+  // Preserve current behavior: prefer explicit URL links from comment/PR body.
+  const bodyForUrl = statusCommentBody || prBody;
+  const urlMatch = bodyForUrl.match(/\[(?:View agent run|Netlify agent run)\]\((https:\/\/app\.netlify\.com\/projects\/[^)]+)\)/);
+  core.setOutput('agent-run-url', urlMatch ? urlMatch[1] : reconciled.agentRunUrl);
+
+  if (reconciled.linkedPrNumber) {
     core.setOutput('has-linked-pr', 'true');
-    core.setOutput('linked-pr-number', prMatch[1] || prMatch[2]);
+    core.setOutput('linked-pr-number', reconciled.linkedPrNumber);
   } else {
     core.setOutput('has-linked-pr', 'false');
     core.setOutput('linked-pr-number', '');

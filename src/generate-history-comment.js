@@ -10,6 +10,7 @@
 
 const fs = require('fs');
 const utils = require('./utils');
+const { HISTORY_COMMENT_MARKER } = require('./comment-markers');
 
 /**
  * @param {{context: ActionContext, core: ActionCore}} params
@@ -89,6 +90,6 @@ module.exports = async function generateHistoryComment({ context, core }) {
     message += `---\n\n`;
   });
 
-  message += `<!-- netlify-agent-run-history -->`;
+  message += HISTORY_COMMENT_MARKER;
   core.setOutput('comment-body', message);
 };

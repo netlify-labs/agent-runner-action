@@ -1,0 +1,6 @@
+{
+  "id": "site_123",
+  "name": "agent-runner-action-example",
+  "account_slug": "netlify-labs",
+  "url": "https://agent-runner-action-example.netlify.app"
+}

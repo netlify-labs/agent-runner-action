@@ -42,6 +42,10 @@ inputs:
     description: 'Preview mode — run the agent but skip PR creation and commits'
     required: false
     default: 'false'
+  preflight-only:
+    description: 'Validate setup and exit without creating or resuming an agent run'
+    required: false
+    default: 'false'
   debug:
     description: 'Enable debug logging of Netlify API responses'
     required: false
@@ -85,6 +89,27 @@ outputs:
   is-dry-run:
     description: 'Whether this was a preview/dry-run (true/false)'
     value: ${{ steps.context-info.outputs.is-dry-run }}
+  preflight-ok:
+    description: 'Whether preflight checks passed'
+    value: ${{ steps.preflight.outputs.preflight-ok }}
+  preflight-json:
+    description: 'Serialized preflight result payload'
+    value: ${{ steps.preflight.outputs.preflight-json }}
+  preflight-summary:
+    description: 'Human-readable preflight summary'
+    value: ${{ steps.preflight.outputs.preflight-summary }}
+  should-continue:
+    description: 'Whether workflow should continue into agent execution'
+    value: ${{ steps.should-continue.outputs.should-continue || steps.preflight.outputs.should-continue }}
+  failure-category:
+    description: 'Failure category from preflight or runtime execution'
+    value: ${{ steps.netlify-agent.outputs.failure-category || steps.preflight.outputs.failure-category }}
+  failure-stage:
+    description: 'Failure stage from preflight or runtime execution'
+    value: ${{ steps.netlify-agent.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
+  agent-error:
+    description: 'Sanitized runtime agent error summary'
+    value: ${{ steps.netlify-agent.outputs.agent-error }}
 
 # ---------------------------------------------------------------------------
 # Composite action steps
@@ -166,28 +191,96 @@ runs:
           await run({ github, context, core });
 
     # -----------------------------------------------------------------------
-    # 4. Validate required secrets
+    # 4. Run preflight checks (static + practical runtime checks)
     # -----------------------------------------------------------------------
-    - name: Validate environment
+    - name: Run preflight checks
+      id: preflight
       if: steps.trigger-check.outputs.should-run == 'true'
-      shell: bash
+      uses: actions/github-script@v8
       env:
+        ACTION_DIR: ${{ github.action_path }}
         NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
         NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
-      run: |
-        MISSING=0
-        if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
-          echo "::error title=Missing netlify-auth-token::Add the netlify-auth-token input (from NETLIFY_AUTH_TOKEN secret). Create a token at https://app.netlify.com/user/applications#personal-access-tokens"
-          MISSING=1
-        fi
-        if [ -z "$NETLIFY_SITE_ID" ]; then
-          echo "::error title=Missing netlify-site-id::Add the netlify-site-id input (from NETLIFY_SITE_ID secret). Find your Site ID at Site configuration > General > Site ID in the Netlify dashboard."
-          MISSING=1
-        fi
-        if [ "$MISSING" -ne 0 ]; then
-          exit 1
-        fi
-        echo "✅ Environment validated"
+        GITHUB_TOKEN_INPUT: ${{ inputs.github-token }}
+        DEFAULT_MODEL: ${{ inputs.default-model }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+        TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
+        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+        PREFLIGHT_ONLY: ${{ inputs.preflight-only }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const { runPreflight } = require(`${process.env.ACTION_DIR}/src/preflight.js`);
+          const preflightOnly = (process.env.PREFLIGHT_ONLY || 'false').toLowerCase() === 'true';
+          const eventName = context.eventName;
+          const commentsRequired = eventName !== 'workflow_dispatch';
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+
+          const result = await runPreflight(
+            {
+              netlifyAuthToken: process.env.NETLIFY_AUTH_TOKEN,
+              netlifySiteId: process.env.NETLIFY_SITE_ID,
+              githubToken: process.env.GITHUB_TOKEN_INPUT,
+              defaultModel: process.env.DEFAULT_MODEL,
+              timeoutMinutes: process.env.TIMEOUT_MINUTES,
+              triggerText: process.env.TRIGGER_TEXT,
+              issueNumber: process.env.ISSUE_NUMBER,
+              eventName,
+              commentsRequired,
+            },
+            {
+              checkGithubRepoAccess: async () => {
+                await github.rest.repos.get({ owner, repo });
+                return { ok: true, message: 'GitHub repository access confirmed.' };
+              },
+              checkCommentPermission: async (input) => {
+                if (!input.commentsRequired) {
+                  return { status: 'warn', message: 'Comment permission check skipped for workflow_dispatch.' };
+                }
+                const sender = context.payload.sender && context.payload.sender.login;
+                if (!sender) {
+                  return { status: 'warn', message: 'Comment permission check skipped: no sender login.' };
+                }
+                try {
+                  const permission = await github.rest.repos.getCollaboratorPermissionLevel({
+                    owner,
+                    repo,
+                    username: sender,
+                  });
+                  return { ok: true, message: `Sender permission resolved: ${permission.data.permission}.` };
+                } catch (error) {
+                  return {
+                    ok: false,
+                    message: 'Unable to verify comment permission.',
+                    failure: {
+                      category: 'github-permission-denied',
+                      stage: 'comment-update',
+                      error: error instanceof Error ? error.message : String(error),
+                    },
+                  };
+                }
+              },
+            }
+          );
+
+          const preflightOk = result.ok === true;
+          const shouldContinue = preflightOk && !preflightOnly;
+          const firstFailureCategory = (result.failureDetails && result.failureDetails[0] && result.failureDetails[0].category) || '';
+          const firstFailureStage = (result.failureDetails && result.failureDetails[0] && result.failureDetails[0].stage) || '';
+          const failedChecks = result.checks.filter(check => check.status === 'fail').map(check => check.id);
+          const summary = preflightOk
+            ? (preflightOnly
+              ? 'Preflight passed. preflight-only=true, so the agent run will not start.'
+              : 'Preflight passed. Workflow may continue to agent execution.')
+            : `Preflight failed: ${failedChecks.join(', ') || 'unknown checks failed'}`;
+
+          core.setOutput('preflight-ok', preflightOk ? 'true' : 'false');
+          core.setOutput('preflight-json', JSON.stringify(result));
+          core.setOutput('preflight-summary', summary);
+          core.setOutput('failure-category', firstFailureCategory);
+          core.setOutput('failure-stage', firstFailureStage);
+          core.setOutput('should-continue', shouldContinue ? 'true' : 'false');
 
     # -----------------------------------------------------------------------
     # 5. Find or create the sticky status comment
@@ -230,13 +323,121 @@ runs:
           });
 
     # -----------------------------------------------------------------------
-    # 6. Exit early if issue already has a linked PR
+    # 6. Report preflight-only success/failure for issue/PR contexts
+    # -----------------------------------------------------------------------
+    - name: Post preflight status comment
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.preflight.outputs.should-continue != 'true'
+        && github.event_name != 'workflow_dispatch'
+        && steps.context-info.outputs.issue-number != ''
+      uses: actions/github-script@v8
+      id: preflight-comment
+      env:
+        PREFLIGHT_JSON: ${{ steps.preflight.outputs.preflight-json }}
+        PREFLIGHT_SUMMARY: ${{ steps.preflight.outputs.preflight-summary }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const preflightOnly = '${{ inputs.preflight-only }}' === 'true';
+          const preflightOk = '${{ steps.preflight.outputs.preflight-ok }}' === 'true';
+          const summary = process.env.PREFLIGHT_SUMMARY || '';
+          const existingCommentId = '${{ steps.find_comment.outputs.comment-id }}';
+          const issueNumber = parseInt('${{ steps.context-info.outputs.issue-number }}', 10);
+          const ghActionUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+
+          let result = {};
+          try {
+            result = JSON.parse(process.env.PREFLIGHT_JSON || '{}');
+          } catch (_) {
+            result = {};
+          }
+
+          const failedChecks = Array.isArray(result.checks)
+            ? result.checks.filter(check => check.status === 'fail')
+            : [];
+          const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+          const failureDetails = Array.isArray(result.failureDetails) ? result.failureDetails : [];
+
+          let body = preflightOk
+            ? '### Netlify Agent Runner preflight passed ✅\n\n'
+            : '### ❌ Netlify Agent Runner preflight failed\n\n';
+
+          if (preflightOk && preflightOnly) {
+            body += 'Configuration is valid, and `preflight-only=true` prevented agent creation for this run.\n\n';
+          } else if (preflightOk) {
+            body += 'Configuration is valid.\n\n';
+          } else {
+            body += `${summary}\n\n`;
+          }
+
+          if (failedChecks.length > 0) {
+            body += '**Failed checks:**\n';
+            for (const check of failedChecks) {
+              body += `- \`${check.id}\`: ${check.message}\n`;
+            }
+            body += '\n';
+          }
+
+          if (failureDetails.length > 0 && Array.isArray(failureDetails[0].remediation) && failureDetails[0].remediation.length > 0) {
+            body += '**Suggested next steps:**\n';
+            for (const remediation of failureDetails[0].remediation) {
+              body += `- ${remediation}\n`;
+            }
+            body += '\n';
+          }
+
+          if (warnings.length > 0) {
+            body += '**Warnings:**\n';
+            for (const warning of warnings) {
+              body += `- ${warning}\n`;
+            }
+            body += '\n';
+          }
+
+          body += `[GitHub Action logs](${ghActionUrl})\n\n<!-- netlify-agent-run-status -->`;
+
+          if (existingCommentId) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: parseInt(existingCommentId, 10),
+              body,
+            });
+            core.setOutput('comment-id', existingCommentId);
+          } else {
+            const { data: comment } = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body,
+            });
+            core.setOutput('comment-id', comment.id);
+          }
+
+    # -----------------------------------------------------------------------
+    # 7. Stop run on preflight failure
+    # -----------------------------------------------------------------------
+    - name: Fail on preflight failure
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.preflight.outputs.preflight-ok != 'true'
+      shell: bash
+      run: |
+        echo "::error title=Preflight failed::${{ steps.preflight.outputs.preflight-summary }}"
+        exit 1
+
+    # -----------------------------------------------------------------------
+    # 8. Exit early if issue already has a linked PR
     # -----------------------------------------------------------------------
     - name: Check linked PR
       id: should-continue
       if: steps.trigger-check.outputs.should-run == 'true'
       shell: bash
       run: |
+        PREFLIGHT_CONTINUE="${{ steps.preflight.outputs.should-continue }}"
+        if [[ "$PREFLIGHT_CONTINUE" != "true" ]]; then
+          echo "should-continue=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
         IS_PR="${{ steps.context-info.outputs.is-pr }}"
         HAS_LINKED_PR="${{ steps.extract-agent-id.outputs.has-linked-pr == 'true' && 'true' || steps.context-info.outputs.has-linked-pr }}"
         if [[ "$IS_PR" == "false" && "$HAS_LINKED_PR" == "true" ]]; then
@@ -255,7 +456,7 @@ runs:
           > This issue already has a linked pull request. Please add follow-up `@netlify` prompts on PR #${{ steps.extract-agent-id.outputs.linked-pr-number || steps.context-info.outputs.linked-pr-number }}${{ steps.extract-agent-id.outputs.agent-run-url && format(', or use the [Netlify Agents dashboard]({0})', steps.extract-agent-id.outputs.agent-run-url) || '' }}.
 
     # -----------------------------------------------------------------------
-    # 7. Create initial status comment
+    # 9. Create initial status comment
     # -----------------------------------------------------------------------
     - name: Create initial status comment
       if: >-
@@ -475,8 +676,31 @@ runs:
           fi
         }
 
+        sanitize_error() {
+          printf '%s' "${1:-}" \
+            | sed 's/\x1b\[[0-9;]*m//g' \
+            | tr '\r\n' '  ' \
+            | sed 's/[[:cntrl:]]//g; s/[[:space:]]\+/ /g; s/^ //; s/ $//'
+        }
+
+        emit_failure_context() {
+          local stage="$1"
+          local category="$2"
+          local message="${3:-}"
+          local clean_message
+          clean_message=$(sanitize_error "$message" | cut -c1-500)
+          echo "failure-stage=$stage" >> $GITHUB_OUTPUT
+          echo "failure-category=$category" >> $GITHUB_OUTPUT
+          echo "agent-error=$clean_message" >> $GITHUB_OUTPUT
+        }
+
         # Ensure netlify CLI is on PATH
         export PATH="$HOME/.bun/bin:$PATH"
+
+        # Default empty failure context for successful runs.
+        echo "failure-stage=" >> $GITHUB_OUTPUT
+        echo "failure-category=" >> $GITHUB_OUTPUT
+        echo "agent-error=" >> $GITHUB_OUTPUT
 
         echo "🚀 Starting Netlify Agent..."
         echo "Model: $AGENT_MODEL | Site: ${SITE_NAME:-unknown} | Dry-run: ${IS_DRY_RUN:-false}"
@@ -513,7 +737,7 @@ runs:
             echo "❌ Failed to create follow-up session after 3 attempts"
             echo "outcome=failure" >> $GITHUB_OUTPUT
             echo "agent-id=$EXISTING_RUNNER_ID" >> $GITHUB_OUTPUT
-            echo "agent-error=Failed to create follow-up session after 3 attempts" >> $GITHUB_OUTPUT
+            emit_failure_context "create-session" "session-create-failed" "Failed to create follow-up session after 3 attempts"
             exit 1
           fi
         else
@@ -532,7 +756,7 @@ runs:
             AGENT_ERR_MSG=$(cat "$AGENT_STDERR" | sed 's/\x1b\[[0-9;]*m//g' | grep -i "error" | head -1 | sed 's/^[[:space:]]*›[[:space:]]*//')
             echo "${AGENT_ERR_MSG:-$AGENT_OUTPUT}"
             echo "outcome=failure" >> $GITHUB_OUTPUT
-            echo "agent-error=${AGENT_ERR_MSG:-Failed to create agent task}" >> $GITHUB_OUTPUT
+            emit_failure_context "create-agent" "agent-create-failed" "${AGENT_ERR_MSG:-Failed to create agent task}"
             rm -f "$AGENT_STDERR"
             exit 1
           fi
@@ -644,7 +868,10 @@ runs:
                   MERGE_CREATING=$(echo "$COMMIT_CHECK" | jq -r '.merge_commit_is_being_created // false')
                   if [ "$MERGE_CREATING" = "false" ]; then
                     MERGE_ERROR=$(echo "$COMMIT_CHECK" | jq -r '.merge_commit_error // empty')
-                    [ -n "$MERGE_ERROR" ] && echo "⚠️ Commit error: $MERGE_ERROR"
+                    if [ -n "$MERGE_ERROR" ]; then
+                      echo "⚠️ Commit error: $MERGE_ERROR"
+                      emit_failure_context "commit" "commit-to-branch-failed" "$MERGE_ERROR"
+                    fi
                     break
                   fi
                   echo "  [${COMMIT_WAIT}/30s] Waiting for commit..."
@@ -696,6 +923,7 @@ runs:
                 if [ -z "$PR_URL" ]; then
                   echo "agent-pr-url=" >> $GITHUB_OUTPUT
                   echo "agent-pr-branch=" >> $GITHUB_OUTPUT
+                  emit_failure_context "create-pr" "pull-request-create-failed" "PR creation finished without a pull request URL"
                 fi
               else
                 echo "agent-pr-url=$(echo "$AGENT_RESULT" | jq -r '.pr_url // empty')" >> $GITHUB_OUTPUT
@@ -707,7 +935,7 @@ runs:
               echo "❌ Agent finished with state: $STATE"
               AGENT_ERROR_MSG=$(echo "$AGENT_RESULT" | jq -r '.error_message // empty' 2>/dev/null)
               echo "outcome=failure" >> $GITHUB_OUTPUT
-              echo "agent-error=${AGENT_ERROR_MSG:-Agent finished with state: $STATE}" >> $GITHUB_OUTPUT
+              emit_failure_context "poll-agent" "agent-failed" "${AGENT_ERROR_MSG:-Agent finished with state: $STATE}"
               exit 1
               ;;
           esac
@@ -723,7 +951,7 @@ runs:
 
         echo "❌ Agent timed out after ${MAX_WAIT}s (last state: ${STATE:-unknown})"
         echo "outcome=timeout" >> $GITHUB_OUTPUT
-        echo "agent-error=Agent timed out after ${MAX_WAIT}s (last state: ${STATE:-unknown})" >> $GITHUB_OUTPUT
+        emit_failure_context "poll-agent" "agent-timeout" "Agent timed out after ${MAX_WAIT}s (last state: ${STATE:-unknown})"
         exit 1
 
     # -----------------------------------------------------------------------
@@ -940,11 +1168,108 @@ runs:
             console.log(`Could not update reaction: ${e.message}`);
           }
 
+    - name: Write GitHub step summary
+      if: always() && steps.trigger-check.outputs.should-run == 'true'
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        OUTCOME: ${{ steps.netlify-agent.outputs.outcome }}
+        PREFLIGHT_OK: ${{ steps.preflight.outputs.preflight-ok }}
+        PREFLIGHT_JSON: ${{ steps.preflight.outputs.preflight-json }}
+        SHOULD_CONTINUE: ${{ steps.should-continue.outputs.should-continue || steps.preflight.outputs.should-continue }}
+        PREFLIGHT_ONLY: ${{ inputs.preflight-only }}
+        EVENT_NAME: ${{ github.event_name }}
+        IS_PR: ${{ steps.context-info.outputs.is-pr }}
+        ISSUE_NUM: ${{ steps.context-info.outputs.issue-number }}
+        CONTEXT_LABEL: ${{ steps.context-info.outputs.is-pr == 'true' && format('PR #{0}', steps.context-info.outputs.issue-number) || format('Issue #{0}', steps.context-info.outputs.issue-number) }}
+        MODEL: ${{ steps.context-info.outputs.model }}
+        IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
+        AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
+        AGENT_RUN_URL: ${{ steps.extract-agent-id.outputs.agent-run-url || format('https://app.netlify.com/projects/{0}/agent-runs/{1}', steps.resolve-site-name.outputs.site-name, steps.netlify-agent.outputs.agent-id) }}
+        AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
+        AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
+        TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+        FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.preflight.outputs.failure-category }}
+        FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
+        AGENT_ERROR: ${{ steps.netlify-agent.outputs.agent-error }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('node:fs');
+          const { renderStepSummary } = require(`${process.env.ACTION_DIR}/src/generate-step-summary.js`);
+
+          if (!process.env.GITHUB_STEP_SUMMARY) {
+            console.log('GITHUB_STEP_SUMMARY is unavailable; skipping summary write.');
+            return;
+          }
+
+          let preflight = null;
+          try {
+            preflight = JSON.parse(process.env.PREFLIGHT_JSON || 'null');
+          } catch (_) {
+            preflight = null;
+          }
+
+          const preflightOk = process.env.PREFLIGHT_OK === 'true';
+          const preflightOnly = process.env.PREFLIGHT_ONLY === 'true';
+          const shouldContinue = process.env.SHOULD_CONTINUE === 'true';
+          const rawOutcome = (process.env.OUTCOME || '').trim().toLowerCase();
+
+          let outcome = rawOutcome || 'unknown';
+          if (!rawOutcome) {
+            if (preflightOnly && preflightOk) {
+              outcome = 'success';
+            } else if (!preflightOk) {
+              outcome = 'failure';
+            } else if (!shouldContinue) {
+              outcome = 'skipped';
+            }
+          }
+
+          const failureCategory = (process.env.FAILURE_CATEGORY || '').trim();
+          const failureStage = (process.env.FAILURE_STAGE || '').trim();
+          const agentError = (process.env.AGENT_ERROR || '').trim();
+          const failure = (failureCategory || failureStage || agentError)
+            ? {
+                category: failureCategory,
+                stage: failureStage,
+                error: agentError,
+              }
+            : null;
+
+          const markdown = renderStepSummary({
+            outcome,
+            eventName: process.env.EVENT_NAME,
+            contextLabel: process.env.CONTEXT_LABEL,
+            model: process.env.MODEL,
+            isDryRun: process.env.IS_DRY_RUN,
+            isPreflightOnly: process.env.PREFLIGHT_ONLY,
+            issueNumber: process.env.ISSUE_NUM,
+            runnerId: process.env.AGENT_ID,
+            siteName: process.env.SITE_NAME,
+            dashboardUrl: process.env.AGENT_RUN_URL,
+            deployUrl: process.env.AGENT_DEPLOY_URL,
+            pullRequestUrl: process.env.AGENT_PR_URL,
+            prompt: process.env.TRIGGER_TEXT,
+            timeoutMinutes: process.env.TIMEOUT_MINUTES,
+            failure,
+            preflight,
+          });
+
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`, 'utf8');
+
     - name: Execution summary
       if: always() && steps.trigger-check.outputs.should-run == 'true'
       shell: bash
       env:
         OUTCOME: ${{ steps.netlify-agent.outputs.outcome }}
+        PREFLIGHT_OK: ${{ steps.preflight.outputs.preflight-ok }}
+        PREFLIGHT_SUMMARY: ${{ steps.preflight.outputs.preflight-summary }}
+        PREFLIGHT_ONLY: ${{ inputs.preflight-only }}
+        SHOULD_CONTINUE: ${{ steps.should-continue.outputs.should-continue || steps.preflight.outputs.should-continue }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         ISSUE_NUM: ${{ steps.context-info.outputs.issue-number }}
         MODEL: ${{ steps.context-info.outputs.model }}
@@ -957,4 +1282,8 @@ runs:
         echo "Model: $MODEL"
         echo "Project: ${FRAMEWORK:-Unknown}"
         echo "Dry-run: ${IS_DRY_RUN:-false}"
+        echo "Preflight-only input: ${PREFLIGHT_ONLY:-false}"
+        echo "Preflight ok: ${PREFLIGHT_OK:-unknown}"
+        echo "Should continue: ${SHOULD_CONTINUE:-unknown}"
+        [ -n "${PREFLIGHT_SUMMARY:-}" ] && echo "Preflight summary: ${PREFLIGHT_SUMMARY}"
         echo "=============================="
