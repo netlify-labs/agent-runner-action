@@ -21,6 +21,12 @@ describe('programmatic canary workflow', () => {
     assert.match(workflow, /Missing CANARY_REPO_TOKEN secret/);
   });
 
+  it('supports a manual simulated failure path', () => {
+    assert.match(workflow, /simulate_failure:/);
+    assert.match(workflow, /SIMULATE_FAILURE: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.simulate_failure \|\| 'false' \}\}/);
+    assert.match(workflow, /Simulated canary failure requested after successful downstream verification/);
+  });
+
   it('updates the canary workflow pin before creating a test issue', () => {
     assert.match(workflow, /netlify-labs\/agent-runner-action@/);
     assert.match(workflow, /PR_ACTION_REF: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| '' \}\}/);

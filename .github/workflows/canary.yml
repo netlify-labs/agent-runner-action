@@ -36,6 +36,11 @@ on:
         description: 'Optional @netlify prompt. Defaults to a minimal README canary marker edit.'
         required: false
         type: string
+      simulate_failure:
+        description: 'If true, fail the controller after downstream canary verification.'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -58,6 +63,7 @@ jobs:
       CANARY_WORKFLOW_NAME: ${{ inputs.canary_workflow_name }}
       TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
       REQUESTED_PROMPT: ${{ inputs.prompt }}
+      SIMULATE_FAILURE: ${{ github.event_name == 'workflow_dispatch' && inputs.simulate_failure || 'false' }}
     steps:
       - name: Check inputs
         run: |
@@ -91,6 +97,7 @@ jobs:
 
           echo "action-ref=${ACTION_REF}" >> "$GITHUB_OUTPUT"
           echo "marker=${RUN_MARKER}" >> "$GITHUB_OUTPUT"
+          echo "simulated-failure=${SIMULATE_FAILURE}" >> "$GITHUB_OUTPUT"
 
           WORKDIR="${RUNNER_TEMP}/agent-runner-action-canary"
           rm -rf "$WORKDIR"
@@ -225,6 +232,11 @@ jobs:
 
           echo "Canary PR verified: ${PR_URL}"
 
+          if [ "$SIMULATE_FAILURE" = "true" ]; then
+            echo "::error::Simulated canary failure requested after successful downstream verification."
+            exit 1
+          fi
+
       - name: Write summary
         if: always()
         env:
@@ -234,6 +246,7 @@ jobs:
           RUN_URL: ${{ steps.canary.outputs.run-url }}
           RUN_CONCLUSION: ${{ steps.canary.outputs.run-conclusion }}
           PR_URL: ${{ steps.canary.outputs.pr-url }}
+          SIMULATED_FAILURE: ${{ steps.canary.outputs.simulated-failure }}
         run: |
           {
             echo "## Agent Runner Canary"
@@ -246,4 +259,5 @@ jobs:
             echo "| Run | ${RUN_URL:-not-set} |"
             echo "| Run conclusion | \`${RUN_CONCLUSION:-not-set}\` |"
             echo "| Pull request | ${PR_URL:-not-set} |"
+            echo "| Simulated failure | \`${SIMULATED_FAILURE:-false}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
