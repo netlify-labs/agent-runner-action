@@ -1,0 +1,239 @@
+name: Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      action_ref:
+        description: 'agent-runner-action ref/SHA to pin in the canary repo. Defaults to this workflow run SHA.'
+        required: false
+        type: string
+      canary_repo:
+        description: 'Canary repository to update and test.'
+        required: false
+        type: string
+        default: 'netlify-labs/agent-runner-action-canary'
+      canary_workflow_path:
+        description: 'Path to the canary agent workflow file.'
+        required: false
+        type: string
+        default: '.github/workflows/netlify-agents.yml'
+      canary_workflow_name:
+        description: 'Workflow file name used by gh run list.'
+        required: false
+        type: string
+        default: 'netlify-agents.yml'
+      timeout_minutes:
+        description: 'Maximum time to wait for the canary issue run.'
+        required: false
+        type: string
+        default: '20'
+      prompt:
+        description: 'Optional @netlify prompt. Defaults to a minimal docs/index.html canary edit.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: Run canary issue flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.CANARY_REPO_TOKEN }}
+      REQUESTED_ACTION_REF: ${{ inputs.action_ref }}
+      CANARY_REPO: ${{ inputs.canary_repo }}
+      CANARY_WORKFLOW_PATH: ${{ inputs.canary_workflow_path }}
+      CANARY_WORKFLOW_NAME: ${{ inputs.canary_workflow_name }}
+      TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+      REQUESTED_PROMPT: ${{ inputs.prompt }}
+    steps:
+      - name: Check inputs
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::Missing CANARY_REPO_TOKEN secret. Add a token that can write contents, create issues, and read actions/PRs in ${CANARY_REPO}."
+            exit 1
+          fi
+
+          if ! [[ "${TIMEOUT_MINUTES}" =~ ^[0-9]+$ ]]; then
+            echo "::error::timeout_minutes must be an integer."
+            exit 1
+          fi
+
+      - name: Pin canary workflow and create test issue
+        id: canary
+        run: |
+          set -euo pipefail
+
+          ACTION_REF="${REQUESTED_ACTION_REF:-$GITHUB_SHA}"
+          RUN_MARKER="canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ISSUE_TITLE="Agent runner canary smoke test ${RUN_MARKER}"
+          DEFAULT_PROMPT="@netlify codex update docs/index.html to add a short visible canary verification sentence: \"Agent Runner canary ${RUN_MARKER}.\" Keep the change minimal."
+          PROMPT="${REQUESTED_PROMPT:-$DEFAULT_PROMPT}"
+          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          START_SECONDS=$SECONDS
+
+          echo "action-ref=${ACTION_REF}" >> "$GITHUB_OUTPUT"
+          echo "marker=${RUN_MARKER}" >> "$GITHUB_OUTPUT"
+
+          WORKDIR="${RUNNER_TEMP}/agent-runner-action-canary"
+          rm -rf "$WORKDIR"
+
+          gh repo clone "$CANARY_REPO" "$WORKDIR" -- --depth 1
+          cd "$WORKDIR"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ ! -f "$CANARY_WORKFLOW_PATH" ]; then
+            echo "::error::Canary workflow file not found: ${CANARY_WORKFLOW_PATH}"
+            exit 1
+          fi
+
+          ACTION_REF="$ACTION_REF" perl -0pi -e \
+            's#netlify-labs/agent-runner-action@[A-Za-z0-9._/-]+#"netlify-labs/agent-runner-action@".$ENV{ACTION_REF}#ge' \
+            "$CANARY_WORKFLOW_PATH"
+
+          if git diff --quiet -- "$CANARY_WORKFLOW_PATH"; then
+            echo "Canary workflow already pinned to ${ACTION_REF}."
+          else
+            git add "$CANARY_WORKFLOW_PATH"
+            git commit -m "chore: pin agent runner canary to ${ACTION_REF}"
+            git push origin HEAD:main
+          fi
+
+          ISSUE_BODY=$(cat <<EOF
+          ${PROMPT}
+
+          Canary metadata:
+          - source_repo: ${GITHUB_REPOSITORY}
+          - source_sha: ${GITHUB_SHA}
+          - action_ref: ${ACTION_REF}
+          - marker: ${RUN_MARKER}
+          EOF
+          )
+
+          ISSUE_URL=$(gh issue create \
+            --repo "$CANARY_REPO" \
+            --title "$ISSUE_TITLE" \
+            --body "$ISSUE_BODY")
+          ISSUE_NUMBER="${ISSUE_URL##*/}"
+
+          echo "issue-url=${ISSUE_URL}" >> "$GITHUB_OUTPUT"
+          echo "issue-number=${ISSUE_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "Created canary issue ${ISSUE_URL}"
+
+          RUN_ID=""
+          while [ -z "$RUN_ID" ]; do
+            if [ $((SECONDS - START_SECONDS)) -gt "$TIMEOUT_SECONDS" ]; then
+              echo "::error::Timed out waiting for canary workflow run to start."
+              exit 1
+            fi
+
+            RUN_ID=$(gh run list \
+              --repo "$CANARY_REPO" \
+              --workflow "$CANARY_WORKFLOW_NAME" \
+              --event issues \
+              --limit 20 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle == \"${ISSUE_TITLE}\") | .databaseId" \
+              | head -n 1)
+
+            if [ -z "$RUN_ID" ]; then
+              sleep 10
+            fi
+          done
+
+          RUN_URL="https://github.com/${CANARY_REPO}/actions/runs/${RUN_ID}"
+          echo "run-id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "run-url=${RUN_URL}" >> "$GITHUB_OUTPUT"
+          echo "Canary workflow run: ${RUN_URL}"
+
+          STATUS=""
+          CONCLUSION=""
+          while true; do
+            if [ $((SECONDS - START_SECONDS)) -gt "$TIMEOUT_SECONDS" ]; then
+              echo "::error::Timed out waiting for canary workflow run ${RUN_ID} to complete."
+              exit 1
+            fi
+
+            STATUS=$(gh run view "$RUN_ID" \
+              --repo "$CANARY_REPO" \
+              --json status \
+              --jq '.status')
+
+            if [ "$STATUS" = "completed" ]; then
+              CONCLUSION=$(gh run view "$RUN_ID" \
+                --repo "$CANARY_REPO" \
+                --json conclusion \
+                --jq '.conclusion')
+              break
+            fi
+
+            echo "Canary run ${RUN_ID} status: ${STATUS}"
+            sleep 20
+          done
+
+          echo "run-conclusion=${CONCLUSION}" >> "$GITHUB_OUTPUT"
+          echo "Canary run ${RUN_ID} concluded: ${CONCLUSION}"
+
+          COMMENTS=$(gh issue view "$ISSUE_NUMBER" \
+            --repo "$CANARY_REPO" \
+            --json comments \
+            --jq '[.comments[].body] | join("\n")')
+
+          PR_NUMBER=$(printf '%s\n' "$COMMENTS" | perl -ne 'if (/Pull Request.*?#([0-9]+)/i) { print "$1\n"; exit } if (/pull\/([0-9]+)/) { print "$1\n"; exit }')
+
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "::group::Canary failed logs"
+            gh run view "$RUN_ID" --repo "$CANARY_REPO" --log-failed || true
+            echo "::endgroup::"
+            echo "::error::Canary workflow concluded ${CONCLUSION}."
+            exit 1
+          fi
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::error::Canary workflow succeeded but no pull request was found from issue comments."
+            exit 1
+          fi
+
+          PR_URL="https://github.com/${CANARY_REPO}/pull/${PR_NUMBER}"
+          echo "pr-number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "pr-url=${PR_URL}" >> "$GITHUB_OUTPUT"
+
+          if ! gh pr diff "$PR_NUMBER" --repo "$CANARY_REPO" | grep -F "$RUN_MARKER" >/dev/null; then
+            echo "::error::Canary PR ${PR_URL} did not contain marker ${RUN_MARKER} in the diff."
+            exit 1
+          fi
+
+          echo "Canary PR verified: ${PR_URL}"
+
+      - name: Write summary
+        if: always()
+        env:
+          ACTION_REF: ${{ steps.canary.outputs.action-ref }}
+          MARKER: ${{ steps.canary.outputs.marker }}
+          ISSUE_URL: ${{ steps.canary.outputs.issue-url }}
+          RUN_URL: ${{ steps.canary.outputs.run-url }}
+          RUN_CONCLUSION: ${{ steps.canary.outputs.run-conclusion }}
+          PR_URL: ${{ steps.canary.outputs.pr-url }}
+        run: |
+          {
+            echo "## Agent Runner Canary"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Action ref | \`${ACTION_REF:-not-set}\` |"
+            echo "| Marker | \`${MARKER:-not-set}\` |"
+            echo "| Issue | ${ISSUE_URL:-not-set} |"
+            echo "| Run | ${RUN_URL:-not-set} |"
+            echo "| Run conclusion | \`${RUN_CONCLUSION:-not-set}\` |"
+            echo "| Pull request | ${PR_URL:-not-set} |"
+          } >> "$GITHUB_STEP_SUMMARY"
