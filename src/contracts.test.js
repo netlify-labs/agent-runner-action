@@ -23,6 +23,7 @@ describe('contracts category/stage/severity lists', () => {
       'site-lookup-failed',
       'netlify-cli-missing',
       'netlify-cli-install-failed',
+      'agent-unavailable',
       'model-unavailable',
       'agent-create-failed',
       'session-create-failed',
@@ -55,7 +56,7 @@ describe('createFailureClassification', () => {
   it('returns stable defaults', () => {
     const result = contracts.createFailureClassification();
     assert.equal(result.category, 'unknown');
-    assert.equal(result.title, 'Netlify Agent Runner failed');
+    assert.equal(result.title, 'Netlify Agent Runners run failed');
     assert.equal(result.summary, 'The run failed before completion.');
     assert.deepEqual(result.remediation, []);
     assert.equal(result.severity, 'error');

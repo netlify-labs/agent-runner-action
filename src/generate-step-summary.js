@@ -146,12 +146,16 @@ function normalizeStepSummaryInput(source = {}) {
   const issueNumber = toText(
     source.issueNumber || source.issue || source.ISSUE_NUM || source.ISSUE_NUMBER
   ).trim();
+  const selectedAgent = toText(
+    source.agent || source.AGENT || source.NETLIFY_AGENT || source.model || source.MODEL
+  ).trim() || 'codex';
 
   return createStepSummaryInput({
     outcome,
     eventName,
     contextLabel: inferContextLabel(source),
-    model: toText(source.model || source.MODEL).trim() || 'codex',
+    agent: selectedAgent,
+    model: selectedAgent,
     isDryRun: toBool(source.isDryRun || source.IS_DRY_RUN),
     isPreflightOnly: toBool(source.isPreflightOnly || source.IS_PREFLIGHT_ONLY),
     issueNumber,
@@ -202,13 +206,13 @@ function renderTableSection(title, rows) {
 function renderStepSummary(source = {}) {
   const normalized = normalizeStepSummaryInput(source);
   const timeoutMinutes = toInt(source.timeoutMinutes || source.TIMEOUT_MINUTES);
-  let markdown = '# Netlify Agent Runner\n\n';
+  let markdown = '# Netlify Agent Runners\n\n';
 
   markdown += renderTableSection('Run Overview', [
     ['Outcome', normalized.outcome || 'unknown'],
     ['Event', normalized.eventName || 'unknown'],
     ['Context', normalized.contextLabel || 'n/a'],
-    ['Model', normalized.model || 'codex'],
+    ['Agent', normalized.agent || normalized.model || 'codex'],
     ['Dry-run', normalized.isDryRun ? 'true' : 'false'],
     ['Preflight-only', normalized.isPreflightOnly ? 'true' : 'false'],
   ]);
@@ -234,7 +238,7 @@ function renderStepSummary(source = {}) {
   }
 
   if (normalized.isPreflightOnly) {
-    markdown += '> Preflight-only mode: configuration was validated without starting a Netlify agent run.\n\n';
+    markdown += '> Preflight-only mode: configuration was validated without starting an agent run.\n\n';
   }
 
   if (normalized.outcome === 'timeout') {

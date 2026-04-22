@@ -7,7 +7,7 @@ const {
 } = require('./generate-step-summary');
 
 describe('renderStepSummary', () => {
-  it('renders success run overview, model, runner, and links', () => {
+  it('renders success run overview, agent, runner, and links', () => {
     const markdown = renderStepSummary({
       outcome: 'success',
       eventName: 'issue_comment',
@@ -24,7 +24,7 @@ describe('renderStepSummary', () => {
 
     assert.ok(markdown.includes('| Outcome | success |'));
     assert.ok(markdown.includes('| Context | PR #42 |'));
-    assert.ok(markdown.includes('| Model | codex |'));
+    assert.ok(markdown.includes('| Agent | codex |'));
     assert.ok(markdown.includes('runner-123'));
     assert.ok(markdown.includes('[Open deploy](https://example-site.netlify.app)'));
     assert.ok(markdown.includes('[Open PR](https://github.com/o/r/pull/9)'));
@@ -80,7 +80,7 @@ describe('renderStepSummary', () => {
       },
     });
 
-    assert.ok(markdown.includes('Preflight-only mode: configuration was validated without starting a Netlify agent run.'));
+    assert.ok(markdown.includes('Preflight-only mode: configuration was validated without starting an agent run.'));
     assert.ok(markdown.includes('## Preflight Checks'));
     assert.ok(markdown.includes('| netlify-auth-token | pass | Token input is present |'));
     assert.ok(markdown.includes('| netlify-site-id | pass | Site ID input is present |'));
@@ -111,7 +111,8 @@ describe('normalizeStepSummaryInput', () => {
       GITHUB_EVENT_NAME: 'issue_comment',
       IS_PR: 'true',
       ISSUE_NUM: '55',
-      MODEL: 'claude',
+      AGENT: 'claude',
+      MODEL: 'legacy-codex',
       AGENT_ID: 'abc123',
       SITE_NAME: 'my-site',
       AGENT_RUN_URL: 'https://app.netlify.com/projects/my-site/agent-runs/abc123',

@@ -1,15 +1,15 @@
-# Netlify Agent Runner
+# Netlify Agent Runners
 
 > [!NOTE]
 > The action is currently in beta, under active development
 
-A GitHub Action that lets you trigger [Netlify Agents](https://www.netlify.com/products/agents/) directly from GitHub issues and pull requests using `@netlify` mentions.
+A GitHub Action that starts [Netlify Agent Runners](https://www.netlify.com/products/agents/) agent runs directly from GitHub issues and pull requests using `@netlify` mentions.
 
 ## How it works
 
 1. Create an issue or comment on a PR with `@netlify` followed by your prompt
 2. The action picks up the trigger, adds a 👀 reaction, and creates an in-progress status comment
-3. Netlify Agents builds or modifies your site based on the prompt
+3. Netlify Agent Runners creates an agent run to build or modify your site based on the prompt
 4. On completion, the status comment is updated with a screenshot, deploy preview link, and result summary
 5. If triggered from an issue, a PR is automatically created with the changes
 
@@ -22,7 +22,7 @@ A GitHub Action that lets you trigger [Netlify Agents](https://www.netlify.com/p
 @netlify gemini Add a testimonials section
 ```
 
-The default model is `codex`. Specify `claude`, `codex`, or `gemini` after `@netlify` to choose a model.
+The default agent is `codex`. Specify `claude`, `codex`, or `gemini` after `@netlify` to choose an agent.
 
 ## Quick start
 
@@ -46,13 +46,13 @@ Go to **Settings > Secrets and variables > Actions** and add:
 Create `.github/workflows/netlify-agents.yml` in your repository:
 
 ```yaml
-name: Netlify Agents
+name: Netlify Agent Runners
 
 on:
   workflow_dispatch:
     inputs:
       trigger_text:
-        description: 'Prompt for the Netlify Agent'
+        description: 'Prompt for the agent run'
         required: true
         type: string
         default: '@netlify'
@@ -60,8 +60,8 @@ on:
         description: 'Actor triggering the agent'
         required: true
         type: string
-      model:
-        description: 'Model to use (claude, codex, gemini)'
+      agent:
+        description: 'Agent to use (claude, codex, gemini)'
         required: false
         type: string
         default: 'codex'
@@ -114,10 +114,11 @@ Or comment `@netlify make it blue` on an existing PR.
 | `netlify-site-id` | Yes | — | Netlify site ID |
 | `github-token` | No | `github.token` | GitHub token for API calls |
 | `allowed-users` | No | `''` | Comma-separated usernames allowed to trigger (empty = repo collaborators) |
-| `default-model` | No | `codex` | Default AI model (`claude`, `codex`, or `gemini`) |
+| `default-agent` | No | `codex` | Default agent (`claude`, `codex`, or `gemini`) |
+| `default-model` | No | `codex` | Backward-compatible alias for `default-agent` |
 | `manage-labels` | No | `false` | Auto-create and apply labels on agent runs |
-| `dry-run` | No | `false` | Run the agent but skip commit/PR creation |
-| `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent runner |
+| `dry-run` | No | `false` | Start an agent run but skip commit/PR creation |
+| `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent run |
 | `timeout-minutes` | No | `10` | Max minutes to wait for agent completion |
 | `netlify-cli-version` | No | `24.8.1` | Netlify CLI version to install |
 | `debug` | No | `false` | Enable debug logging of API responses |
@@ -125,8 +126,8 @@ Or comment `@netlify make it blue` on an existing PR.
 
 ## Execution modes: `dry-run` vs `preflight-only`
 
-- `dry-run: 'true'` still starts a Netlify Agent run (external Netlify calls still happen), but it skips branch commits and pull request creation.
-- `preflight-only: 'true'` validates setup and permissions, then exits before creating/resuming any agent runner.
+- `dry-run: 'true'` still starts an agent run (external Netlify calls still happen), but it skips branch commits and pull request creation.
+- `preflight-only: 'true'` validates setup and permissions, then exits before creating/resuming any agent run.
 - If both are set to `true`, `preflight-only` behavior wins and no agent is started.
 
 ```yaml
@@ -152,7 +153,8 @@ If `preflight-only` fails, inspect `preflight-summary` and `preflight-json` outp
 
 - `netlify-auth-token` is present and valid
 - `netlify-site-id` matches a site your token can access
-- `default-model` is one of `claude`, `codex`, or `gemini`
+- `default-agent` selects one of the supported agents: `claude`, `codex`, or `gemini`
+- `default-model` remains supported as a backward-compatible alias
 - `timeout-minutes` is a positive integer
 - workflow permissions include `contents: write`, `pull-requests: write`, and `issues: write`
 
@@ -162,12 +164,13 @@ Use these outputs in subsequent workflow steps for custom automation:
 
 | Output | Description |
 |---|---|
-| `agent-id` | Netlify agent runner ID |
+| `agent-id` | Agent run ID |
 | `outcome` | `success`, `failure`, or `timeout` |
 | `agent-result` | Agent result summary text |
 | `agent-pr-url` | Pull request URL (if created) |
 | `agent-deploy-url` | Deploy preview URL |
-| `model` | AI model that was used |
+| `agent` | Agent that was used |
+| `model` | Backward-compatible alias for `agent` |
 | `trigger-text` | Cleaned trigger text / prompt |
 | `is-pr` | Whether triggered from a PR (`true`/`false`) |
 | `issue-number` | Issue or PR number |
@@ -218,6 +221,18 @@ Notes:
 - Each report includes the scenario name, run/skip decision, context, recovered state, and rendered comments.
 - Reconciliation warnings are included in simulator output under `Warnings`.
 
+## Maintainer local CI with act
+
+Use [`act`](https://github.com/nektos/act) to run the GitHub Actions CI workflow locally before pushing.
+
+```bash
+bun run act:list
+bun run act:ci
+bun run act:ci:pr
+```
+
+The repo includes `.actrc` plus push and pull request payloads under `.act/`. Normal `act` runs require Docker. On macOS, start Docker Desktop first. If Docker is unavailable, `bun run act:ci:host` runs the same job on the host machine as a faster smoke check, but it is less representative than the container-backed runner.
+
 ## What gets posted
 
 - **Status comment** — current run result with screenshot, deploy preview, and links
@@ -230,7 +245,7 @@ After the first run creates a PR, add follow-up `@netlify` comments on the PR. T
 
 ## Security
 
-- Only repository collaborators, members, and owners can trigger the agent
+- Only repository collaborators, members, and owners can trigger agent runs
 - Bot accounts (`github-actions[bot]`, `netlify-coding[bot]`) are excluded
 - Concurrency control ensures one run per issue/PR at a time
 - The `allowed-users` input can further restrict access to specific users

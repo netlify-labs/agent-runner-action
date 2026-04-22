@@ -217,6 +217,7 @@ describe('action.yml wiring', () => {
       'netlify-auth-token',
       'netlify-site-id',
       'github-token',
+      'default-agent',
       'default-model',
       'timeout-minutes',
       'debug',
@@ -233,6 +234,7 @@ describe('action.yml wiring', () => {
     const expected = [
       'agent-id',
       'outcome',
+      'agent',
       'model',
       'trigger-text',
       'is-pr',

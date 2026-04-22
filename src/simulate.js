@@ -52,6 +52,7 @@ const { loadFixtureJson, runScenario } = require('./scenario-harness');
  * @property {Outcome} outcome
  * @property {boolean} shouldRun
  * @property {SimulationContext} context
+ * @property {string} agent
  * @property {string} model
  * @property {string} prompt
  * @property {Record<string, unknown>} recoveredState
@@ -477,7 +478,8 @@ function buildReport(trace, meta) {
     outcome: meta.outcome,
     shouldRun,
     context,
-    model: toText(outputs.model),
+    agent: toText(outputs.agent || outputs.model),
+    model: toText(outputs.model || outputs.agent),
     prompt: toText(outputs['trigger-text']),
     recoveredState: { ...reconciled },
     warnings: Array.isArray(trace.warnings) ? trace.warnings.map(toText) : [],
@@ -515,7 +517,7 @@ function renderHumanReport(report) {
   lines.push(`Decision: ${report.decision}`);
   lines.push(`Should run: ${report.shouldRun ? 'true' : 'false'}`);
   lines.push(`Outcome: ${report.outcome}`);
-  lines.push(`Model: ${report.model || 'n/a'}`);
+  lines.push(`Agent: ${report.agent || report.model || 'n/a'}`);
   lines.push('');
 
   lines.push('Prompt:');
@@ -586,7 +588,7 @@ function renderMarkdownReport(report) {
   lines.push(`| Decision | \`${report.decision}\` |`);
   lines.push(`| Should run | ${report.shouldRun ? 'true' : 'false'} |`);
   lines.push(`| Outcome | \`${report.outcome}\` |`);
-  lines.push(`| Model | \`${report.model || 'n/a'}\` |`);
+  lines.push(`| Agent | \`${report.agent || report.model || 'n/a'}\` |`);
   lines.push('');
   lines.push('## Prompt');
   lines.push('');

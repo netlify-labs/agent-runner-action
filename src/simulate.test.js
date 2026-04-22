@@ -75,7 +75,7 @@ describe('simulate CLI', () => {
       assert.equal(result.report.context.prNumber, '58');
       assert.equal(result.report.recoveredState.runnerId, 'runner-state-123');
       assert.equal(result.report.recoveredState.recoveryAction, 'resume-runner');
-      assert.ok(result.report.summary.includes('# Netlify Agent Runner'));
+      assert.ok(result.report.summary.includes('# Netlify Agent Runners'));
       assert.ok(result.report.comments.length > 0);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });

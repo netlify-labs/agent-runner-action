@@ -1,4 +1,4 @@
-name: Netlify Agents
+name: Netlify Agent Runners
 
 on:
   workflow_dispatch:
@@ -12,8 +12,8 @@ on:
         description: 'GitHub username to attribute this run to'
         required: true
         type: string
-      model:
-        description: 'AI model to use'
+      agent:
+        description: 'Agent to use'
         required: false
         type: choice
         options:
@@ -57,10 +57,10 @@ jobs:
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
           # Optional settings:
-          # default-model: 'codex'        # Default AI model (claude, codex, gemini)
+          # default-agent: 'codex'        # Default agent (claude, codex, gemini)
           # manage-labels: 'false'        # Auto-create and apply labels
-          # dry-run: 'false'              # Still runs Netlify Agent; skips commit/PR creation
-          # preflight-only: 'false'       # Validate setup only; starts no agent runner
+          # dry-run: 'false'              # Still starts an agent run; skips commit/PR creation
+          # preflight-only: 'false'       # Validate setup only; starts no agent run
           # If both are true, preflight-only behavior wins.
           # preflight-only: 'true'        # Example: verify config/permissions and exit
           # dry-run: 'true'               # Example: run preview without committing changes

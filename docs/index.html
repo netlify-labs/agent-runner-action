@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Netlify Agent Runner - GitHub Action</title>
+  <title>Netlify Agent Runners - GitHub Action</title>
   <style>
     :root {
       --teal: #00AD9F;
@@ -145,8 +145,8 @@
 <body>
 
 <div class="hero">
-  <h1>Netlify <span>Agent Runner</span></h1>
-  <p>Trigger Netlify Agents from GitHub issues and pull requests. Just mention <code>@netlify</code> and the agent builds your site.</p>
+  <h1>Netlify <span>Agent Runners</span></h1>
+  <p>Start Netlify Agent Runners agent runs from GitHub issues and pull requests. Just mention <code>@netlify</code> and the selected agent builds your site.</p>
   <div class="hero-code">
     <span class="key">- uses:</span> <span class="val">netlify-labs/agent-runner-action@v1</span><br>
     <span class="key">&nbsp; with:</span><br>
@@ -199,13 +199,13 @@
     <span class="step-number">4</span>
     <h3>Add the workflow</h3>
     <p>Create <code>.github/workflows/netlify-agents.yml</code>:</p>
-    <pre><code>name: Netlify Agents
+    <pre><code>name: Netlify Agent Runners
 
 on:
   workflow_dispatch:
     inputs:
       trigger_text:
-        description: 'Prompt for the Netlify Agent'
+        description: 'Prompt for the agent run'
         required: true
         type: string
         default: '@netlify'
@@ -213,8 +213,8 @@ on:
         description: 'Actor triggering the agent'
         required: true
         type: string
-      model:
-        description: 'Model to use (claude, codex, gemini)'
+      agent:
+        description: 'Agent to use (claude, codex, gemini)'
         required: false
         type: string
         default: 'codex'
@@ -264,12 +264,12 @@ jobs:
   <p>Create an issue with <code>@netlify</code> in the body:</p>
   <pre><code>@netlify Build a landing page for a coffee shop with a menu and contact form</code></pre>
 
-  <h3>Choose a model</h3>
+  <h3>Choose an agent</h3>
   <p>Specify <code>claude</code>, <code>codex</code>, or <code>gemini</code> after <code>@netlify</code>:</p>
   <pre><code>@netlify claude Add a dark mode toggle
 @netlify codex Make the hero section responsive
 @netlify gemini Add a testimonials carousel</code></pre>
-  <p>Default model is <code>codex</code>. You can change the default with the <code>default-model</code> input.</p>
+  <p>Default agent is <code>codex</code>. You can change the default with the <code>default-agent</code> input.</p>
 
   <h3>Follow-up prompts</h3>
   <p>After the first run creates a PR, add follow-up <code>@netlify</code> comments on the PR to iterate. The agent continues from where it left off.</p>
@@ -277,8 +277,8 @@ jobs:
   <h3>Execution modes</h3>
   <p><code>dry-run</code> and <code>preflight-only</code> are different controls:</p>
   <ul>
-    <li><code>dry-run: 'true'</code> still starts a Netlify Agent run, but skips commit and PR creation.</li>
-    <li><code>preflight-only: 'true'</code> validates setup and exits before any agent runner is created or resumed.</li>
+    <li><code>dry-run: 'true'</code> still starts an agent run, but skips commit and PR creation.</li>
+    <li><code>preflight-only: 'true'</code> validates setup and exits before any agent run is created or resumed.</li>
     <li>If both are <code>true</code>, preflight-only behavior wins and no agent run starts.</li>
   </ul>
   <pre><code>- uses: netlify-labs/agent-runner-action@v1
@@ -305,10 +305,11 @@ jobs:
     <tr><td><code>netlify-site-id</code></td><td>Yes</td><td>&mdash;</td><td>Netlify site ID</td></tr>
     <tr><td><code>github-token</code></td><td>No</td><td><code>github.token</code></td><td>GitHub token for API calls</td></tr>
     <tr><td><code>allowed-users</code></td><td>No</td><td><code>''</code></td><td>Comma-separated usernames allowed to trigger</td></tr>
-    <tr><td><code>default-model</code></td><td>No</td><td><code>codex</code></td><td>Default AI model (<code>claude</code>, <code>codex</code>, <code>gemini</code>)</td></tr>
+    <tr><td><code>default-agent</code></td><td>No</td><td><code>codex</code></td><td>Default agent (<code>claude</code>, <code>codex</code>, <code>gemini</code>)</td></tr>
+    <tr><td><code>default-model</code></td><td>No</td><td><code>codex</code></td><td>Backward-compatible alias for <code>default-agent</code></td></tr>
     <tr><td><code>manage-labels</code></td><td>No</td><td><code>false</code></td><td>Auto-create and apply labels on runs</td></tr>
     <tr><td><code>dry-run</code></td><td>No</td><td><code>false</code></td><td>Start an agent run but skip commit/PR creation</td></tr>
-    <tr><td><code>preflight-only</code></td><td>No</td><td><code>false</code></td><td>Validate setup and exit without creating/resuming an agent runner</td></tr>
+    <tr><td><code>preflight-only</code></td><td>No</td><td><code>false</code></td><td>Validate setup and exit without creating/resuming an agent run</td></tr>
     <tr><td><code>timeout-minutes</code></td><td>No</td><td><code>10</code></td><td>Max minutes to wait for agent</td></tr>
     <tr><td><code>netlify-cli-version</code></td><td>No</td><td><code>24.8.1</code></td><td>Netlify CLI version to install</td></tr>
     <tr><td><code>debug</code></td><td>No</td><td><code>false</code></td><td>Enable debug API logging</td></tr>
@@ -321,12 +322,13 @@ jobs:
   <p>Use these in subsequent workflow steps for custom automation:</p>
   <table>
     <tr><th>Output</th><th>Description</th></tr>
-    <tr><td><code>agent-id</code></td><td>Netlify agent runner ID</td></tr>
+    <tr><td><code>agent-id</code></td><td>Agent run ID</td></tr>
     <tr><td><code>outcome</code></td><td><code>success</code>, <code>failure</code>, or <code>timeout</code></td></tr>
     <tr><td><code>agent-result</code></td><td>Agent result summary text</td></tr>
     <tr><td><code>agent-pr-url</code></td><td>Pull request URL (if created)</td></tr>
     <tr><td><code>agent-deploy-url</code></td><td>Deploy preview URL</td></tr>
-    <tr><td><code>model</code></td><td>AI model that was used</td></tr>
+    <tr><td><code>agent</code></td><td>Agent that was used</td></tr>
+    <tr><td><code>model</code></td><td>Backward-compatible alias for <code>agent</code></td></tr>
     <tr><td><code>trigger-text</code></td><td>Cleaned trigger prompt</td></tr>
     <tr><td><code>is-pr</code></td><td><code>true</code> / <code>false</code></td></tr>
     <tr><td><code>issue-number</code></td><td>Issue or PR number</td></tr>
@@ -357,8 +359,8 @@ jobs:
   <ol>
     <li>You mention <code>@netlify</code> in an issue, PR, or comment</li>
     <li>The action reacts with eyes emoji and posts an in-progress status comment</li>
-    <li>It creates a Netlify Agent runner with your prompt</li>
-    <li>The agent builds or modifies your site</li>
+    <li>It creates an agent run with your prompt</li>
+    <li>The selected agent builds or modifies your site</li>
     <li>On completion, the status comment is updated with a result summary, screenshot, and deploy preview link</li>
     <li>If triggered from an issue, a pull request is automatically created with the changes</li>
   </ol>
@@ -381,7 +383,7 @@ jobs:
 
   <div class="trouble-item">
     <strong>Preflight-only failed checks</strong>
-    <p>Use <code>preflight-summary</code> and <code>preflight-json</code> outputs to identify failing checks. Common fixes: token/site ID mismatch, invalid default model, non-positive timeout, or missing workflow permissions.</p>
+    <p>Use <code>preflight-summary</code> and <code>preflight-json</code> outputs to identify failing checks. Common fixes: token/site ID mismatch, invalid default agent, non-positive timeout, or missing workflow permissions.</p>
   </div>
 
   <div class="trouble-item">
@@ -400,8 +402,8 @@ jobs:
   </div>
 
   <div class="trouble-item">
-    <strong>"Agent Runner [model] is not available"</strong>
-    <p>The AI provider is temporarily down. Try a different model: <code>@netlify claude</code>, <code>@netlify codex</code>, or <code>@netlify gemini</code>.</p>
+    <strong>"Requested agent is not available"</strong>
+    <p>The selected agent is temporarily unavailable. Try a different agent: <code>@netlify claude</code>, <code>@netlify codex</code>, or <code>@netlify gemini</code>.</p>
   </div>
 
   <div class="trouble-item">
@@ -418,7 +420,7 @@ jobs:
 </div>
 
 <footer>
-  <p>Netlify Agent Runner &middot; <a href="https://github.com/netlify-labs/agent-runner-action">GitHub</a> &middot; <a href="https://www.netlify.com/products/agents/">Netlify Agents</a></p>
+  <p>Netlify Agent Runners &middot; <a href="https://github.com/netlify-labs/agent-runner-action">GitHub</a> &middot; <a href="https://www.netlify.com/products/agents/">Netlify Agent Runners</a></p>
 </footer>
 
 </body>

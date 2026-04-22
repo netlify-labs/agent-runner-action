@@ -1,4 +1,4 @@
-// Deterministic failure classifier for Netlify Agent Runner.
+// Deterministic failure classifier for Netlify Agent Runners.
 // Produces stable categories and user-facing metadata that can be reused
 // by comment rendering and step-summary generation.
 
@@ -119,11 +119,23 @@ const FAILURE_TAXONOMY = Object.freeze({
     userActionRequired: false,
     stage: 'validate-env',
   }),
-  'model-unavailable': freezeProfile({
-    title: 'Requested model is unavailable',
-    summary: 'Netlify reported that the selected model is not currently available.',
+  'agent-unavailable': freezeProfile({
+    title: 'Requested agent is unavailable',
+    summary: 'Netlify reported that the selected agent is not currently available.',
     remediation: [
-      'Retry with a different model (`claude`, `codex`, or `gemini`).',
+      'Retry with a different agent (`claude`, `codex`, or `gemini`).',
+      'Retry later if the provider outage is temporary.',
+    ],
+    severity: 'error',
+    retryable: true,
+    userActionRequired: false,
+    stage: 'create-agent',
+  }),
+  'model-unavailable': freezeProfile({
+    title: 'Requested agent is unavailable',
+    summary: 'Netlify reported that the selected agent is not currently available.',
+    remediation: [
+      'Retry with a different agent (`claude`, `codex`, or `gemini`).',
       'Retry later if the provider outage is temporary.',
     ],
     severity: 'error',
@@ -132,8 +144,8 @@ const FAILURE_TAXONOMY = Object.freeze({
     stage: 'create-agent',
   }),
   'agent-create-failed': freezeProfile({
-    title: 'Failed to create Netlify Agent run',
-    summary: 'The initial Netlify agent runner creation request did not succeed.',
+    title: 'Failed to create agent run',
+    summary: 'The initial agent run creation request did not succeed.',
     remediation: [
       'Check the Netlify API error details in workflow logs.',
       'Retry the run after confirming site and auth configuration.',
@@ -145,7 +157,7 @@ const FAILURE_TAXONOMY = Object.freeze({
   }),
   'session-create-failed': freezeProfile({
     title: 'Failed to create follow-up session',
-    summary: 'A follow-up prompt could not be attached to the existing Netlify agent runner.',
+    summary: 'A follow-up prompt could not be attached to the existing agent run.',
     remediation: [
       'Retry the prompt to create a new follow-up session.',
       'If repeated, start a fresh run instead of reusing the old runner ID.',
@@ -157,7 +169,7 @@ const FAILURE_TAXONOMY = Object.freeze({
   }),
   'agent-timeout': freezeProfile({
     title: 'Agent timed out before completion',
-    summary: 'The Netlify agent did not reach a terminal state within timeout-minutes.',
+    summary: 'The agent run did not reach a terminal state within timeout-minutes.',
     remediation: [
       'Try a smaller or more focused prompt.',
       'Increase `timeout-minutes` if longer runs are expected.',
@@ -169,7 +181,7 @@ const FAILURE_TAXONOMY = Object.freeze({
   }),
   'agent-failed': freezeProfile({
     title: 'Agent run failed',
-    summary: 'The Netlify agent reached a failed/error/cancelled terminal state.',
+    summary: 'The agent run reached a failed/error/cancelled terminal state.',
     remediation: [
       'Inspect the agent error details and logs for the failing operation.',
       'Retry with adjusted prompt scope after addressing root cause.',
@@ -252,7 +264,7 @@ const FAILURE_TAXONOMY = Object.freeze({
     stage: 'unknown',
   }),
   unknown: freezeProfile({
-    title: 'Netlify Agent Runner failed',
+    title: 'Netlify Agent Runners run failed',
     summary: 'The run failed before completion and did not match a known failure category.',
     remediation: [
       'Inspect workflow logs for the first concrete error.',
@@ -408,9 +420,10 @@ function detectFailureCategory(signal = {}) {
 
   if (matchesAny(text, [
     /agent runner \w+ is not available/i,
+    /agent \w+ is not available/i,
     /model .*?(unavailable|not available|unsupported)/i,
   ])) {
-    return 'model-unavailable';
+    return 'agent-unavailable';
   }
 
   if (stage === 'create-session' || matchesAny(text, [

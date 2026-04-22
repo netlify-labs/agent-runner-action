@@ -34,7 +34,7 @@ from that branch) before any `@main` or release-tag movement.
 | S1 | Preflight-only success | `workflow_dispatch` with `preflight-only=true` after the input is implemented. | Step summary shows validation success and no agent start. Because this is `workflow_dispatch`, no status comment is expected. |
 | S2 | Invalid site ID failure | `workflow_dispatch` with `site_id_override=invalid-site-id`. | Fails fast with clear error text. Step summary includes readable failure details and logs link. Because this is `workflow_dispatch`, no issue/PR comment is expected. |
 | S3 | Dry-run prompt | `workflow_dispatch` with `dry_run=true` and a normal prompt. | Agent run starts, but no commit/PR is created. Summary states dry-run path. Status comment still shows run context and outcome. |
-| S4 | Normal issue trigger | Open an issue with `@netlify` prompt text. | Eyes reaction appears. Status comment updates from in-progress to final outcome with model/result and links (deploy/PR when available). |
+| S4 | Normal issue trigger | Open an issue with `@netlify` prompt text. | Eyes reaction appears. Status comment updates from in-progress to final outcome with agent/result and links (deploy/PR when available). |
 | S5 | PR follow-up trigger | Comment `@netlify ...` on the active PR created by the action. | Existing PR receives follow-up status/history updates. Run keeps continuity on the same PR thread. |
 | S6 | Failure path with readable summary/comment output | Trigger one deterministic failure mode (for example, invalid site ID or expired token). | Summary and comment clearly state what failed, where it failed, and what to do next; include run logs link and Netlify dashboard link when available. |
 

@@ -4,13 +4,13 @@
 # Verification policy:
 # - Test netlify-labs/agent-runner-action from dw/actions-updates (or a SHA from that branch).
 # - Do not repoint @main or release tags during verification.
-name: Netlify Agents Branch Verification
+name: Netlify Agent Runners Branch Verification
 
 on:
   workflow_dispatch:
     inputs:
       trigger_text:
-        description: 'Prompt for the Netlify Agent'
+        description: 'Prompt for the agent run'
         required: true
         type: string
         default: '@netlify codex Add a tiny visual polish to the hero section'
@@ -18,8 +18,8 @@ on:
         description: 'GitHub username to attribute this run to'
         required: true
         type: string
-      model:
-        description: 'AI model to use'
+      agent:
+        description: 'Agent to use'
         required: false
         type: choice
         options:
@@ -28,7 +28,7 @@ on:
           - gemini
         default: codex
       dry_run:
-        description: 'Run the agent but skip commits/PR creation'
+        description: 'Start an agent run but skip commits/PR creation'
         required: false
         type: boolean
         default: false
@@ -92,7 +92,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### Agent Runner Branch Verification"
+            echo "### Agent Runners Branch Verification"
             echo "- Action under test: \`${ACTION_UNDER_TEST_REPO}@${ACTION_UNDER_TEST_REF}\`"
             echo "- Resolved action commit SHA: \`${{ steps.action-sha.outputs.sha }}\`"
             echo "- Example repo run id: \`${GITHUB_RUN_ID}\`"
@@ -116,17 +116,17 @@ jobs:
 
       # If you pin to an immutable SHA, update both ACTION_UNDER_TEST_REF and
       # the @ref on these two uses lines together.
-      - name: Run Agent Runner (workflow_dispatch)
+      - name: Run Agent Runners (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
         uses: netlify-labs/agent-runner-action@dw/actions-updates
         with:
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           netlify-site-id: ${{ steps.dispatch-site.outputs.value }}
-          default-model: ${{ inputs.model }}
+          default-agent: ${{ inputs.agent }}
           dry-run: ${{ inputs.dry_run }}
           # preflight-only: 'true' # Enable when preflight-only is implemented.
 
-      - name: Run Agent Runner (issue and PR events)
+      - name: Run Agent Runners (issue and PR events)
         if: github.event_name != 'workflow_dispatch'
         uses: netlify-labs/agent-runner-action@dw/actions-updates
         with:

@@ -51,7 +51,7 @@ describe('check-docs-drift', () => {
   it('detects missing input documentation rows', () => {
     const readme = read('README.md');
     const driftedReadme = readme.replace(
-      "| `dry-run` | No | `false` | Run the agent but skip commit/PR creation |\n",
+      "| `dry-run` | No | `false` | Start an agent run but skip commit/PR creation |\n",
       ''
     );
     const errors = checkDocsDrift({

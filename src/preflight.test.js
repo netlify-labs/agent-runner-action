@@ -8,6 +8,7 @@ describe('normalizePreflightInput', () => {
       NETLIFY_AUTH_TOKEN: 'ntlk_123',
       NETLIFY_SITE_ID: 'site_abc',
       GITHUB_TOKEN: 'ghs_123',
+      DEFAULT_AGENT: 'GEMINI',
       DEFAULT_MODEL: 'CLAUDE',
       TIMEOUT_MINUTES: '15',
       TRIGGER_TEXT: 'Ship it',
@@ -18,7 +19,8 @@ describe('normalizePreflightInput', () => {
     assert.equal(normalized.netlifyAuthToken, 'ntlk_123');
     assert.equal(normalized.netlifySiteId, 'site_abc');
     assert.equal(normalized.githubToken, 'ghs_123');
-    assert.equal(normalized.defaultModel, 'claude');
+    assert.equal(normalized.defaultAgent, 'gemini');
+    assert.equal(normalized.defaultModel, 'gemini');
     assert.equal(normalized.timeoutMinutes, 15);
     assert.equal(normalized.triggerText, 'Ship it');
     assert.equal(normalized.issueNumber, '42');
@@ -40,7 +42,7 @@ describe('runPreflight', () => {
       netlifyAuthToken: 'token',
       netlifySiteId: 'site-id',
       githubToken: 'gh-token',
-      defaultModel: 'codex',
+      defaultAgent: 'codex',
       timeoutMinutes: 10,
       triggerText: '@netlify fix it',
       issueNumber: '88',
@@ -54,7 +56,7 @@ describe('runPreflight', () => {
     const byId = Object.fromEntries(result.checks.map(check => [check.id, check]));
     assert.equal(byId['netlify-auth-token'].status, 'pass');
     assert.equal(byId['netlify-site-id'].status, 'pass');
-    assert.equal(byId['default-model'].status, 'pass');
+    assert.equal(byId['default-agent'].status, 'pass');
     assert.equal(byId['timeout-minutes'].status, 'pass');
     assert.equal(byId['github-token'].status, 'pass');
     assert.equal(byId['trigger-context'].status, 'pass');
@@ -68,7 +70,7 @@ describe('runPreflight', () => {
 
   it('fails missing required static inputs with taxonomy-compatible failures', async () => {
     const result = await runPreflight({
-      defaultModel: 'unsupported-model',
+      defaultAgent: 'unsupported-agent',
       timeoutMinutes: '0',
       commentsRequired: true,
     });
@@ -76,7 +78,7 @@ describe('runPreflight', () => {
     assert.equal(result.ok, false);
     assert.ok(result.failures.includes('missing-auth-token'));
     assert.ok(result.failures.includes('missing-site-id'));
-    assert.ok(result.failures.includes('model-unavailable'));
+    assert.ok(result.failures.includes('agent-unavailable'));
     assert.ok(result.failures.includes('github-permission-denied'));
     assert.ok(result.failures.includes('unknown'));
   });
@@ -86,7 +88,7 @@ describe('runPreflight', () => {
       netlifyAuthToken: 'token',
       netlifySiteId: 'site-id',
       githubToken: 'gh-token',
-      defaultModel: 'gemini',
+      defaultAgent: 'gemini',
       timeoutMinutes: 10,
       triggerText: 'manual run',
       eventName: 'workflow_dispatch',
@@ -104,7 +106,7 @@ describe('runPreflight', () => {
         netlifyAuthToken: 'token',
         netlifySiteId: 'site-id',
         githubToken: 'gh-token',
-        defaultModel: 'claude',
+        defaultAgent: 'claude',
         timeoutMinutes: 10,
         triggerText: 'please run',
         issueNumber: '3',
@@ -143,7 +145,7 @@ describe('runPreflight', () => {
         netlifyAuthToken: 'token',
         netlifySiteId: 'site-id',
         githubToken: 'gh-token',
-        defaultModel: 'codex',
+        defaultAgent: 'codex',
         timeoutMinutes: 10,
         triggerText: '@netlify build',
         issueNumber: '12',

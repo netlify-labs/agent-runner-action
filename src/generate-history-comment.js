@@ -39,7 +39,7 @@ module.exports = async function generateHistoryComment({ context, core }) {
   }
 
   const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}`;
-  let message = `### Netlify Agent Run History\n\nView the full history in [Netlify Agent Run dashboard](${agentRunUrl})\n\n---\n\n`;
+  let message = `### Agent Run History\n\nView the full history in the [Netlify Agent Runners dashboard](${agentRunUrl})\n\n---\n\n`;
 
   const reversed = [...sessions].reverse();
   reversed.forEach((session, idx) => {
@@ -75,7 +75,7 @@ module.exports = async function generateHistoryComment({ context, core }) {
       /** @type {string[]} */
       const links = [];
       if (deployUrl) links.push(`[Open Preview URL](${deployUrl})`);
-      links.push(`[Netlify Agents run](${agentRunUrl})`);
+      links.push(`[Agent run](${agentRunUrl})`);
       if (commitSha && prUrl) {
         const prNum = prUrl.match(/\/pull\/(\d+)/);
         if (prNum) {

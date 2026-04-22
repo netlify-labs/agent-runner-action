@@ -19,7 +19,7 @@ The contract applies to action behavior when a new optional input
 2. `dry-run` semantics do not change.
    - `dry-run=true` still starts the agent.
    - `dry-run=true` still skips commit/PR creation.
-3. `preflight-only=true` does not start or resume an agent runner.
+3. `preflight-only=true` does not start or resume an agent run.
    - It only validates configuration and exits after reporting.
 4. If both `dry-run=true` and `preflight-only=true`, preflight-only wins.
    - No agent is started.

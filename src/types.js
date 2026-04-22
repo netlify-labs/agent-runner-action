@@ -1,4 +1,4 @@
-// Shared JSDoc type definitions for the Netlify Agents action.
+// Shared JSDoc type definitions for the Netlify Agent Runners action.
 // These are purely for editor IntelliSense and `tsc --checkJs` — no runtime cost.
 
 /**
@@ -49,7 +49,7 @@
  * @typedef {object} EventPayload
  * @property {{login: string}} [sender]
  * @property {{full_name: string}} [repository]
- * @property {{trigger_text?: string, actor?: string, model?: string}} [inputs]
+ * @property {{trigger_text?: string, actor?: string, agent?: string, model?: string}} [inputs]
  * @property {{number: number, body?: string, title?: string, html_url?: string, author_association?: string, pull_request?: {url?: string}}} [issue]
  * @property {{id: number, body?: string, html_url?: string, author_association?: string, user?: {login: string}}} [comment]
  * @property {{number: number, body?: string, html_url?: string, author_association?: string, head: {ref: string, sha: string, repo?: {full_name: string}}, base: {ref: string}}} [pull_request]
@@ -91,7 +91,7 @@
  */
 
 /**
- * A single Netlify Agent session from the API.
+ * A single Netlify Agent Runners session from the API.
  * @typedef {object} AgentSession
  * @property {string} id
  * @property {string} [prompt]

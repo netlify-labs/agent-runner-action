@@ -1,4 +1,4 @@
-// Shared utilities for the Netlify Agents action.
+// Shared utilities for the Netlify Agent Runners action.
 // Used by actions/github-script steps via:
 //   const utils = require(`${process.env.ACTION_DIR}/src/utils.js`)
 
@@ -34,7 +34,7 @@ const TRIGGER_PATTERN = new RegExp(
 );
 
 // ---------------------------------------------------------------------------
-// Model handling
+// Agent selection handling. Legacy API fields still use the name "model".
 // ---------------------------------------------------------------------------
 
 /** @type {string[]} */
@@ -160,10 +160,10 @@ function buildInProgressComment({ agentRunUrl, prompt, model, runnerId, ghAction
   const clean = cleanPrompt(prompt);
 
   let body = agentRunUrl
-    ? `### [Netlify Agent Runner ${flavor}](${agentRunUrl}) ${emoji}\n\n`
-    : `### Netlify Agent Runner ${flavor} ${emoji}\n\n`;
+    ? `### [Netlify Agent Runners ${flavor}](${agentRunUrl}) ${emoji}\n\n`
+    : `### Netlify Agent Runners ${flavor} ${emoji}\n\n`;
 
-  body += `**Model:** \`${model}\`\n\n`;
+  body += `**Agent:** \`${model}\`\n\n`;
   if (clean) body += formatPromptBlock(clean);
 
   /** @type {string[]} */

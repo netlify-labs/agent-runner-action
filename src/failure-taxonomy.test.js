@@ -39,11 +39,11 @@ describe('detectFailureCategory', () => {
         signal: { error: 'bun install -g netlify-cli failed with exit code 1' },
       },
       {
-        category: 'model-unavailable',
+        category: 'agent-unavailable',
         signal: { error: 'Agent Runner Claude is not available right now' },
       },
       {
-        category: 'model-unavailable',
+        category: 'agent-unavailable',
         signal: { errorMessage: 'Agent Runner codex is not available for this account' },
       },
       {
@@ -116,6 +116,14 @@ describe('detectFailureCategory', () => {
     });
     assert.equal(category, 'agent-timeout');
   });
+
+  it('accepts legacy model-unavailable category overrides', () => {
+    const category = detectFailureCategory({
+      category: 'model-unavailable',
+      error: 'Agent Runner codex is not available right now',
+    });
+    assert.equal(category, 'model-unavailable');
+  });
 });
 
 describe('classifyFailure', () => {
@@ -137,9 +145,9 @@ describe('classifyFailure', () => {
         userActionRequired: true,
       },
       {
-        name: 'model unavailable',
+        name: 'agent unavailable',
         signal: { error: 'Agent Runner codex is not available right now' },
-        category: 'model-unavailable',
+        category: 'agent-unavailable',
         retryable: true,
         userActionRequired: false,
       },

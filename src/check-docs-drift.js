@@ -18,7 +18,7 @@ const WORKFLOW_FILES = [
   'workflow-templates/netlify-agents.yml',
 ];
 const IMPORTANT_DEFAULT_INPUTS = [
-  'default-model',
+  'default-agent',
   'dry-run',
   'timeout-minutes',
   'timezone',

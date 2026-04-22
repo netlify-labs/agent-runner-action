@@ -107,9 +107,9 @@ describe('generate-error-comment', () => {
     });
 
     const body = await renderComment();
-    assert.ok(body.includes('Requested model is unavailable'));
+    assert.ok(body.includes('Requested agent is unavailable'));
     assert.ok(body.includes('`@netlify codex` or `@netlify gemini`'));
-    assert.ok(body.includes('[Netlify agent run](https://app.netlify.com/projects/example-site/agent-runs/runner-42)'));
+    assert.ok(body.includes('[Agent run](https://app.netlify.com/projects/example-site/agent-runs/runner-42)'));
     assert.ok(body.includes('<!-- netlify-agent-runner-id:runner-42 -->'));
     assert.ok(body.includes('<!-- netlify-agent-run-status -->'));
   });
@@ -149,7 +149,7 @@ describe('generate-error-comment', () => {
     });
 
     const body = await renderComment();
-    assert.ok(body.includes('Netlify Agent Runner failed'));
+    assert.ok(body.includes('Netlify Agent Runners run failed'));
     assert.ok(body.includes('- **Category:** `unknown`'));
   });
 
@@ -182,7 +182,7 @@ describe('generate-error-comment', () => {
     });
 
     const body = await renderComment();
-    assert.ok(body.includes('[Netlify Agents dashboard](https://app.netlify.com/projects/example-site/agent-runs)'));
+    assert.ok(body.includes('[Netlify Agent Runners dashboard](https://app.netlify.com/projects/example-site/agent-runs)'));
     assert.ok(body.includes('[GitHub Action logs](https://github.com/org/repo/actions/runs/99)'));
   });
 
@@ -195,7 +195,7 @@ describe('generate-error-comment', () => {
     });
 
     const body = await renderComment();
-    assert.ok(body.includes('[Netlify agent run](https://app.netlify.com/projects/example-site/agent-runs/runner-120)'));
+    assert.ok(body.includes('[Agent run](https://app.netlify.com/projects/example-site/agent-runs/runner-120)'));
     assert.ok(body.includes('[GitHub Action logs](https://github.com/org/repo/actions/runs/120)'));
     assert.ok(body.includes('<!-- netlify-agent-runner-id:runner-120 -->'));
     assert.ok(body.includes('<!-- netlify-agent-run-status -->'));

@@ -89,7 +89,7 @@ jobs:
             ACTION_REF="${PR_ACTION_REF:-$GITHUB_SHA}"
           fi
           RUN_MARKER="canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          ISSUE_TITLE="Agent runner canary smoke test ${RUN_MARKER}"
+          ISSUE_TITLE="Agent Runners canary smoke test ${RUN_MARKER}"
           DEFAULT_PROMPT="@netlify codex in README.md, replace or add one line exactly: Canary marker: ${RUN_MARKER}. Do not edit other files."
           PROMPT="${REQUESTED_PROMPT:-$DEFAULT_PROMPT}"
           TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
@@ -121,7 +121,7 @@ jobs:
             echo "Canary workflow already pinned to ${ACTION_REF}."
           else
             git add "$CANARY_WORKFLOW_PATH"
-            git commit -m "chore: pin agent runner canary to ${ACTION_REF}"
+            git commit -m "chore: pin Agent Runners canary to ${ACTION_REF}"
             git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${CANARY_REPO}.git"
             git push origin HEAD:main
           fi
@@ -249,7 +249,7 @@ jobs:
           SIMULATED_FAILURE: ${{ steps.canary.outputs.simulated-failure }}
         run: |
           {
-            echo "## Agent Runner Canary"
+            echo "## Agent Runners Canary"
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
@@ -297,7 +297,7 @@ jobs:
             --arg simulated_failure "${SIMULATED_FAILURE:-false}" \
             '{
               text: (
-                "Agent Runner canary failed\n" +
+                "Agent Runners canary failed\n" +
                 "Run: " + $run_url + "\n" +
                 "PR: " + $pr_url + "\n" +
                 "Event: " + $event_name + "\n" +
