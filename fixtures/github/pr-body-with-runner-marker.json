@@ -1,0 +1,13 @@
+{
+  "data": {
+    "number": 58,
+    "head": {
+      "ref": "feature/workflow-fixes",
+      "sha": "51dbe0918403f59de6d0310d9f5ee2b996abc123"
+    },
+    "base": {
+      "ref": "main"
+    },
+    "body": "Follow-up context for agent run recovery.\n<!-- netlify-agent-session-data:{\"session_pr\":{\"pr_url\":\"https://github.com/netlify-labs/agent-runner-action-example/pull/58\"}} -->\n<!-- netlify-agent-runner-id:runner-pr-555 -->\nChanges in Pull Request #58"
+  }
+}

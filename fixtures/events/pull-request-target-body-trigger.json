@@ -1,0 +1,20 @@
+{
+  "action": "opened",
+  "sender": { "login": "trusted-contributor" },
+  "repository": { "full_name": "netlify-labs/agent-runner-action-example" },
+  "pull_request": {
+    "number": 63,
+    "title": "Refine status comment copy",
+    "body": "@netlify with codex update status copy for clarity",
+    "html_url": "https://github.com/netlify-labs/agent-runner-action-example/pull/63",
+    "author_association": "CONTRIBUTOR",
+    "head": {
+      "ref": "feature/status-copy",
+      "sha": "6e59a5f91abec5f9d63f8b8b031f4db845c2a111",
+      "repo": { "full_name": "netlify-labs/agent-runner-action-example" }
+    },
+    "base": {
+      "ref": "main"
+    }
+  }
+}

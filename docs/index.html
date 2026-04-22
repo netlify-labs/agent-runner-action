@@ -148,7 +148,7 @@
   <h1>Netlify <span>Agent Runner</span></h1>
   <p>Trigger Netlify Agents from GitHub issues and pull requests. Just mention <code>@netlify</code> and the agent builds your site.</p>
   <div class="hero-code">
-    <span class="key">- uses:</span> <span class="val">netlify-labs/agent-runner-action@main</span><br>
+    <span class="key">- uses:</span> <span class="val">netlify-labs/agent-runner-action@v1</span><br>
     <span class="key">&nbsp; with:</span><br>
     <span class="key">&nbsp;&nbsp;&nbsp; netlify-auth-token:</span> <span class="val">${{ secrets.NETLIFY_AUTH_TOKEN }}</span><br>
     <span class="key">&nbsp;&nbsp;&nbsp; netlify-site-id:</span> <span class="val">${{ secrets.NETLIFY_SITE_ID }}</span>
@@ -250,10 +250,11 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: netlify-labs/agent-runner-action@main
+      - uses: netlify-labs/agent-runner-action@v1
         with:
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}</code></pre>
+          netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
+          # preflight-only: 'false' # Validate setup and skip agent execution</code></pre>
   </div>
 </section>
 
@@ -273,6 +274,25 @@ jobs:
   <h3>Follow-up prompts</h3>
   <p>After the first run creates a PR, add follow-up <code>@netlify</code> comments on the PR to iterate. The agent continues from where it left off.</p>
 
+  <h3>Execution modes</h3>
+  <p><code>dry-run</code> and <code>preflight-only</code> are different controls:</p>
+  <ul>
+    <li><code>dry-run: 'true'</code> still starts a Netlify Agent run, but skips commit and PR creation.</li>
+    <li><code>preflight-only: 'true'</code> validates setup and exits before any agent runner is created or resumed.</li>
+    <li>If both are <code>true</code>, preflight-only behavior wins and no agent run starts.</li>
+  </ul>
+  <pre><code>- uses: netlify-labs/agent-runner-action@v1
+  with:
+    netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+    netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
+    preflight-only: 'true' # setup validation only
+
+- uses: netlify-labs/agent-runner-action@v1
+  with:
+    netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+    netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
+    dry-run: 'true' # run agent preview, skip commits/PR</code></pre>
+
   <h3>Typo-tolerant</h3>
   <p>Common typos are recognized: <code>@nelify</code>, <code>@netlfy</code>, <code>@netify</code>, <code>@netlif</code>, <code>@netfly</code>. Aliases like <code>@netlify-agent</code> and <code>@netlify-ai</code> also work.</p>
 </section>
@@ -287,8 +307,12 @@ jobs:
     <tr><td><code>allowed-users</code></td><td>No</td><td><code>''</code></td><td>Comma-separated usernames allowed to trigger</td></tr>
     <tr><td><code>default-model</code></td><td>No</td><td><code>codex</code></td><td>Default AI model (<code>claude</code>, <code>codex</code>, <code>gemini</code>)</td></tr>
     <tr><td><code>manage-labels</code></td><td>No</td><td><code>false</code></td><td>Auto-create and apply labels on runs</td></tr>
+    <tr><td><code>dry-run</code></td><td>No</td><td><code>false</code></td><td>Start an agent run but skip commit/PR creation</td></tr>
+    <tr><td><code>preflight-only</code></td><td>No</td><td><code>false</code></td><td>Validate setup and exit without creating/resuming an agent runner</td></tr>
     <tr><td><code>timeout-minutes</code></td><td>No</td><td><code>10</code></td><td>Max minutes to wait for agent</td></tr>
+    <tr><td><code>netlify-cli-version</code></td><td>No</td><td><code>24.8.1</code></td><td>Netlify CLI version to install</td></tr>
     <tr><td><code>debug</code></td><td>No</td><td><code>false</code></td><td>Enable debug API logging</td></tr>
+    <tr><td><code>timezone</code></td><td>No</td><td><code>America/Los_Angeles</code></td><td>Timezone used for date/time rendering in comments</td></tr>
   </table>
 </section>
 
@@ -306,6 +330,14 @@ jobs:
     <tr><td><code>trigger-text</code></td><td>Cleaned trigger prompt</td></tr>
     <tr><td><code>is-pr</code></td><td><code>true</code> / <code>false</code></td></tr>
     <tr><td><code>issue-number</code></td><td>Issue or PR number</td></tr>
+    <tr><td><code>is-dry-run</code></td><td>Whether the run used preview mode (<code>true</code> / <code>false</code>)</td></tr>
+    <tr><td><code>preflight-ok</code></td><td>Whether preflight validation passed (<code>true</code> / <code>false</code>)</td></tr>
+    <tr><td><code>preflight-json</code></td><td>Serialized preflight result payload (<code>ok</code>, <code>checks</code>, <code>warnings</code>, <code>failures</code>)</td></tr>
+    <tr><td><code>preflight-summary</code></td><td>Human-readable preflight status summary</td></tr>
+    <tr><td><code>should-continue</code></td><td>Whether execution should continue into agent runtime</td></tr>
+    <tr><td><code>failure-category</code></td><td>Preflight/runtime taxonomy category when available</td></tr>
+    <tr><td><code>failure-stage</code></td><td>Preflight/runtime failure stage when available</td></tr>
+    <tr><td><code>agent-error</code></td><td>Sanitized runtime error summary emitted by agent orchestration</td></tr>
   </table>
   <h3>Example: run tests after agent</h3>
   <pre><code>steps:
@@ -348,6 +380,11 @@ jobs:
   </div>
 
   <div class="trouble-item">
+    <strong>Preflight-only failed checks</strong>
+    <p>Use <code>preflight-summary</code> and <code>preflight-json</code> outputs to identify failing checks. Common fixes: token/site ID mismatch, invalid default model, non-positive timeout, or missing workflow permissions.</p>
+  </div>
+
+  <div class="trouble-item">
     <strong>"The project can't be found"</strong>
     <p>The <code>NETLIFY_SITE_ID</code> secret points to a site that doesn't exist or that your token can't access. Verify the site ID in the Netlify dashboard and regenerate your token if needed.</p>
   </div>
@@ -355,6 +392,11 @@ jobs:
   <div class="trouble-item">
     <strong>Agent timed out</strong>
     <p>The default timeout is 10 minutes. For complex prompts, increase it with <code>timeout-minutes: '15'</code>. You can also break large tasks into smaller follow-up prompts.</p>
+  </div>
+
+  <div class="trouble-item">
+    <strong>"dry-run" still contacted Netlify</strong>
+    <p>This is expected. <code>dry-run</code> skips commit and PR creation only. Use <code>preflight-only: 'true'</code> when you need validation with no agent run.</p>
   </div>
 
   <div class="trouble-item">

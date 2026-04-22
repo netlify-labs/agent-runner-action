@@ -1,0 +1,18 @@
+[
+  {
+    "event": "commented",
+    "actor": { "login": "maintainer" }
+  },
+  {
+    "event": "cross-referenced",
+    "source": {
+      "issue": {
+        "number": 58,
+        "title": "Linked pull request",
+        "pull_request": {
+          "url": "https://api.github.com/repos/netlify-labs/agent-runner-action-example/pulls/58"
+        }
+      }
+    }
+  }
+]

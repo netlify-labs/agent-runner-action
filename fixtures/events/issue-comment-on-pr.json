@@ -1,0 +1,20 @@
+{
+  "action": "created",
+  "sender": { "login": "reviewer" },
+  "repository": { "full_name": "netlify-labs/agent-runner-action-example" },
+  "issue": {
+    "number": 58,
+    "title": "Fix workflow output handling",
+    "body": "Follow-up needed",
+    "html_url": "https://github.com/netlify-labs/agent-runner-action-example/pull/58",
+    "pull_request": {
+      "url": "https://api.github.com/repos/netlify-labs/agent-runner-action-example/pulls/58"
+    }
+  },
+  "comment": {
+    "id": 502,
+    "body": "@netlify gemini update failing test snapshots",
+    "html_url": "https://github.com/netlify-labs/agent-runner-action-example/pull/58#issuecomment-502",
+    "author_association": "MEMBER"
+  }
+}

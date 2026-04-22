@@ -56,3 +56,15 @@ jobs:
         with:
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
+          # Optional settings:
+          # default-model: 'codex'        # Default AI model (claude, codex, gemini)
+          # manage-labels: 'false'        # Auto-create and apply labels
+          # dry-run: 'false'              # Still runs Netlify Agent; skips commit/PR creation
+          # preflight-only: 'false'       # Validate setup only; starts no agent runner
+          # If both are true, preflight-only behavior wins.
+          # preflight-only: 'true'        # Example: verify config/permissions and exit
+          # dry-run: 'true'               # Example: run preview without committing changes
+          # timeout-minutes: '10'         # Max wait for agent completion
+          # netlify-cli-version: '24.8.1' # Netlify CLI version
+          # timezone: 'America/Los_Angeles' # Timezone for rendered timestamps
+          # debug: 'false'                # Enable debug logging

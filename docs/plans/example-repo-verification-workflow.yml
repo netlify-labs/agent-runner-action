@@ -1,0 +1,134 @@
+# Copy this workflow into netlify-labs/agent-runner-action-example as:
+# .github/workflows/netlify-agents-branch-verification.yml
+#
+# Verification policy:
+# - Test netlify-labs/agent-runner-action from dw/actions-updates (or a SHA from that branch).
+# - Do not repoint @main or release tags during verification.
+name: Netlify Agents Branch Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      trigger_text:
+        description: 'Prompt for the Netlify Agent'
+        required: true
+        type: string
+        default: '@netlify codex Add a tiny visual polish to the hero section'
+      actor:
+        description: 'GitHub username to attribute this run to'
+        required: true
+        type: string
+      model:
+        description: 'AI model to use'
+        required: false
+        type: choice
+        options:
+          - codex
+          - claude
+          - gemini
+        default: codex
+      dry_run:
+        description: 'Run the agent but skip commits/PR creation'
+        required: false
+        type: boolean
+        default: false
+      site_id_override:
+        description: 'Optional test-only site ID override for failure scenarios'
+        required: false
+        type: string
+        default: ''
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted, edited]
+  issues:
+    types: [opened, assigned, edited]
+  issue_comment:
+    types: [created, edited]
+
+concurrency:
+  group: netlify-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  ACTION_UNDER_TEST_REPO: netlify-labs/agent-runner-action
+  ACTION_UNDER_TEST_REF: dw/actions-updates
+
+jobs:
+  netlify-agent:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.sender.login != 'github-actions[bot]' &&
+        github.event.sender.login != 'netlify-coding[bot]' &&
+        github.event.sender.login != 'netlify[bot]'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Resolve action SHA for audit trail
+        id: action-sha
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${ACTION_UNDER_TEST_REF}"
+          if [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+            sha="$ref"
+          else
+            sha="$(curl -fsSL \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${ACTION_UNDER_TEST_REPO}/commits/${ref}" \
+              | jq -r '.sha')"
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Record verification metadata
+        shell: bash
+        run: |
+          {
+            echo "### Agent Runner Branch Verification"
+            echo "- Action under test: \`${ACTION_UNDER_TEST_REPO}@${ACTION_UNDER_TEST_REF}\`"
+            echo "- Resolved action commit SHA: \`${{ steps.action-sha.outputs.sha }}\`"
+            echo "- Example repo run id: \`${GITHUB_RUN_ID}\`"
+            echo "- Example repo commit SHA: \`${GITHUB_SHA}\`"
+            echo "- Policy: do not repoint \`@main\` or release tags during verification."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve dispatch site id
+        if: github.event_name == 'workflow_dispatch'
+        id: dispatch-site
+        shell: bash
+        env:
+          SITE_ID_OVERRIDE: ${{ inputs.site_id_override }}
+          DEFAULT_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          if [ -n "$SITE_ID_OVERRIDE" ]; then
+            echo "value=$SITE_ID_OVERRIDE" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$DEFAULT_SITE_ID" >> "$GITHUB_OUTPUT"
+          fi
+
+      # If you pin to an immutable SHA, update both ACTION_UNDER_TEST_REF and
+      # the @ref on these two uses lines together.
+      - name: Run Agent Runner (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: netlify-labs/agent-runner-action@dw/actions-updates
+        with:
+          netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          netlify-site-id: ${{ steps.dispatch-site.outputs.value }}
+          default-model: ${{ inputs.model }}
+          dry-run: ${{ inputs.dry_run }}
+          # preflight-only: 'true' # Enable when preflight-only is implemented.
+
+      - name: Run Agent Runner (issue and PR events)
+        if: github.event_name != 'workflow_dispatch'
+        uses: netlify-labs/agent-runner-action@dw/actions-updates
+        with:
+          netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}

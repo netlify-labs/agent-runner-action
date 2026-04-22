@@ -1,0 +1,9 @@
+{
+  "inputs": {
+    "trigger_text": "@netlify gemini run preflight checks",
+    "model": "gemini",
+    "actor": "repo-admin"
+  },
+  "sender": { "login": "repo-admin" },
+  "repository": { "full_name": "netlify-labs/agent-runner-action-example" }
+}

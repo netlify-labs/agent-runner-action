@@ -1,0 +1,20 @@
+{
+  "action": "submitted",
+  "sender": { "login": "maintainer" },
+  "repository": { "full_name": "netlify-labs/agent-runner-action-example" },
+  "pull_request": {
+    "number": 65,
+    "head": {
+      "ref": "feature/follow-up",
+      "sha": "4ef8adf31b8f6ed4d2aab70f326b8d4e71f8f333"
+    },
+    "base": {
+      "ref": "main"
+    }
+  },
+  "review": {
+    "body": "@netlify claude resolve these requested updates",
+    "html_url": "https://github.com/netlify-labs/agent-runner-action-example/pull/65#pullrequestreview-777",
+    "author_association": "COLLABORATOR"
+  }
+}

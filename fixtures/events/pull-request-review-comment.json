@@ -1,0 +1,21 @@
+{
+  "action": "created",
+  "sender": { "login": "maintainer" },
+  "repository": { "full_name": "netlify-labs/agent-runner-action-example" },
+  "pull_request": {
+    "number": 64,
+    "head": {
+      "ref": "feature/fix-tests",
+      "sha": "a3a28cc95f9e2af59ab11dd6c357029f0da11b22"
+    },
+    "base": {
+      "ref": "main"
+    }
+  },
+  "comment": {
+    "id": 901,
+    "body": "@netlify codex apply this requested review change",
+    "html_url": "https://github.com/netlify-labs/agent-runner-action-example/pull/64#discussion_r901",
+    "author_association": "MEMBER"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "runner_abc123",
+  "state": "running",
+  "latest_session": {
+    "id": "session_1",
+    "state": "running",
+    "prompt": "@netlify fix lint errors"
+  }
+}

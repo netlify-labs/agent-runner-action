@@ -72,6 +72,13 @@ function extractRequirePaths(text) {
   return paths;
 }
 
+/** Extract rough YAML blocks for composite action steps. */
+function extractStepBlocks(text) {
+  return text
+    .split(/\n(?=\s{4}- name: )/)
+    .filter(block => block.trim().startsWith('- name:') || block.includes('\n    - name:'));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -133,9 +140,89 @@ describe('action.yml wiring', () => {
     }
   });
 
+  it('quotes expression env values that include hash placeholders', () => {
+    const unquoted = [];
+    for (const line of actionYml.split(/\r?\n/)) {
+      const match = line.match(/^\s+([A-Z0-9_]+):\s+(.+)$/);
+      if (!match) continue;
+
+      const [, name, rawValue] = match;
+      const value = rawValue.trim();
+      if (!value.includes('${{') || !value.includes('#{')) continue;
+
+      const isQuoted =
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"));
+      if (!isQuoted) unquoted.push(`${name}: ${value}`);
+    }
+
+    assert.deepEqual(
+      unquoted,
+      [],
+      `GitHub expressions containing # placeholders must be YAML-quoted: ${unquoted.join(', ')}`
+    );
+  });
+
+  it('passes custom github-token to all peter-evans comment helper actions', () => {
+    const commentHelperBlocks = extractStepBlocks(actionYml)
+      .filter(block => block.includes('uses: peter-evans/'));
+
+    assert.ok(commentHelperBlocks.length > 0, 'Expected peter-evans comment helper steps');
+    for (const block of commentHelperBlocks) {
+      assert.match(
+        block,
+        /token:\s+\$\{\{\s*inputs\.github-token\s*\}\}/,
+        `Comment helper step must pass inputs.github-token:\n${block}`
+      );
+    }
+  });
+
+  it('does not hard-code sticky comment discovery to github-actions bot', () => {
+    assert.equal(
+      actionYml.includes("comment-author: 'github-actions[bot]'"),
+      false,
+      'Sticky comment discovery must work with GitHub App/custom token authors'
+    );
+  });
+
+  it('uses pull request review comment reaction endpoints for review comments', () => {
+    assert.match(actionYml, /createForPullRequestReviewComment/);
+    assert.match(actionYml, /deleteForPullRequestComment/);
+    assert.match(actionYml, /reaction-target', 'review-comment'/);
+  });
+
+  it('wires Netlify site access into preflight checks', () => {
+    assert.match(actionYml, /checkSiteResolution:\s+async/);
+    assert.match(actionYml, /https:\/\/api\.netlify\.com\/api\/v1\/sites/);
+    assert.match(actionYml, /Netlify site access confirmed/);
+  });
+
+  it('fails the run when post-agent commit or PR creation fails', () => {
+    assert.match(actionYml, /COMMIT_FAILURE=""/);
+    assert.match(actionYml, /emit_failure_context "commit" "commit-to-branch-failed"/);
+    assert.match(actionYml, /emit_failure_context "create-pr" "pull-request-create-failed"/);
+    assert.match(actionYml, /echo "outcome=failure" >> \$GITHUB_OUTPUT/);
+  });
+
+  it('generates rich error comments even after the agent step fails', () => {
+    const errorCommentBlock = extractStepBlocks(actionYml)
+      .find(block => block.includes('- name: Generate error comment'));
+    assert.ok(errorCommentBlock, 'Generate error comment step should exist');
+    assert.match(errorCommentBlock, /always\(\)/);
+  });
+
   it('has at least the expected inputs', () => {
     const inputs = extractInputNames(actionYml);
-    const expected = ['netlify-auth-token', 'netlify-site-id', 'github-token', 'default-model', 'timeout-minutes', 'debug', 'dry-run'];
+    const expected = [
+      'netlify-auth-token',
+      'netlify-site-id',
+      'github-token',
+      'default-model',
+      'timeout-minutes',
+      'debug',
+      'dry-run',
+      'preflight-only',
+    ];
     for (const name of expected) {
       assert.ok(inputs.has(name), `Missing expected input: ${name}`);
     }
@@ -143,7 +230,21 @@ describe('action.yml wiring', () => {
 
   it('has at least the expected outputs', () => {
     const outputs = extractOutputNames(actionYml);
-    const expected = ['agent-id', 'outcome', 'model', 'trigger-text', 'is-pr', 'issue-number'];
+    const expected = [
+      'agent-id',
+      'outcome',
+      'model',
+      'trigger-text',
+      'is-pr',
+      'issue-number',
+      'preflight-ok',
+      'preflight-json',
+      'preflight-summary',
+      'should-continue',
+      'failure-category',
+      'failure-stage',
+      'agent-error',
+    ];
     for (const name of expected) {
       assert.ok(outputs.has(name), `Missing expected output: ${name}`);
     }

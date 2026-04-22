@@ -1,0 +1,12 @@
+{
+  "action": "opened",
+  "sender": { "login": "maintainer" },
+  "repository": { "full_name": "netlify-labs/agent-runner-action-example" },
+  "issue": {
+    "number": 11,
+    "title": "@netlify codex tighten README examples",
+    "body": "Please align all docs snippets.",
+    "html_url": "https://github.com/netlify-labs/agent-runner-action-example/issues/11",
+    "author_association": "MEMBER"
+  }
+}

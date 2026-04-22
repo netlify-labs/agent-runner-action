@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "bun test src/*.test.js",
+    "simulate": "bun src/simulate.js",
+    "docs:check": "bun src/check-docs-drift.js",
     "typecheck": "bunx tsc --noEmit"
   },
   "keywords": [],
