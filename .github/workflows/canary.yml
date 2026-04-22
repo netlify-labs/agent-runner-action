@@ -261,3 +261,53 @@ jobs:
             echo "| Pull request | ${PR_URL:-not-set} |"
             echo "| Simulated failure | \`${SIMULATED_FAILURE:-false}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify Slack on canary failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          ACTION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ACTION_PR_URL: ${{ github.event.pull_request.html_url || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          ACTION_REF: ${{ steps.canary.outputs.action-ref }}
+          CANARY_ISSUE_URL: ${{ steps.canary.outputs.issue-url }}
+          CANARY_RUN_URL: ${{ steps.canary.outputs.run-url }}
+          CANARY_RUN_CONCLUSION: ${{ steps.canary.outputs.run-conclusion }}
+          CANARY_PR_URL: ${{ steps.canary.outputs.pr-url }}
+          SIMULATED_FAILURE: ${{ steps.canary.outputs.simulated-failure }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "No SLACK_WEBHOOK_URL configured; skipping Slack notification."
+            exit 0
+          fi
+
+          jq -n \
+            --arg run_url "${ACTION_RUN_URL}" \
+            --arg pr_url "${ACTION_PR_URL:-not-set}" \
+            --arg event_name "${EVENT_NAME}" \
+            --arg ref_name "${REF_NAME}" \
+            --arg action_ref "${ACTION_REF:-not-set}" \
+            --arg canary_issue_url "${CANARY_ISSUE_URL:-not-set}" \
+            --arg canary_run_url "${CANARY_RUN_URL:-not-set}" \
+            --arg canary_run_conclusion "${CANARY_RUN_CONCLUSION:-not-set}" \
+            --arg canary_pr_url "${CANARY_PR_URL:-not-set}" \
+            --arg simulated_failure "${SIMULATED_FAILURE:-false}" \
+            '{
+              text: (
+                "Agent Runner canary failed\n" +
+                "Run: " + $run_url + "\n" +
+                "PR: " + $pr_url + "\n" +
+                "Event: " + $event_name + "\n" +
+                "Ref: " + $ref_name + "\n" +
+                "Action ref: " + $action_ref + "\n" +
+                "Canary issue: " + $canary_issue_url + "\n" +
+                "Canary run: " + $canary_run_url + "\n" +
+                "Canary conclusion: " + $canary_run_conclusion + "\n" +
+                "Canary PR: " + $canary_pr_url + "\n" +
+                "Simulated failure: " + $simulated_failure
+              )
+            }' \
+            | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"

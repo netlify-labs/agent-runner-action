@@ -29,6 +29,14 @@ describe('programmatic canary workflow', () => {
     assert.match(workflow, /Simulated canary failure requested after successful downstream verification/);
   });
 
+  it('optionally notifies Slack when the canary controller fails', () => {
+    assert.match(workflow, /name: Notify Slack on canary failure/);
+    assert.match(workflow, /if: failure\(\)/);
+    assert.match(workflow, /SLACK_WEBHOOK_URL: \$\{\{ secrets\.SLACK_WEBHOOK_URL \}\}/);
+    assert.match(workflow, /No SLACK_WEBHOOK_URL configured; skipping Slack notification/);
+    assert.match(workflow, /curl -fsS -X POST -H 'Content-Type: application\/json'/);
+  });
+
   it('updates the canary workflow pin before creating a test issue', () => {
     assert.match(workflow, /netlify-labs\/agent-runner-action@/);
     assert.match(workflow, /PR_ACTION_REF: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| '' \}\}/);
