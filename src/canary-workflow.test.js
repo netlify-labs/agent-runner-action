@@ -14,6 +14,8 @@ describe('programmatic canary workflow', () => {
 
   it('targets the canonical canary repository by default', () => {
     assert.match(workflow, /default:\s+'netlify-labs\/agent-runner-action-canary'/);
+    assert.match(workflow, /CANARY_REPO: \$\{\{ inputs\.canary_repo \|\| 'netlify-labs\/agent-runner-action-canary' \}\}/);
+    assert.match(workflow, /TIMEOUT_MINUTES: \$\{\{ inputs\.timeout_minutes \|\| '20' \}\}/);
   });
 
   it('requires an explicit cross-repository token', () => {
