@@ -33,7 +33,7 @@ on:
         type: string
         default: '20'
       prompt:
-        description: 'Optional @netlify prompt. Defaults to a minimal docs/index.html canary edit.'
+        description: 'Optional @netlify prompt. Defaults to a minimal README canary marker edit.'
         required: false
         type: string
 
@@ -84,7 +84,7 @@ jobs:
           fi
           RUN_MARKER="canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           ISSUE_TITLE="Agent runner canary smoke test ${RUN_MARKER}"
-          DEFAULT_PROMPT="@netlify codex update docs/index.html to add a short visible canary verification sentence: \"Agent Runner canary ${RUN_MARKER}.\" Keep the change minimal."
+          DEFAULT_PROMPT="@netlify codex in README.md, replace or add one line exactly: Canary marker: ${RUN_MARKER}. Do not edit other files."
           PROMPT="${REQUESTED_PROMPT:-$DEFAULT_PROMPT}"
           TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
           START_SECONDS=$SECONDS

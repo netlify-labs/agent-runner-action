@@ -25,6 +25,8 @@ describe('programmatic canary workflow', () => {
     assert.match(workflow, /netlify-labs\/agent-runner-action@/);
     assert.match(workflow, /PR_ACTION_REF: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| '' \}\}/);
     assert.match(workflow, /ACTION_REF="\$\{PR_ACTION_REF:-\$GITHUB_SHA\}"/);
+    assert.match(workflow, /in README\.md, replace or add one line exactly/);
+    assert.match(workflow, /Do not edit other files/);
     assert.match(workflow, /x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{CANARY_REPO\}\.git/);
     assert.match(workflow, /git push origin HEAD:main/);
     assert.match(workflow, /gh issue create/);
