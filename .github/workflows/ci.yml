@@ -2,10 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [master]
-    paths: ['src/**', 'action.yml', 'package.json', 'tsconfig.json', 'README.md', 'docs/**', 'example-workflow.yml', 'workflow-templates/**']
+    branches: [main]
+    paths: ['.github/workflows/**', 'src/**', 'action.yml', 'package.json', 'tsconfig.json', 'README.md', 'docs/**', 'example-workflow.yml', 'workflow-templates/**']
   pull_request:
-    paths: ['src/**', 'action.yml', 'package.json', 'tsconfig.json', 'README.md', 'docs/**', 'example-workflow.yml', 'workflow-templates/**']
+    paths: ['.github/workflows/**', 'src/**', 'action.yml', 'package.json', 'tsconfig.json', 'README.md', 'docs/**', 'example-workflow.yml', 'workflow-templates/**']
 
 jobs:
   test:
