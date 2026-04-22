@@ -19,6 +19,7 @@ describe('programmatic canary workflow', () => {
 
   it('updates the canary workflow pin before creating a test issue', () => {
     assert.match(workflow, /netlify-labs\/agent-runner-action@/);
+    assert.match(workflow, /x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{CANARY_REPO\}\.git/);
     assert.match(workflow, /git push origin HEAD:main/);
     assert.match(workflow, /gh issue create/);
   });

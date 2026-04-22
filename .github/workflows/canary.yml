@@ -106,6 +106,7 @@ jobs:
           else
             git add "$CANARY_WORKFLOW_PATH"
             git commit -m "chore: pin agent runner canary to ${ACTION_REF}"
+            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${CANARY_REPO}.git"
             git push origin HEAD:main
           fi
 
