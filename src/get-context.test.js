@@ -23,6 +23,7 @@ describe('getContext', () => {
   let core;
   beforeEach(() => {
     core = mockCore();
+    delete process.env.DEFAULT_AGENT;
     process.env.DEFAULT_MODEL = 'codex';
     process.env.DRY_RUN = 'false';
   });
@@ -39,6 +40,7 @@ describe('getContext', () => {
     await getContext({ github: mockGithub(), context, core });
     assert.equal(core.outputs['issue-number'], 42);
     assert.equal(core.outputs['is-pr'], 'true');
+    assert.equal(core.outputs['agent'], 'claude');
     assert.equal(core.outputs['model'], 'claude');
     assert.equal(core.outputs['is-dry-run'], 'false');
   });
@@ -151,10 +153,25 @@ describe('getContext', () => {
       repo: { owner: 'o', repo: 'r' },
     };
     await getContext({ github: mockGithub(), context, core });
+    assert.equal(core.outputs['agent'], 'gemini');
     assert.equal(core.outputs['model'], 'gemini');
   });
 
-  it('defaults model to DEFAULT_MODEL env', async () => {
+  it('uses workflow_dispatch agent input', async () => {
+    const context = {
+      eventName: 'workflow_dispatch',
+      payload: {
+        inputs: { trigger_text: 'build something', agent: 'claude' },
+      },
+      repo: { owner: 'o', repo: 'r' },
+    };
+    await getContext({ github: mockGithub(), context, core });
+    assert.equal(core.outputs['agent'], 'claude');
+    assert.equal(core.outputs['model'], 'claude');
+  });
+
+  it('defaults agent to DEFAULT_AGENT env', async () => {
+    process.env.DEFAULT_AGENT = 'gemini';
     process.env.DEFAULT_MODEL = 'claude';
     const context = {
       eventName: 'issue_comment',
@@ -165,6 +182,22 @@ describe('getContext', () => {
       repo: { owner: 'o', repo: 'r' },
     };
     await getContext({ github: mockGithub(), context, core });
+    assert.equal(core.outputs['agent'], 'gemini');
+    assert.equal(core.outputs['model'], 'gemini');
+  });
+
+  it('defaults agent to legacy DEFAULT_MODEL env', async () => {
+    process.env.DEFAULT_MODEL = 'claude';
+    const context = {
+      eventName: 'issue_comment',
+      payload: {
+        issue: { number: 1, pull_request: null },
+        comment: { body: '@netlify build a page', html_url: 'https://github.com/o/r/issues/1#c' },
+      },
+      repo: { owner: 'o', repo: 'r' },
+    };
+    await getContext({ github: mockGithub(), context, core });
+    assert.equal(core.outputs['agent'], 'claude');
     assert.equal(core.outputs['model'], 'claude');
   });
 

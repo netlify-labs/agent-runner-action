@@ -1,4 +1,4 @@
-// Extract existing agent runner ID and session data from status comment or PR body.
+// Extract existing agent run ID and session data from status comment or PR body.
 // Sets outputs: agent-runner-id, session-data-map, agent-run-url, has-linked-pr, linked-pr-number
 
 /** @typedef {import('./types').ActionParams} ActionParams */
@@ -53,7 +53,7 @@ module.exports = async function extractAgentId({ github, context, core, inputs }
 
   // Preserve current behavior: prefer explicit URL links from comment/PR body.
   const bodyForUrl = statusCommentBody || prBody;
-  const urlMatch = bodyForUrl.match(/\[(?:View agent run|Netlify agent run)\]\((https:\/\/app\.netlify\.com\/projects\/[^)]+)\)/);
+  const urlMatch = bodyForUrl.match(/\[(?:View agent run|Netlify agent run|Agent run)\]\((https:\/\/app\.netlify\.com\/projects\/[^)]+)\)/);
   core.setOutput('agent-run-url', urlMatch ? urlMatch[1] : reconciled.agentRunUrl);
 
   if (reconciled.linkedPrNumber) {

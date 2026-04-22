@@ -40,7 +40,7 @@ module.exports = async function crossPostToPR({ github, context }) {
   // Update issue status comment with redirect note
   const issueCommentId = process.env.STATUS_COMMENT_ID || '';
   if (issueCommentId && statusBody) {
-    const note = `> [!NOTE]\n> A Pull Request was opened for this here #${prNumber}.\n>\n> Leave follow-up \`@netlify\` prompts on PR #${prNumber}, or use the [Netlify Agents dashboard](${agentRunUrl}) to continue iterating.`;
+    const note = `> [!NOTE]\n> A Pull Request was opened for this here #${prNumber}.\n>\n> Leave follow-up \`@netlify\` prompts on PR #${prNumber}, or use the [Netlify Agent Runners dashboard](${agentRunUrl}) to continue iterating.`;
     const firstNewline = statusBody.indexOf('\n');
     const noteBody = firstNewline !== -1
       ? statusBody.slice(0, firstNewline) + '\n\n' + note + statusBody.slice(firstNewline)

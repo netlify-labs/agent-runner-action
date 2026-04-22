@@ -26,6 +26,7 @@ function sanitizeErrorText(value) {
   return (value || '')
     .replace(ANSI_PATTERN, '')
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '')
+    .replace(/\bAgent Runner (\w+) is not available\b/gi, 'Agent $1 is not available')
     .replace(/```/g, "'''")
     .trim();
 }
@@ -40,14 +41,14 @@ function truncateErrorText(value) {
 }
 
 /**
- * Preserve explicit model fallback guidance when providers are unavailable.
+ * Preserve explicit agent fallback guidance when providers are unavailable.
  * @param {string} category
  * @param {string} errorText
  * @returns {string}
  */
-function renderModelUnavailableHint(category, errorText) {
-  if (category !== 'model-unavailable') return '';
-  const providerMatch = errorText.match(/Agent Runner (\w+) is not available/i);
+function renderAgentUnavailableHint(category, errorText) {
+  if (category !== 'agent-unavailable' && category !== 'model-unavailable') return '';
+  const providerMatch = errorText.match(/(?:Agent Runner|agent) (\w+) is not available/i);
   if (!providerMatch) return '';
 
   const unavailableModel = providerMatch[1].toLowerCase();
@@ -84,7 +85,7 @@ module.exports = async function generateErrorComment({ core }) {
     statusCode: statusCode || undefined,
   });
   const safeError = truncateErrorText(sanitizeErrorText(agentError));
-  const modelUnavailableHint = renderModelUnavailableHint(failure.category, agentError);
+  const agentUnavailableHint = renderAgentUnavailableHint(failure.category, agentError);
 
   let message = agentRunUrl
     ? `### [❌ ${failure.title}](${agentRunUrl})\n\n`
@@ -104,8 +105,8 @@ module.exports = async function generateErrorComment({ core }) {
     message += '\n';
   }
 
-  if (modelUnavailableHint) {
-    message += `${modelUnavailableHint}\n\n`;
+  if (agentUnavailableHint) {
+    message += `${agentUnavailableHint}\n\n`;
   }
 
   if (safeError) {
@@ -114,8 +115,8 @@ module.exports = async function generateErrorComment({ core }) {
 
   /** @type {string[]} */
   const links = [];
-  if (agentRunUrl) links.push(`[Netlify agent run](${agentRunUrl})`);
-  if (!agentRunUrl && agentDashboardUrl) links.push(`[Netlify Agents dashboard](${agentDashboardUrl})`);
+  if (agentRunUrl) links.push(`[Agent run](${agentRunUrl})`);
+  if (!agentRunUrl && agentDashboardUrl) links.push(`[Netlify Agent Runners dashboard](${agentDashboardUrl})`);
   if (ghActionUrl) links.push(`[GitHub Action logs](${ghActionUrl})`);
   if (links.length > 0) {
     message += links.join(' • ') + '\n\n';

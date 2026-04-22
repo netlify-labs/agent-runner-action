@@ -6,7 +6,7 @@
 //   node src/format-comment.js in-progress  → prints in-progress comment body
 //
 // Reads from environment variables:
-//   TRIGGER_TEXT, AGENT_MODEL, AGENT_LINK, ACTION_LINK, AGENT_ID, IS_DRY_RUN
+//   TRIGGER_TEXT, NETLIFY_AGENT, AGENT_MODEL, AGENT_LINK, ACTION_LINK, AGENT_ID, IS_DRY_RUN
 
 /** @typedef {import('./types').InProgressCommentOptions} InProgressCommentOptions */
 
@@ -16,7 +16,7 @@ const command = process.argv[2];
 
 if (command === 'in-progress') {
   const triggerText = process.env.TRIGGER_TEXT || '';
-  const model = process.env.AGENT_MODEL || 'codex';
+  const model = process.env.NETLIFY_AGENT || process.env.AGENT_MODEL || 'codex';
   const agentLink = process.env.AGENT_LINK || '';
   const actionLink = process.env.ACTION_LINK || '';
   const agentId = process.env.AGENT_ID || '';

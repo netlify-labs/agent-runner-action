@@ -1,5 +1,5 @@
-name: 'Netlify Agents'
-description: 'Run Netlify Agents from GitHub Issues and Pull Requests via @netlify mentions'
+name: 'Netlify Agent Runners'
+description: 'Start Netlify Agent Runners agent runs from GitHub Issues and Pull Requests via @netlify mentions'
 branding:
   icon: 'zap'
   color: 'green'
@@ -19,11 +19,15 @@ inputs:
     required: false
     default: ${{ github.token }}
   allowed-users:
-    description: 'Comma-separated list of GitHub usernames allowed to trigger the agent (optional — defaults to repo collaborators)'
+    description: 'Comma-separated list of GitHub usernames allowed to trigger agent runs (optional — defaults to repo collaborators)'
     required: false
     default: ''
+  default-agent:
+    description: 'Default agent to use (claude, codex, or gemini)'
+    required: false
+    default: 'codex'
   default-model:
-    description: 'Default AI model to use (claude, codex, or gemini)'
+    description: 'Backward-compatible alias for default-agent'
     required: false
     default: 'codex'
   manage-labels:
@@ -39,7 +43,7 @@ inputs:
     required: false
     default: '24.8.1'
   dry-run:
-    description: 'Preview mode — run the agent but skip PR creation and commits'
+    description: 'Preview mode — start an agent run but skip PR creation and commits'
     required: false
     default: 'false'
   preflight-only:
@@ -60,7 +64,7 @@ inputs:
 # ---------------------------------------------------------------------------
 outputs:
   agent-id:
-    description: 'The Netlify agent runner ID'
+    description: 'The agent run ID'
     value: ${{ steps.netlify-agent.outputs.agent-id }}
   outcome:
     description: 'Agent outcome: success, failure, or timeout'
@@ -74,8 +78,11 @@ outputs:
   agent-deploy-url:
     description: 'Deploy preview URL'
     value: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
+  agent:
+    description: 'The selected agent'
+    value: ${{ steps.context-info.outputs.agent }}
   model:
-    description: 'The AI model that was used'
+    description: 'Backward-compatible alias for agent'
     value: ${{ steps.context-info.outputs.model }}
   trigger-text:
     description: 'The cleaned trigger text / prompt'
@@ -189,7 +196,8 @@ runs:
       uses: actions/github-script@v8
       env:
         ACTION_DIR: ${{ github.action_path }}
-        DEFAULT_MODEL: ${{ inputs.default-model }}
+        DEFAULT_AGENT: ${{ inputs.default-agent || inputs.default-model }}
+        DEFAULT_MODEL: ${{ inputs.default-model || inputs.default-agent }}
         DRY_RUN: ${{ inputs.dry-run }}
       with:
         github-token: ${{ inputs.github-token }}
@@ -209,7 +217,8 @@ runs:
         NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
         NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
         GITHUB_TOKEN_INPUT: ${{ inputs.github-token }}
-        DEFAULT_MODEL: ${{ inputs.default-model }}
+        DEFAULT_AGENT: ${{ inputs.default-agent || inputs.default-model }}
+        DEFAULT_MODEL: ${{ inputs.default-model || inputs.default-agent }}
         TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
         ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
@@ -229,6 +238,7 @@ runs:
               netlifyAuthToken: process.env.NETLIFY_AUTH_TOKEN,
               netlifySiteId: process.env.NETLIFY_SITE_ID,
               githubToken: process.env.GITHUB_TOKEN_INPUT,
+              defaultAgent: process.env.DEFAULT_AGENT,
               defaultModel: process.env.DEFAULT_MODEL,
               timeoutMinutes: process.env.TIMEOUT_MINUTES,
               triggerText: process.env.TRIGGER_TEXT,
@@ -349,7 +359,7 @@ runs:
         issue-number: ${{ steps.context-info.outputs.issue-number }}
         body-includes: '<!-- netlify-agent-run-history -->'
 
-    - name: Extract existing agent runner ID
+    - name: Extract existing agent run ID
       id: extract-agent-id
       if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch'
       uses: actions/github-script@v8
@@ -406,8 +416,8 @@ runs:
           const failureDetails = Array.isArray(result.failureDetails) ? result.failureDetails : [];
 
           let body = preflightOk
-            ? '### Netlify Agent Runner preflight passed ✅\n\n'
-            : '### ❌ Netlify Agent Runner preflight failed\n\n';
+            ? '### Netlify Agent Runners preflight passed ✅\n\n'
+            : '### ❌ Netlify Agent Runners preflight failed\n\n';
 
           if (preflightOk && preflightOnly) {
             body += 'Configuration is valid, and `preflight-only=true` prevented agent creation for this run.\n\n';
@@ -500,7 +510,7 @@ runs:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.context-info.outputs.issue-number }}
         body: |
-          > This issue already has a linked pull request. Please add follow-up `@netlify` prompts on PR #${{ steps.extract-agent-id.outputs.linked-pr-number || steps.context-info.outputs.linked-pr-number }}${{ steps.extract-agent-id.outputs.agent-run-url && format(', or use the [Netlify Agents dashboard]({0})', steps.extract-agent-id.outputs.agent-run-url) || '' }}.
+          > This issue already has a linked pull request. Please add follow-up `@netlify` prompts on PR #${{ steps.extract-agent-id.outputs.linked-pr-number || steps.context-info.outputs.linked-pr-number }}${{ steps.extract-agent-id.outputs.agent-run-url && format(', or use the [Netlify Agent Runners dashboard]({0})', steps.extract-agent-id.outputs.agent-run-url) || '' }}.
 
     # -----------------------------------------------------------------------
     # 9. Create initial status comment
@@ -520,7 +530,7 @@ runs:
         script: |
           const utils = require(`${process.env.ACTION_DIR}/src/utils.js`);
           const triggerText = ${{ toJSON(steps.context-info.outputs.trigger-text) }} || '';
-          const model = ${{ toJSON(steps.context-info.outputs.model) }} || 'codex';
+          const model = ${{ toJSON(steps.context-info.outputs.agent || steps.context-info.outputs.model) }} || 'codex';
           const isDryRun = '${{ steps.context-info.outputs.is-dry-run }}' === 'true';
           const dryRunTag = isDryRun ? ' (preview)' : '';
           const ghActionUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
@@ -671,7 +681,7 @@ runs:
         github-token: ${{ inputs.github-token }}
         script: |
           const utils = require(`${process.env.ACTION_DIR}/src/utils.js`);
-          const model = ${{ toJSON(steps.context-info.outputs.model) }} || 'codex';
+          const model = ${{ toJSON(steps.context-info.outputs.agent || steps.context-info.outputs.model) }} || 'codex';
           const runnerId = ${{ toJSON(steps.extract-agent-id.outputs.agent-runner-id) }};
           const commentId = ${{ toJSON(steps.find_comment.outputs.comment-id) }} || ${{ toJSON(steps.create_comment.outputs.comment-id) }};
           const siteName = ${{ toJSON(steps.resolve-site-name.outputs.site-name) }} || 'unknown';
@@ -687,10 +697,10 @@ runs:
           });
 
     # -----------------------------------------------------------------------
-    # 13. Run the Netlify Agent (create runner, poll for completion)
+    # 13. Run Netlify Agent Runners (create an agent run, poll for completion)
     #     Dry-run mode skips PR creation and commits.
     # -----------------------------------------------------------------------
-    - name: Run Netlify Agent
+    - name: Run Netlify Agent Runners
       id: netlify-agent
       if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
       shell: bash
@@ -699,7 +709,8 @@ runs:
         NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
-        AGENT_MODEL: ${{ steps.context-info.outputs.model }}
+        NETLIFY_AGENT: ${{ steps.context-info.outputs.agent || steps.context-info.outputs.model }}
+        AGENT_MODEL: ${{ steps.context-info.outputs.model || steps.context-info.outputs.agent }}
         EXISTING_RUNNER_ID: ${{ steps.extract-agent-id.outputs.agent-runner-id }}
         HEAD_BRANCH: ${{ steps.context-info.outputs.head-ref }}
         REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -749,18 +760,19 @@ runs:
         echo "failure-category=" >> $GITHUB_OUTPUT
         echo "agent-error=" >> $GITHUB_OUTPUT
 
-        echo "🚀 Starting Netlify Agent..."
-        echo "Model: $AGENT_MODEL | Site: ${SITE_NAME:-unknown} | Dry-run: ${IS_DRY_RUN:-false}"
+        echo "🚀 Starting Netlify Agent Runners..."
+        SELECTED_AGENT="${NETLIFY_AGENT:-${AGENT_MODEL:-codex}}"
+        echo "Agent: $SELECTED_AGENT | Site: ${SITE_NAME:-unknown} | Dry-run: ${IS_DRY_RUN:-false}"
 
         # Build agent args
-        AGENT_ARGS=(--json --agent "$AGENT_MODEL")
+        AGENT_ARGS=(--json --agent "$SELECTED_AGENT")
         if [ -n "${HEAD_BRANCH:-}" ]; then
           AGENT_ARGS+=(--branch "$HEAD_BRANCH")
         elif [ -n "${REPOSITORY_DEFAULT_BRANCH:-}" ]; then
           AGENT_ARGS+=(--branch "$REPOSITORY_DEFAULT_BRANCH")
         fi
 
-        # Create or reuse agent runner
+        # Create or reuse agent run
         if [ -n "${EXISTING_RUNNER_ID:-}" ]; then
           echo "🔄 Follow-up session on runner: $EXISTING_RUNNER_ID"
           SAFE_PROMPT=$(echo "$TRIGGER_TEXT" | jq -Rs .)
@@ -768,7 +780,7 @@ runs:
           for ATTEMPT in 1 2 3; do
             echo "  Attempt $ATTEMPT/3..."
             SESSION_RESULT=$(netlify api createAgentRunnerSession \
-              --data "{\"agent_runner_id\": \"$EXISTING_RUNNER_ID\", \"body\": {\"prompt\": $SAFE_PROMPT, \"agent\": \"$AGENT_MODEL\"}}" 2>/dev/null || true)
+              --data "{\"agent_runner_id\": \"$EXISTING_RUNNER_ID\", \"body\": {\"prompt\": $SAFE_PROMPT, \"agent\": \"$SELECTED_AGENT\"}}" 2>/dev/null || true)
             debug_log "createAgentRunnerSession (attempt $ATTEMPT)" "$SESSION_RESULT"
             SESSION_STATE=$(echo "$SESSION_RESULT" | jq -r '.state // empty')
             if [ "$SESSION_STATE" = "running" ]; then
@@ -788,7 +800,7 @@ runs:
             exit 1
           fi
         else
-          echo "📡 Creating new agent runner..."
+          echo "📡 Creating new agent run..."
           AGENT_STDERR=$(mktemp)
           AGENT_OUTPUT=$(netlify agents:create "$TRIGGER_TEXT" "${AGENT_ARGS[@]}" 2>"$AGENT_STDERR" || true)
           debug_log "agents:create" "$AGENT_OUTPUT"
@@ -1033,7 +1045,7 @@ runs:
           const triggerText = (process.env.TRIGGER_TEXT || '').toLowerCase();
           const owner = context.repo.owner;
           const repo = context.repo.repo;
-          const label = { name: 'netlify-agent', color: '00AD9F', description: 'Items created or modified by Netlify Agent' };
+          const label = { name: 'netlify-agent', color: '00AD9F', description: 'Items created or modified by Netlify Agent Runners' };
           try { await github.rest.issues.createLabel({ owner, repo, ...label }); } catch (e) { /* exists */ }
           const autoLabels = ['netlify-agent'];
           if (triggerText.includes('security')) autoLabels.push('security-fix');
@@ -1192,7 +1204,7 @@ runs:
         issue-number: ${{ steps.context-info.outputs.issue-number }}
         comment-id: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
         body: |
-          Netlify Agent run completed (status reporting encountered an error).
+          Agent run completed (status reporting encountered an error).
           [GitHub Action logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
           <!-- netlify-agent-run-status -->
         edit-mode: replace
@@ -1250,7 +1262,8 @@ runs:
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         ISSUE_NUM: ${{ steps.context-info.outputs.issue-number }}
         CONTEXT_LABEL: "${{ steps.context-info.outputs.is-pr == 'true' && format('PR #{0}', steps.context-info.outputs.issue-number) || format('Issue #{0}', steps.context-info.outputs.issue-number) }}"
-        MODEL: ${{ steps.context-info.outputs.model }}
+        AGENT: ${{ steps.context-info.outputs.agent || steps.context-info.outputs.model }}
+        MODEL: ${{ steps.context-info.outputs.model || steps.context-info.outputs.agent }}
         IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
         SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
@@ -1311,6 +1324,7 @@ runs:
             outcome,
             eventName: process.env.EVENT_NAME,
             contextLabel: process.env.CONTEXT_LABEL,
+            agent: process.env.AGENT,
             model: process.env.MODEL,
             isDryRun: process.env.IS_DRY_RUN,
             isPreflightOnly: process.env.PREFLIGHT_ONLY,
@@ -1339,14 +1353,15 @@ runs:
         SHOULD_CONTINUE: ${{ steps.should-continue.outputs.should-continue || steps.preflight.outputs.should-continue }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         ISSUE_NUM: ${{ steps.context-info.outputs.issue-number }}
-        MODEL: ${{ steps.context-info.outputs.model }}
+        AGENT: ${{ steps.context-info.outputs.agent || steps.context-info.outputs.model }}
+        MODEL: ${{ steps.context-info.outputs.model || steps.context-info.outputs.agent }}
         FRAMEWORK: ${{ steps.project-info.outputs.framework }}
         IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
       run: |
         echo "📊 ===== Execution Summary ====="
         echo "Status: ${OUTCOME:-skipped}"
         echo "Context: $([ "$IS_PR" = 'true' ] && echo 'PR' || echo 'Issue') #${ISSUE_NUM}"
-        echo "Model: $MODEL"
+        echo "Agent: ${AGENT:-$MODEL}"
         echo "Project: ${FRAMEWORK:-Unknown}"
         echo "Dry-run: ${IS_DRY_RUN:-false}"
         echo "Preflight-only input: ${PREFLIGHT_ONLY:-false}"

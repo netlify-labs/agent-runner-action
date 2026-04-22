@@ -1,4 +1,4 @@
-# Netlify Agent Runner Hardening Plan
+# Netlify Agent Runners Hardening Plan
 
 Status: draft plan  
 Scope: ideas 1, 4, 5, 6, 7, 8, 9, and 11 from the idea-wizard pass  
@@ -6,7 +6,7 @@ Canonical consumer slug: `netlify-labs/agent-runner-action@v1`
 
 ## Purpose
 
-This plan describes a reliability and operator-experience hardening pass for the Netlify Agent Runner GitHub Action. The action already provides the core user workflow: a GitHub user mentions `@netlify` in an issue, pull request, review, review comment, issue comment, or manual dispatch; the action extracts context, starts or resumes a Netlify Agent run, updates status comments, and optionally creates or updates a pull request.
+This plan describes a reliability and operator-experience hardening pass for the Netlify Agent Runners GitHub Action. The action already provides the core user workflow: a GitHub user mentions `@netlify` in an issue, pull request, review, review comment, issue comment, or manual dispatch; the action extracts context, starts or resumes an agent run, updates status comments, and optionally creates or updates a pull request.
 
 The next layer of value is not another flashy feature. It is making the action easier to trust, debug, test, and support. The selected ideas all point in the same direction:
 
@@ -58,7 +58,7 @@ Important current constraints:
 - The canonical consumer slug for this plan is `netlify-labs/agent-runner-action@v1`.
 - The action currently relies on Bun, Netlify CLI, GitHub CLI, `jq`, and GitHub APIs.
 - A lot of orchestration still lives inline in `action.yml` Bash. This plan does not require a full runner rewrite, but it should extract pure parsing/rendering/decision logic into testable modules where that directly supports the selected ideas.
-- `dry-run` currently means "run the agent but skip PR creation and commits." It is not the same as "do not contact Netlify."
+- `dry-run` currently means "start an agent run but skip PR creation and commits." It is not the same as "do not contact Netlify."
 
 ## Goals
 
@@ -162,8 +162,8 @@ It should return:
 {
   category: 'agent-timeout',
   title: 'Agent timed out before completion',
-  summary: 'The Netlify Agent did not reach a terminal state before the configured timeout.',
-  remediation: ['Try a smaller prompt', 'Increase timeout-minutes', 'Check the Netlify Agents dashboard'],
+  summary: 'The agent run did not reach a terminal state before the configured timeout.',
+  remediation: ['Try a smaller prompt', 'Increase timeout-minutes', 'Check the Netlify Agent Runners dashboard'],
   severity: 'error',
   retryable: true,
   userActionRequired: false
@@ -386,7 +386,7 @@ Selected idea: 4.
 
 ### User Problem
 
-Follow-up prompts depend on recovering the previous Netlify Agent runner ID. The current implementation parses a sticky status comment first and falls back to PR body markers. That is useful but fragile. If a comment is deleted, edited, partially rendered, or contains malformed session JSON, the action can lose continuity.
+Follow-up prompts depend on recovering the previous agent run ID. The current implementation parses a sticky status comment first and falls back to PR body markers. That is useful but fragile. If a comment is deleted, edited, partially rendered, or contains malformed session JSON, the action can lose continuity.
 
 ### Plan
 
@@ -472,7 +472,7 @@ Add a new optional input:
 
 ```yaml
 preflight-only:
-  description: 'Validate setup and configuration without starting a Netlify Agent run'
+  description: 'Validate setup and configuration without starting an agent run'
   required: false
   default: 'false'
 ```
@@ -480,7 +480,7 @@ preflight-only:
 This is intentionally separate from `dry-run`.
 
 - `dry-run=true`: starts the agent but skips PR creation and commits.
-- `preflight-only=true`: validates setup and exits before creating or resuming an agent runner.
+- `preflight-only=true`: validates setup and exits before creating or resuming an agent run.
 
 This separation avoids surprising existing users.
 
@@ -490,7 +490,7 @@ Static checks:
 
 - `netlify-auth-token` input is present.
 - `netlify-site-id` input is present.
-- `default-model` is one of `claude`, `codex`, or `gemini`.
+- `default-agent` is one of `claude`, `codex`, or `gemini`; `default-model` remains a compatibility alias.
 - `timeout-minutes` is a positive integer.
 - `github-token` input is present.
 - Trigger context can be extracted.
@@ -527,7 +527,7 @@ Composite actions do not have a native "return early" primitive. The implementat
 For preflight-only success:
 
 ```markdown
-### Netlify Agent Runner preflight passed
+### Netlify Agent Runners preflight passed
 
 The action configuration looks valid. No agent was started because `preflight-only` is enabled.
 
@@ -544,7 +544,7 @@ Checks:
 For preflight failure:
 
 ```markdown
-### Netlify Agent Runner preflight failed
+### Netlify Agent Runners preflight failed
 
 The action did not start an agent run because setup validation failed.
 
@@ -576,7 +576,7 @@ Required cases:
 
 ### Success Criteria
 
-- Users can validate setup without starting a Netlify Agent.
+- Users can validate setup without starting an agent run.
 - Setup failures produce specific, actionable comments and summaries.
 - Existing default runs continue unless preflight fails.
 - `dry-run` semantics remain unchanged.
@@ -629,7 +629,7 @@ Prompt:
   fix the mobile layout
 
 Would update status comment with:
-  Netlify Agent Runner...
+  Netlify Agent Runners...
 ```
 
 JSON output:
@@ -709,7 +709,7 @@ Parse `action.yml` and validate:
 - Every declared output appears in the README output table, or is explicitly marked internal/undocumented.
 - Workflow examples use only declared inputs.
 - Required secrets are described consistently.
-- Default model is documented consistently.
+- Default agent is documented consistently.
 - `dry-run`, `netlify-cli-version`, `timezone`, and the proposed `preflight-only` input are documented.
 - The docs site includes the canonical slug.
 - Workflow templates include required permissions: `contents: write`, `pull-requests: write`, `issues: write`.
@@ -816,8 +816,8 @@ The classifier should accept:
 
 `model-unavailable`
 
-- Trigger: error text like "Agent Runner X is not available."
-- User message: retry with another model, e.g. `@netlify codex`, `@netlify claude`, or `@netlify gemini`.
+- Trigger: error text like "Agent X is not available."
+- User message: retry with another agent, e.g. `@netlify codex`, `@netlify claude`, or `@netlify gemini`.
 - Retryable: true.
 
 `agent-create-failed`
@@ -941,14 +941,14 @@ Generate a `$GITHUB_STEP_SUMMARY` Markdown report for every triggered run. It sh
 Run overview:
 
 ```markdown
-## Netlify Agent Runner
+## Netlify Agent Runners
 
 | Field | Value |
 |---|---|
 | Outcome | success |
 | Event | issue_comment |
 | Context | PR #42 |
-| Model | codex |
+| Agent | codex |
 | Dry-run | false |
 | Preflight-only | false |
 ```
@@ -984,10 +984,10 @@ Failure:
 **Retryable:** yes  
 **User action required:** no
 
-The Netlify Agent did not finish before the configured timeout.
+The agent run did not finish before the configured timeout.
 
 Suggested next steps:
-- Check the Netlify Agents dashboard.
+- Check the Netlify Agent Runners dashboard.
 - Increase `timeout-minutes`.
 - Split the task into a smaller prompt.
 ```
@@ -1065,7 +1065,7 @@ Scope:
 - Refactor `src/extract-agent-id.js` to use it.
 - Add unit tests.
 
-Why it is self-contained: it hardens follow-up state without changing the agent runner flow.
+Why it is self-contained: it hardens follow-up state without changing the agent run flow.
 
 ### Slice 3: Failure Taxonomy And Error Comments
 

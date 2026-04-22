@@ -381,7 +381,8 @@ async function generateScenarioComment(scenario, context, outputs, failure, reco
   process.env.IS_PR = outputs['is-pr'] || 'false';
   process.env.ISSUE_NUMBER = issueNumber ? String(issueNumber) : '';
   process.env.TRIGGER_TEXT = outputs['trigger-text'] || toText((scenario.env || {}).TRIGGER_TEXT);
-  process.env.AGENT_MODEL = outputs.model || toText((scenario.env || {}).AGENT_MODEL || (scenario.env || {}).DEFAULT_MODEL || 'codex');
+  process.env.NETLIFY_AGENT = outputs.agent || outputs.model || toText((scenario.env || {}).NETLIFY_AGENT || (scenario.env || {}).AGENT_MODEL || (scenario.env || {}).DEFAULT_AGENT || (scenario.env || {}).DEFAULT_MODEL || 'codex');
+  process.env.AGENT_MODEL = process.env.NETLIFY_AGENT;
   process.env.AGENT_ID = toText((scenario.env || {}).AGENT_ID) || reconciled.runnerId;
   process.env.SITE_NAME = toText((scenario.env || {}).SITE_NAME) || 'agent-runner-action-example';
   process.env.IS_DRY_RUN = outputs['is-dry-run'] || toText((scenario.env || {}).DRY_RUN || 'false');
@@ -417,6 +418,7 @@ async function runScenario(scenario, options = {}) {
   const netlifyFixtures = normalizeFixtureMap(scenario.netlifyFixtures, repoRoot);
 
   const envPatch = {
+    DEFAULT_AGENT: 'codex',
     DEFAULT_MODEL: 'codex',
     DRY_RUN: 'false',
     RUNNER_TEMP: os.tmpdir(),
@@ -516,7 +518,8 @@ async function runScenario(scenario, options = {}) {
         eventName: context.eventName,
         isPr: outputs['is-pr'] || toText(payload.pull_request ? 'true' : 'false'),
         issueNumber: outputs['issue-number'] || toText((payload.issue && /** @type {any} */ (payload.issue).number) || ''),
-        model: outputs.model || toText((scenario.env || {}).DEFAULT_MODEL || 'codex'),
+        agent: outputs.agent || outputs.model || toText((scenario.env || {}).DEFAULT_AGENT || (scenario.env || {}).DEFAULT_MODEL || 'codex'),
+        model: outputs.model || outputs.agent || toText((scenario.env || {}).DEFAULT_MODEL || (scenario.env || {}).DEFAULT_AGENT || 'codex'),
         runnerId: reconciled.runnerId || toText((scenario.env || {}).AGENT_ID),
         siteName: toText((scenario.env || {}).SITE_NAME),
         dashboardUrl: reconciled.agentRunUrl,

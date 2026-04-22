@@ -20,9 +20,10 @@ describe('scenario harness', () => {
 
     assert.equal(trace.outputs['should-run'], 'true');
     assert.equal(trace.outputs['is-pr'], 'false');
+    assert.equal(trace.outputs.agent, 'codex');
     assert.equal(trace.outputs.model, 'codex');
     assert.equal(trace.failures.length, 0);
-    assert.ok(trace.summary.includes('# Netlify Agent Runner'));
+    assert.ok(trace.summary.includes('# Netlify Agent Runners'));
     assert.ok(trace.summary.includes('| Outcome | success |'));
     assert.ok(trace.comments.length > 0);
   });
@@ -74,9 +75,9 @@ describe('scenario harness', () => {
     assert.equal(trace.state.reconciled.recoveryAction, 'redirect-to-pr');
   });
 
-  it('covers workflow_dispatch explicit model selection', async () => {
+  it('covers workflow_dispatch explicit agent selection', async () => {
     const trace = await runScenario({
-      name: 'workflow dispatch explicit model',
+      name: 'workflow dispatch explicit agent',
       eventName: 'workflow_dispatch',
       eventFixture: 'fixtures/events/workflow-dispatch.json',
       env: {
@@ -87,6 +88,7 @@ describe('scenario harness', () => {
     });
 
     assert.equal(trace.outputs['should-run'], 'true');
+    assert.equal(trace.outputs.agent, 'gemini');
     assert.equal(trace.outputs.model, 'gemini');
   });
 
@@ -183,8 +185,8 @@ describe('scenario harness', () => {
     });
 
     assert.equal(trace.failures.length, 1);
-    assert.equal(trace.failures[0].category, 'model-unavailable');
-    assert.ok(trace.summary.includes('`model-unavailable`'));
+    assert.equal(trace.failures[0].category, 'agent-unavailable');
+    assert.ok(trace.summary.includes('`agent-unavailable`'));
   });
 
   it('maps timeout runs to taxonomy and summary timeout section', async () => {
@@ -232,7 +234,7 @@ describe('scenario harness', () => {
     assert.equal(trace.failures.length, 0);
     assert.equal(trace.comments.length, 0);
     assert.ok(trace.summary.includes('Preview mode: no commit or pull request creation is performed.'));
-    assert.ok(trace.summary.includes('Preflight-only mode: configuration was validated without starting a Netlify agent run.'));
+    assert.ok(trace.summary.includes('Preflight-only mode: configuration was validated without starting an agent run.'));
     assert.ok(trace.summary.includes('Both dry-run=true and preflight-only=true were set; preflight-only takes precedence.'));
     assert.ok(trace.summary.includes('| Runner ID | n/a |'));
     assert.ok(trace.summary.includes('| Dashboard | n/a |'));

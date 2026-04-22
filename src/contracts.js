@@ -8,7 +8,7 @@
 /** @typedef {'info' | 'warning' | 'error'} FailureSeverity */
 /** @typedef {'validate-env' | 'resolve-site' | 'create-agent' | 'create-session' | 'poll-agent' | 'commit' | 'create-pr' | 'comment-update' | 'unknown'} FailureStage */
 
-/** @typedef {'missing-auth-token' | 'missing-site-id' | 'site-lookup-failed' | 'netlify-cli-missing' | 'netlify-cli-install-failed' | 'model-unavailable' | 'agent-create-failed' | 'session-create-failed' | 'agent-timeout' | 'agent-failed' | 'deploy-preview-unavailable' | 'commit-to-branch-failed' | 'pull-request-create-failed' | 'github-permission-denied' | 'github-api-failed' | 'malformed-api-response' | 'unknown'} FailureCategory */
+/** @typedef {'missing-auth-token' | 'missing-site-id' | 'site-lookup-failed' | 'netlify-cli-missing' | 'netlify-cli-install-failed' | 'agent-unavailable' | 'model-unavailable' | 'agent-create-failed' | 'session-create-failed' | 'agent-timeout' | 'agent-failed' | 'deploy-preview-unavailable' | 'commit-to-branch-failed' | 'pull-request-create-failed' | 'github-permission-denied' | 'github-api-failed' | 'malformed-api-response' | 'unknown'} FailureCategory */
 
 /**
  * Shared hidden markers embedded in issue/PR comments.
@@ -68,6 +68,7 @@
  * @property {'success' | 'failure' | 'timeout' | 'skipped' | 'unknown'} outcome
  * @property {string} eventName
  * @property {string} contextLabel
+ * @property {string} agent
  * @property {string} model
  * @property {boolean} isDryRun
  * @property {boolean} isPreflightOnly
@@ -109,6 +110,7 @@ const FAILURE_CATEGORIES = Object.freeze([
   'site-lookup-failed',
   'netlify-cli-missing',
   'netlify-cli-install-failed',
+  'agent-unavailable',
   'model-unavailable',
   'agent-create-failed',
   'session-create-failed',
@@ -194,7 +196,7 @@ function createReconciledState(overrides = {}) {
 function createFailureClassification(overrides = {}) {
   return {
     category: normalizeFailureCategory(overrides.category || 'unknown'),
-    title: overrides.title || 'Netlify Agent Runner failed',
+    title: overrides.title || 'Netlify Agent Runners run failed',
     summary: overrides.summary || 'The run failed before completion.',
     remediation: Array.isArray(overrides.remediation) ? overrides.remediation : [],
     severity: normalizeFailureSeverity(overrides.severity || 'error'),
@@ -244,7 +246,8 @@ function createStepSummaryInput(overrides = {}) {
       : 'unknown',
     eventName: overrides.eventName || '',
     contextLabel: overrides.contextLabel || '',
-    model: overrides.model || 'codex',
+    agent: overrides.agent || overrides.model || 'codex',
+    model: overrides.agent || overrides.model || 'codex',
     isDryRun: overrides.isDryRun === true,
     isPreflightOnly: overrides.isPreflightOnly === true,
     issueNumber: overrides.issueNumber || '',

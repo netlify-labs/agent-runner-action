@@ -1,7 +1,7 @@
 {
   "inputs": {
     "trigger_text": "@netlify gemini run preflight checks",
-    "model": "gemini",
+    "agent": "gemini",
     "actor": "repo-admin"
   },
   "sender": { "login": "repo-admin" },

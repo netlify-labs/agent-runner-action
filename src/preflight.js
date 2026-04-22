@@ -13,6 +13,7 @@ const DEFAULT_MODEL = 'codex';
  *   netlifyAuthToken: string,
  *   netlifySiteId: string,
  *   githubToken: string,
+ *   defaultAgent: string,
  *   defaultModel: string,
  *   timeoutMinutes: number,
  *   triggerText: string,
@@ -97,8 +98,15 @@ function normalizePreflightInput(source = {}) {
     netlifyAuthToken: pickText(source, ['netlifyAuthToken', 'NETLIFY_AUTH_TOKEN', 'netlify-auth-token']),
     netlifySiteId: pickText(source, ['netlifySiteId', 'NETLIFY_SITE_ID', 'netlify-site-id']),
     githubToken: pickText(source, ['githubToken', 'GITHUB_TOKEN', 'github-token']),
+    defaultAgent: (
+      pickText(source, ['defaultAgent', 'DEFAULT_AGENT', 'agent', 'AGENT', 'default-agent']).toLowerCase()
+      || pickText(source, ['defaultModel', 'DEFAULT_MODEL', 'model', 'MODEL', 'default-model']).toLowerCase()
+      || DEFAULT_MODEL
+    ),
     defaultModel: (
-      pickText(source, ['defaultModel', 'DEFAULT_MODEL', 'model', 'MODEL']).toLowerCase() || DEFAULT_MODEL
+      pickText(source, ['defaultAgent', 'DEFAULT_AGENT', 'agent', 'AGENT', 'default-agent']).toLowerCase()
+      || pickText(source, ['defaultModel', 'DEFAULT_MODEL', 'model', 'MODEL', 'default-model']).toLowerCase()
+      || DEFAULT_MODEL
     ),
     timeoutMinutes: toInt(source.timeoutMinutes ?? source.TIMEOUT_MINUTES ?? source['timeout-minutes']),
     triggerText: pickText(source, ['triggerText', 'TRIGGER_TEXT', 'prompt', 'PROMPT']),
@@ -222,17 +230,17 @@ async function runPreflight(source = {}, runtimeChecks = {}) {
     input.netlifySiteId ? null : { category: 'missing-site-id', stage: 'validate-env' }
   );
 
-  const validModel = VALID_MODELS.includes(input.defaultModel);
+  const validModel = VALID_MODELS.includes(input.defaultAgent);
   pushCheck(
     checks,
     warnings,
     failureDetails,
-    'default-model',
+    'default-agent',
     validModel ? 'pass' : 'fail',
     validModel
-      ? `Default model is valid (${input.defaultModel}).`
-      : `Invalid default model "${input.defaultModel}". Expected one of: ${VALID_MODELS.join(', ')}.`,
-    validModel ? null : { category: 'model-unavailable', stage: 'validate-env', error: input.defaultModel }
+      ? `Default agent is valid (${input.defaultAgent}).`
+      : `Invalid default agent "${input.defaultAgent}". Expected one of: ${VALID_MODELS.join(', ')}.`,
+    validModel ? null : { category: 'agent-unavailable', stage: 'validate-env', error: input.defaultAgent }
   );
 
   const validTimeout = Number.isInteger(input.timeoutMinutes) && input.timeoutMinutes > 0;

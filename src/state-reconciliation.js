@@ -1,4 +1,4 @@
-// Reconcile prior Netlify Agent run state from comments, PR bodies, and outputs.
+// Reconcile prior agent run state from comments, PR bodies, and outputs.
 // Pure module: no API calls.
 
 /**

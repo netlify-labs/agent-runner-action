@@ -1,6 +1,6 @@
 // Extract context information from the GitHub event.
 // Sets outputs: issue-number, pr-number, head-ref, base-ref, head-sha,
-//               is-pr, trigger-text, has-linked-pr, model, is-dry-run
+//               is-pr, trigger-text, has-linked-pr, agent, model, is-dry-run
 
 /** @typedef {import('./types').ActionParams} ActionParams */
 
@@ -11,7 +11,7 @@ const utils = require('./utils');
  * @returns {Promise<void>}
  */
 module.exports = async function getContext({ github, context, core }) {
-  const defaultModel = process.env.DEFAULT_MODEL || 'codex';
+  const defaultAgent = process.env.DEFAULT_AGENT || process.env.DEFAULT_MODEL || 'codex';
 
   /** @type {number | undefined} */
   let issueNumber;
@@ -119,12 +119,13 @@ module.exports = async function getContext({ github, context, core }) {
   const isDryRun = process.env.DRY_RUN === 'true' ||
     /\b(?:preview|dry[- ]?run)\b/i.test(triggerText.split('\n')[0] || '');
 
-  // Extract model
-  let model = defaultModel;
-  if (context.eventName === 'workflow_dispatch' && payload.inputs?.model) {
-    model = payload.inputs.model.toLowerCase();
+  // Extract selected agent. `model` remains an output alias for compatibility.
+  let agent = defaultAgent;
+  const workflowDispatchAgent = payload.inputs?.agent || payload.inputs?.model;
+  if (context.eventName === 'workflow_dispatch' && workflowDispatchAgent) {
+    agent = workflowDispatchAgent.toLowerCase();
   } else {
-    model = utils.extractModel(triggerText, defaultModel);
+    agent = utils.extractModel(triggerText, defaultAgent);
   }
 
   // Append source URL for back-linking
@@ -151,8 +152,9 @@ module.exports = async function getContext({ github, context, core }) {
   core.setOutput('is-pr', isPR.toString());
   core.setOutput('trigger-text', triggerText);
   core.setOutput('has-linked-pr', hasLinkedPR.toString());
-  core.setOutput('model', model);
+  core.setOutput('agent', agent);
+  core.setOutput('model', agent);
   core.setOutput('is-dry-run', isDryRun.toString());
 
-  console.log(`Context: event=${context.eventName} issue=#${issueNumber} isPR=${isPR} model=${model} dryRun=${isDryRun}`);
+  console.log(`Context: event=${context.eventName} issue=#${issueNumber} isPR=${isPR} agent=${agent} dryRun=${isDryRun}`);
 };
