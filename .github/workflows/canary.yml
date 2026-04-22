@@ -1,6 +1,11 @@
 name: Canary
 
 on:
+  pull_request:
+    paths:
+      - 'action.yml'
+      - 'action.yaml'
+      - 'src/**'
   workflow_dispatch:
     inputs:
       action_ref:
@@ -47,6 +52,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.CANARY_REPO_TOKEN }}
       REQUESTED_ACTION_REF: ${{ inputs.action_ref }}
+      PR_ACTION_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
       CANARY_REPO: ${{ inputs.canary_repo }}
       CANARY_WORKFLOW_PATH: ${{ inputs.canary_workflow_path }}
       CANARY_WORKFLOW_NAME: ${{ inputs.canary_workflow_name }}
@@ -72,7 +78,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          ACTION_REF="${REQUESTED_ACTION_REF:-$GITHUB_SHA}"
+          ACTION_REF="${REQUESTED_ACTION_REF:-}"
+          if [ -z "$ACTION_REF" ]; then
+            ACTION_REF="${PR_ACTION_REF:-$GITHUB_SHA}"
+          fi
           RUN_MARKER="canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           ISSUE_TITLE="Agent runner canary smoke test ${RUN_MARKER}"
           DEFAULT_PROMPT="@netlify codex update docs/index.html to add a short visible canary verification sentence: \"Agent Runner canary ${RUN_MARKER}.\" Keep the change minimal."

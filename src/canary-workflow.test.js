@@ -8,6 +8,10 @@ const WORKFLOW_PATH = path.join(REPO_ROOT, '.github', 'workflows', 'canary.yml')
 const workflow = fs.readFileSync(WORKFLOW_PATH, 'utf8');
 
 describe('programmatic canary workflow', () => {
+  it('runs on pull requests that touch the action or source code', () => {
+    assert.match(workflow, /pull_request:\n\s+paths:\n\s+- 'action\.yml'\n\s+- 'action\.yaml'\n\s+- 'src\/\*\*'/);
+  });
+
   it('targets the canonical canary repository by default', () => {
     assert.match(workflow, /default:\s+'netlify-labs\/agent-runner-action-canary'/);
   });
@@ -19,6 +23,8 @@ describe('programmatic canary workflow', () => {
 
   it('updates the canary workflow pin before creating a test issue', () => {
     assert.match(workflow, /netlify-labs\/agent-runner-action@/);
+    assert.match(workflow, /PR_ACTION_REF: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| '' \}\}/);
+    assert.match(workflow, /ACTION_REF="\$\{PR_ACTION_REF:-\$GITHUB_SHA\}"/);
     assert.match(workflow, /x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{CANARY_REPO\}\.git/);
     assert.match(workflow, /git push origin HEAD:main/);
     assert.match(workflow, /gh issue create/);
