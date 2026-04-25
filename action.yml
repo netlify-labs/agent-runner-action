@@ -861,21 +861,23 @@ runs:
               AGENT_DEPLOY_URL=""
               debug_log "listAgentRunnerSessions" "$SESSION_OUTPUT"
               if [ -n "$SESSION_OUTPUT" ]; then
+                LATEST_SESSION=$(echo "$SESSION_OUTPUT" | jq -c 'if type=="array" then .[-1] // {} elif type=="object" and (.sessions | type == "array") then .sessions[-1] // {} else {} end')
                 echo "agent-result<<AGENT_RESULT_EOF" >> $GITHUB_OUTPUT
-                echo "$SESSION_OUTPUT" | jq -r '.[-1].result // empty' >> $GITHUB_OUTPUT
+                echo "$LATEST_SESSION" | jq -r '.result // empty' >> $GITHUB_OUTPUT
                 echo "AGENT_RESULT_EOF" >> $GITHUB_OUTPUT
-                AGENT_DEPLOY_URL=$(echo "$SESSION_OUTPUT" | jq -r '.[-1].deploy_url // empty')
-                echo "agent-title=$(echo "$SESSION_OUTPUT" | jq -r '.[-1].title // empty')" >> $GITHUB_OUTPUT
+                AGENT_DEPLOY_URL=$(echo "$LATEST_SESSION" | jq -r '.deploy_url // empty')
+                echo "agent-title=$(echo "$LATEST_SESSION" | jq -r '.title // empty')" >> $GITHUB_OUTPUT
                 echo "agent-sessions<<AGENT_SESSIONS_EOF" >> $GITHUB_OUTPUT
                 echo "$SESSION_OUTPUT" >> $GITHUB_OUTPUT
                 echo "AGENT_SESSIONS_EOF" >> $GITHUB_OUTPUT
                 echo "$SESSION_OUTPUT" > "$RUNNER_TEMP/agent-sessions-${AGENT_ID}.json"
+              else
+                LATEST_SESSION='{}'
               fi
 
               # Re-fetch runner
               AGENT_RESULT=$(netlify agents:show "$AGENT_ID" --json 2>/dev/null || true)
               debug_log "agents:show (post-completion)" "$AGENT_RESULT"
-              echo "agent-has-diff=$(echo "$AGENT_RESULT" | jq -r '.has_result_diff // false')" >> $GITHUB_OUTPUT
 
               # Validate deploy URL
               if [ -n "$AGENT_DEPLOY_URL" ]; then
@@ -887,7 +889,7 @@ runs:
               echo "agent-deploy-url=$AGENT_DEPLOY_URL" >> $GITHUB_OUTPUT
 
               # Screenshot
-              DEPLOY_ID=$(echo "$SESSION_OUTPUT" | jq -r '.[-1].deploy_id // empty')
+              DEPLOY_ID=$(echo "$LATEST_SESSION" | jq -r '.deploy_id // empty')
               if [ -n "$DEPLOY_ID" ] && [ -n "$AGENT_DEPLOY_URL" ]; then
                 DEPLOY_RESULT=$(netlify api getDeploy --data "{\"deploy_id\": \"$DEPLOY_ID\"}" 2>/dev/null || true)
                 debug_log "getDeploy" "$DEPLOY_RESULT"
@@ -905,9 +907,20 @@ runs:
               fi
 
               # Handle diffs — commit to existing PR or create new PR
-              HAS_DIFF=$(echo "$AGENT_RESULT" | jq -r '.has_result_diff // false')
-              EXISTING_PR=$(echo "$AGENT_RESULT" | jq -r '.pr_url // empty')
-              PR_BRANCH=$(echo "$AGENT_RESULT" | jq -r '.pr_branch // empty')
+              RUNNER_HAS_DIFF=$(echo "$AGENT_RESULT" | jq -r '.has_result_diff // false')
+              SESSION_HAS_DIFF=$(echo "$LATEST_SESSION" | jq -r '.has_result_diff // .has_diff // empty')
+              EXISTING_PR=$(echo "$LATEST_SESSION" | jq -r '.pull_request_url // empty')
+              PR_BRANCH=$(echo "$LATEST_SESSION" | jq -r '.pull_request_branch // empty')
+              [ -n "$EXISTING_PR" ] || EXISTING_PR=$(echo "$AGENT_RESULT" | jq -r '.pr_url // empty')
+              [ -n "$PR_BRANCH" ] || PR_BRANCH=$(echo "$AGENT_RESULT" | jq -r '.pr_branch // empty')
+              HAS_DIFF="$RUNNER_HAS_DIFF"
+              if [ -n "$SESSION_HAS_DIFF" ]; then
+                HAS_DIFF="$SESSION_HAS_DIFF"
+              elif [ -n "${EXISTING_RUNNER_ID:-}" ] && [ "$RUNNER_HAS_DIFF" = "true" ] && [ -n "$EXISTING_PR" ] && [ -n "$PR_BRANCH" ] && [ -z "$DEPLOY_ID" ] && [ -z "$AGENT_DEPLOY_URL" ]; then
+                HAS_DIFF="false"
+                echo "ℹ️ Latest follow-up session produced no deploy/code artifacts; reusing existing PR without a new commit"
+              fi
+              echo "agent-has-diff=$HAS_DIFF" >> $GITHUB_OUTPUT
 
               if [ "$HAS_DIFF" = "true" ] && [ -n "$EXISTING_PR" ] && [ -n "$PR_BRANCH" ]; then
                 echo "📦 Committing to branch: $PR_BRANCH"
@@ -1119,6 +1132,8 @@ runs:
       env:
         ACTION_DIR: ${{ github.action_path }}
         AGENT_ERROR: ${{ steps.netlify-agent.outputs.agent-error }}
+        FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.preflight.outputs.failure-category }}
+        FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
         SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
