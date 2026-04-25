@@ -190,6 +190,8 @@ function buildInProgressComment({ agentRunUrl, prompt, model, runnerId, ghAction
   if (ghActionUrl) links.push(`[GitHub Action logs](${ghActionUrl})`);
   if (links.length) body += links.join(' • ') + '\n';
 
+  body += `\n*Started at ${formatRunDate(new Date().toISOString())}*\n`;
+
   if (runnerId) {
     body += renderRunnerIdMarker(runnerId);
   }

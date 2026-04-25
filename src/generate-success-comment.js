@@ -111,6 +111,7 @@ module.exports = async function generateSuccessComment({ context, core }) {
     message += `Branch: \`${agentPrBranch}\`\n`;
   }
 
+  message += `\n*Completed at ${utils.formatRunDate(new Date().toISOString())}*\n`;
   message += `\n${renderSessionDataMarker(sessionDataMap)}`;
   message += `\n${renderRunnerIdMarker(agentId)}`;
   message += `\n${STATUS_COMMENT_MARKER}`;
