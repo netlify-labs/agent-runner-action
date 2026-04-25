@@ -34,7 +34,7 @@ describe('render helpers', () => {
 describe('parseRunnerId', () => {
   it('extracts runner ids from markdown with surrounding text', () => {
     const body = [
-      '### Netlify Agent Runner completed',
+      '### Netlify Agent Run completed',
       '',
       '<!-- netlify-agent-runner-id:abc_123-def -->',
       '<!-- netlify-agent-run-status -->',

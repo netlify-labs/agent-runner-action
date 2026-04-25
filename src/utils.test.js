@@ -161,27 +161,36 @@ describe('formatPromptBlock', () => {
     assert.equal(utils.formatPromptBlock(null), '');
   });
 
-  it('does not truncate prompts at or under 300 characters', () => {
-    const prompt = 'a'.repeat(300);
+  it('does not truncate prompts at or under 350 characters', () => {
+    const prompt = 'a'.repeat(350);
     const result = utils.formatPromptBlock(prompt, 'https://github.com/foo/bar/issues/1');
     assert.ok(!result.includes('…'));
     assert.ok(!result.includes('See full prompt'));
   });
 
-  it('truncates prompts over 300 characters and links to source', () => {
-    const prompt = 'a'.repeat(400);
+  it('truncates prompts over 350 characters and links to source', () => {
+    const prompt = 'a'.repeat(500);
     const sourceUrl = 'https://github.com/foo/bar/issues/1#issue-123';
     const result = utils.formatPromptBlock(prompt, sourceUrl);
     assert.ok(result.includes('…'));
     assert.ok(result.includes(`[See full prompt](${sourceUrl})`));
-    assert.ok(!result.includes('a'.repeat(301)));
+    assert.ok(!result.includes('a'.repeat(351)));
   });
 
   it('truncates without link when no sourceUrl provided', () => {
-    const prompt = 'a'.repeat(400);
+    const prompt = 'a'.repeat(500);
     const result = utils.formatPromptBlock(prompt);
     assert.ok(result.includes('…'));
     assert.ok(!result.includes('See full prompt'));
+  });
+
+  it('truncates at last newline before limit to avoid mid-line cuts', () => {
+    // 300 chars on first line, newline, then 200 more chars
+    const prompt = 'a'.repeat(300) + '\n' + 'x'.repeat(200);
+    const result = utils.formatPromptBlock(prompt);
+    assert.ok(result.includes('…'));
+    // Should cut at the newline (char 300), not mid-way through the x's
+    assert.ok(!result.includes('x'), 'should not include content after the newline');
   });
 });
 

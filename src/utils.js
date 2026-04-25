@@ -119,11 +119,14 @@ function ghContainsExpressions(field) {
  */
 function formatPromptBlock(prompt, sourceUrl) {
   if (!prompt) return '';
-  const MAX_LENGTH = 300;
+  const MAX_LENGTH = 350;
   let display = prompt;
   let truncated = false;
   if (prompt.length > MAX_LENGTH) {
-    display = prompt.slice(0, MAX_LENGTH).trimEnd() + '…';
+    // Cut at the last newline at or before the limit to avoid mid-line truncation
+    const lastNewline = prompt.lastIndexOf('\n', MAX_LENGTH);
+    const cutAt = lastNewline > 0 ? lastNewline : MAX_LENGTH;
+    display = prompt.slice(0, cutAt).trimEnd() + '…';
     truncated = true;
   }
   const lines = display.split('\n');

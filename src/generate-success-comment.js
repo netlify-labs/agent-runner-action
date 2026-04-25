@@ -73,7 +73,7 @@ module.exports = async function generateSuccessComment({ context, core }) {
   const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}`;
 
   const dryRunTag = isDryRun ? ' (preview)' : '';
-  let message = `### [Netlify Agent Runner completed${dryRunTag}](${agentRunUrl}) ✅\n\n`;
+  let message = `### [Netlify Agent Run completed${dryRunTag}](${agentRunUrl}) ✅\n\n`;
 
   if (isDryRun) {
     message += `> **Preview mode** — no PR was created and no commits were made.\n\n`;
