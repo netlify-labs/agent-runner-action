@@ -19,7 +19,6 @@ const {
  * @property {boolean} [isPr]
  * @property {unknown} [statusCommentBody]
  * @property {unknown} [prBody]
- * @property {unknown} [issueTimelineLinkedPrNumber]
  * @property {Record<string, unknown>} [contextOutputs]
  * @property {unknown} [siteName]
  * @property {unknown} [existingRunnerIdOutput]
@@ -206,7 +205,6 @@ function reconcileAgentState(input = {}) {
 
   const statusLinkedPr = parseLinkedPrReference(statusCommentBody);
   const prBodyLinkedPr = parseLinkedPrReference(prBody);
-  const timelineLinkedPr = toText(input.issueTimelineLinkedPrNumber).trim();
   const contextLinkedPr = toText(
     contextOutputs.linkedPrNumber ||
     contextOutputs['linked-pr-number'] ||
@@ -221,9 +219,6 @@ function reconcileAgentState(input = {}) {
   } else if (prBodyLinkedPr) {
     linkedPrNumber = prBodyLinkedPr;
     sources.push('pr-body:linked-pr');
-  } else if (timelineLinkedPr) {
-    linkedPrNumber = timelineLinkedPr;
-    sources.push('issue-timeline:linked-pr');
   } else if (contextLinkedPr) {
     linkedPrNumber = contextLinkedPr;
     sources.push('context-output:linked-pr');

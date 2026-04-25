@@ -45,6 +45,43 @@ describe('getContext', () => {
     assert.equal(core.outputs['is-dry-run'], 'false');
   });
 
+  it('does not treat cross-referenced pull requests as linked PR ownership for issue comments', async () => {
+    const context = {
+      eventName: 'issue_comment',
+      payload: {
+        issue: { number: 42, pull_request: null },
+        comment: { body: '@netlify claude review this', html_url: 'https://github.com/o/r/issues/42#comment-1' },
+      },
+      repo: { owner: 'o', repo: 'r' },
+    };
+    const github = {
+      rest: {
+        pulls: { get: async () => ({ data: { head: { ref: 'feat', sha: 'abc' }, base: { ref: 'main' } } }) },
+        issues: {
+          listEventsForTimeline: async () => ({
+            data: [
+              {
+                event: 'cross-referenced',
+                source: {
+                  issue: {
+                    number: 58,
+                    pull_request: { url: 'https://api.github.com/repos/o/r/pulls/58' },
+                  },
+                },
+              },
+            ],
+          }),
+        },
+      },
+    };
+
+    await getContext({ github, context, core });
+
+    assert.equal(core.outputs['is-pr'], 'false');
+    assert.equal(core.outputs['has-linked-pr'], 'false');
+    assert.equal(core.outputs['linked-pr-number'], '');
+  });
+
   it('extracts context from issues event', async () => {
     const context = {
       eventName: 'issues',

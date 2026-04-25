@@ -10,36 +10,30 @@ function readFixture(relativePath) {
 }
 
 describe('state reconciliation scenarios (fixture-backed)', () => {
-  it('redirects issue flow to linked PR when timeline has cross-reference', () => {
+  it('redirects issue flow when the status comment explicitly records a linked PR', () => {
     const eventFixture = readFixture('fixtures/events/issue-comment-on-issue.json');
-    const timelineFixture = readFixture('fixtures/github/timeline-linked-pr.json');
-    const linkedEvent = timelineFixture.find(entry => entry.event === 'cross-referenced');
-    const linkedPrNumber = String(linkedEvent.source.issue.number);
+    const statusFixture = readFixture('fixtures/github/existing-status-comment-with-linked-pr.json');
 
     const reconciled = reconcileAgentState({
       isPr: false,
-      statusCommentBody: '',
+      statusCommentBody: statusFixture.data.body,
       prBody: '',
-      issueTimelineLinkedPrNumber: linkedPrNumber,
       contextOutputs: {
         issueNumber: eventFixture.issue.number,
       },
     });
 
-    assert.equal(reconciled.linkedPrNumber, linkedPrNumber);
+    assert.equal(reconciled.linkedPrNumber, '58');
     assert.equal(reconciled.recoveryAction, 'redirect-to-pr');
     assert.equal(reconciled.runnerId, '');
   });
 
-  it('prefers resuming known runner over redirect when status state exists', () => {
+  it('prefers resuming known runner when status state exists', () => {
     const statusFixture = readFixture('fixtures/github/existing-status-comment-with-runner.json');
-    const timelineFixture = readFixture('fixtures/github/timeline-linked-pr.json');
-    const linkedEvent = timelineFixture.find(entry => entry.event === 'cross-referenced');
 
     const reconciled = reconcileAgentState({
       isPr: false,
       statusCommentBody: statusFixture.data.body,
-      issueTimelineLinkedPrNumber: String(linkedEvent.source.issue.number),
       siteName: 'agent-runner-action-example',
     });
 

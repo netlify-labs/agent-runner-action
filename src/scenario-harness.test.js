@@ -55,9 +55,9 @@ describe('scenario harness', () => {
     assert.equal(trace.state.reconciled.runnerId, 'runner-abc123');
   });
 
-  it('covers linked PR redirect behavior for issue comments on issues', async () => {
+  it('ignores unrelated cross-referenced pull requests for issue comments on issues', async () => {
     const trace = await runScenario({
-      name: 'issue comment with linked PR redirect',
+      name: 'issue comment with unrelated cross-reference',
       eventName: 'issue_comment',
       eventFixture: 'fixtures/events/issue-comment-on-issue.json',
       githubFixtures: {
@@ -71,6 +71,31 @@ describe('scenario harness', () => {
 
     assert.equal(trace.outputs['should-run'], 'true');
     assert.equal(trace.outputs['is-pr'], 'false');
+    assert.equal(trace.outputs['has-linked-pr'], 'false');
+    assert.equal(trace.outputs['linked-pr-number'], '');
+    assert.equal(trace.state.reconciled.linkedPrNumber, '');
+    assert.equal(trace.state.reconciled.recoveryAction, 'start-new-run');
+  });
+
+  it('redirects issue follow-ups only when the status comment records a linked PR', async () => {
+    const trace = await runScenario({
+      name: 'issue comment with action-owned linked PR',
+      eventName: 'issue_comment',
+      eventFixture: 'fixtures/events/issue-comment-on-issue.json',
+      githubFixtures: {
+        'issues.getComment': 'fixtures/github/existing-status-comment-with-linked-pr.json',
+      },
+      env: {
+        OUTCOME: 'success',
+      },
+      runExtractAgentId: true,
+      commentMode: 'none',
+    });
+
+    assert.equal(trace.outputs['should-run'], 'true');
+    assert.equal(trace.outputs['is-pr'], 'false');
+    assert.equal(trace.outputs['has-linked-pr'], 'true');
+    assert.equal(trace.outputs['linked-pr-number'], '58');
     assert.equal(trace.state.reconciled.linkedPrNumber, '58');
     assert.equal(trace.state.reconciled.recoveryAction, 'redirect-to-pr');
   });
@@ -127,7 +152,6 @@ describe('scenario harness', () => {
       eventName: 'issue_comment',
       eventFixture: 'fixtures/events/issue-comment-on-issue.json',
       githubFixtures: {
-        'issues.listEventsForTimeline': 'fixtures/github/timeline-linked-pr.json',
         'issues.getComment': 'fixtures/github/existing-status-comment-malformed-session-data.json',
       },
       env: {

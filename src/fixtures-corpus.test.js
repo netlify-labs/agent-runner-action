@@ -109,6 +109,7 @@ describe('github response fixtures', () => {
     const collaboratorRead = /** @type {any} */ (readJson('github', 'collaborator-read.json'));
     const timelineLinked = /** @type {any[]} */ (readJson('github', 'timeline-linked-pr.json'));
     const statusWithRunner = /** @type {any} */ (readJson('github', 'existing-status-comment-with-runner.json'));
+    const statusWithLinkedPr = /** @type {any} */ (readJson('github', 'existing-status-comment-with-linked-pr.json'));
     const malformedSessionData = /** @type {any} */ (readJson('github', 'existing-status-comment-malformed-session-data.json'));
 
     assert.equal(collaboratorAdmin.data.permission, 'admin');
@@ -120,6 +121,7 @@ describe('github response fixtures', () => {
     );
 
     assert.match(statusWithRunner.data.body, /<!-- netlify-agent-runner-id:/);
+    assert.match(statusWithLinkedPr.data.body, /Changes in Pull Request #58/);
     assert.match(statusWithRunner.data.body, /<!-- netlify-agent-session-data:/);
     assert.match(malformedSessionData.data.body, /\{not-json\}/);
   });

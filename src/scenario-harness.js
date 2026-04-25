@@ -488,7 +488,6 @@ async function runScenario(scenario, options = {}) {
         isPr: outputs['is-pr'] === 'true',
         statusCommentBody,
         prBody,
-        issueTimelineLinkedPrNumber: outputs['linked-pr-number'] || '',
         contextOutputs: outputs,
         siteName: toText((scenario.env || {}).SITE_NAME) || 'agent-runner-action-example',
         existingRunnerIdOutput: outputs['agent-runner-id'] || '',

@@ -495,7 +495,7 @@ runs:
           exit 0
         fi
         IS_PR="${{ steps.context-info.outputs.is-pr }}"
-        HAS_LINKED_PR="${{ steps.extract-agent-id.outputs.has-linked-pr == 'true' && 'true' || steps.context-info.outputs.has-linked-pr }}"
+        HAS_LINKED_PR="${{ steps.extract-agent-id.outputs.has-linked-pr == 'true' && 'true' || 'false' }}"
         if [[ "$IS_PR" == "false" && "$HAS_LINKED_PR" == "true" ]]; then
           echo "⚠️ Issue already has a linked PR"
           echo "should-continue=false" >> $GITHUB_OUTPUT
@@ -504,13 +504,13 @@ runs:
         fi
 
     - name: Redirect to PR if issue has linked PR
-      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'false' && (steps.extract-agent-id.outputs.linked-pr-number != '' || steps.context-info.outputs.linked-pr-number != '')
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'false' && steps.extract-agent-id.outputs.linked-pr-number != ''
       uses: peter-evans/create-or-update-comment@v5
       with:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.context-info.outputs.issue-number }}
         body: |
-          > This issue already has a linked pull request. Please add follow-up `@netlify` prompts on PR #${{ steps.extract-agent-id.outputs.linked-pr-number || steps.context-info.outputs.linked-pr-number }}${{ steps.extract-agent-id.outputs.agent-run-url && format(', or use the [Netlify Agent Runners dashboard]({0})', steps.extract-agent-id.outputs.agent-run-url) || '' }}.
+          > This issue already has a linked pull request. Please add follow-up `@netlify` prompts on PR #${{ steps.extract-agent-id.outputs.linked-pr-number }}${{ steps.extract-agent-id.outputs.agent-run-url && format(', or use the [Netlify Agent Runners dashboard]({0})', steps.extract-agent-id.outputs.agent-run-url) || '' }}.
 
     # -----------------------------------------------------------------------
     # 9. Create initial status comment

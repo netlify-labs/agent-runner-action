@@ -23,6 +23,7 @@ module.exports = async function getContext({ github, context, core }) {
   let baseRef;
   /** @type {string | undefined} */
   let headSha;
+  let linkedPrNumber = '';
   let triggerText = '';
   let hasLinkedPR = false;
   let isPR = false;
@@ -81,24 +82,6 @@ module.exports = async function getContext({ github, context, core }) {
       }
     } else {
       isPR = false;
-      try {
-        const { data: timeline } = await github.rest.issues.listEventsForTimeline({
-          owner: context.repo.owner, repo: context.repo.repo,
-          issue_number: /** @type {number} */ (issueNumber), per_page: 100,
-          headers: { accept: 'application/vnd.github.mockingbird-preview+json' }
-        });
-        const linkedPRs = timeline
-          .filter(/** @param {import('./types').TimelineEvent} e */ e => e.event === 'cross-referenced')
-          .filter(/** @param {import('./types').TimelineEvent} e */ e => e.source?.issue?.pull_request?.url);
-        hasLinkedPR = linkedPRs.length > 0;
-        if (hasLinkedPR) {
-          const prNumber = linkedPRs[linkedPRs.length - 1].source?.issue?.number;
-          if (prNumber) core.setOutput('linked-pr-number', prNumber.toString());
-        }
-        console.log(`Issue #${issueNumber}, linked PRs: ${linkedPRs.length}`);
-      } catch (error) {
-        console.error('Error checking linked PRs:', error);
-      }
     }
 
   } else if (context.eventName === 'pull_request_review_comment' || context.eventName === 'pull_request_review') {
@@ -151,6 +134,7 @@ module.exports = async function getContext({ github, context, core }) {
   core.setOutput('is-pr', isPR.toString());
   core.setOutput('trigger-text', triggerText);
   core.setOutput('has-linked-pr', hasLinkedPR.toString());
+  core.setOutput('linked-pr-number', linkedPrNumber);
   core.setOutput('agent', agent);
   core.setOutput('model', agent);
   core.setOutput('is-dry-run', isDryRun.toString());
