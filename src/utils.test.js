@@ -160,6 +160,29 @@ describe('formatPromptBlock', () => {
     assert.equal(utils.formatPromptBlock(''), '');
     assert.equal(utils.formatPromptBlock(null), '');
   });
+
+  it('does not truncate prompts at or under 300 characters', () => {
+    const prompt = 'a'.repeat(300);
+    const result = utils.formatPromptBlock(prompt, 'https://github.com/foo/bar/issues/1');
+    assert.ok(!result.includes('…'));
+    assert.ok(!result.includes('See full prompt'));
+  });
+
+  it('truncates prompts over 300 characters and links to source', () => {
+    const prompt = 'a'.repeat(400);
+    const sourceUrl = 'https://github.com/foo/bar/issues/1#issue-123';
+    const result = utils.formatPromptBlock(prompt, sourceUrl);
+    assert.ok(result.includes('…'));
+    assert.ok(result.includes(`[See full prompt](${sourceUrl})`));
+    assert.ok(!result.includes('a'.repeat(301)));
+  });
+
+  it('truncates without link when no sourceUrl provided', () => {
+    const prompt = 'a'.repeat(400);
+    const result = utils.formatPromptBlock(prompt);
+    assert.ok(result.includes('…'));
+    assert.ok(!result.includes('See full prompt'));
+  });
 });
 
 // ---------------------------------------------------------------------------

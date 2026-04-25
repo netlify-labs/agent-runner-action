@@ -51,11 +51,10 @@ module.exports = async function getContext({ github, context, core }) {
     issueNumber = issue?.number;
     let issueTitle = issue?.title || '';
     const issueBody = issue?.body || '';
-    if (utils.matchesTrigger(issueBody)) {
-      // Strip @netlify mention from title (if duplicated in both title and body)
+    if (utils.matchesTrigger(issueTitle)) {
+      // Strip @netlify mention from title only when the title itself contains the trigger
       issueTitle = issueTitle
         .replace(utils.TRIGGER_PATTERN, '')
-        // Only strip whitespace+model when a model name or preposition is actually present
         .replace(/\s+(?:with|using|use|via)\s+(?:claude|codex|gemini)\s*/i, '')
         .replace(/\s+(?:claude|codex|gemini)\s*/i, '')
         .trim();
