@@ -131,12 +131,11 @@ function formatPromptBlock(prompt, sourceUrl) {
   }
   const lines = display.split('\n');
   lines[0] = `**${lines[0]}**`;
-  const quoted = lines.map(l => `> ${l}`).join('\n');
-  let block = `**Prompt:**\n\n${quoted}\n`;
   if (truncated && sourceUrl) {
-    block += `>\n> [See full prompt](${sourceUrl})\n`;
+    lines[lines.length - 1] += ` [See full prompt](${sourceUrl})`;
   }
-  return block + '\n';
+  const quoted = lines.map(l => `> ${l}`).join('\n');
+  return `**Prompt:**\n\n${quoted}\n\n`;
 }
 
 /**
