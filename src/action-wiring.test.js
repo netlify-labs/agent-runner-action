@@ -204,11 +204,19 @@ describe('action.yml wiring', () => {
     assert.match(actionYml, /echo "outcome=failure" >> \$GITHUB_OUTPUT/);
   });
 
+  it('uses latest session metadata before committing follow-up branch changes', () => {
+    assert.match(actionYml, /LATEST_SESSION=\$\(echo "\$SESSION_OUTPUT" \| jq -c/);
+    assert.match(actionYml, /SESSION_HAS_DIFF=\$\(echo "\$LATEST_SESSION" \| jq -r '.has_result_diff \/\/ .has_diff \/\/ empty'\)/);
+    assert.match(actionYml, /Latest follow-up session produced no deploy\/code artifacts; reusing existing PR without a new commit/);
+  });
+
   it('generates rich error comments even after the agent step fails', () => {
     const errorCommentBlock = extractStepBlocks(actionYml)
       .find(block => block.includes('- name: Generate error comment'));
     assert.ok(errorCommentBlock, 'Generate error comment step should exist');
     assert.match(errorCommentBlock, /always\(\)/);
+    assert.match(errorCommentBlock, /FAILURE_CATEGORY:\s+\$\{\{\s*steps\.netlify-agent\.outputs\.failure-category/);
+    assert.match(errorCommentBlock, /FAILURE_STAGE:\s+\$\{\{\s*steps\.netlify-agent\.outputs\.failure-stage/);
   });
 
   it('has at least the expected inputs', () => {

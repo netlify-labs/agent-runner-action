@@ -112,13 +112,28 @@ function ghContainsExpressions(field) {
 /**
  * Format a prompt for display in a GitHub comment.
  * Bolds the first line and blockquotes all lines.
+ * If the prompt exceeds 300 characters, truncates and links to the source.
  * @param {string | null | undefined} prompt
+ * @param {string} [sourceUrl] - URL to the original issue/comment containing the full prompt
  * @returns {string}
  */
-function formatPromptBlock(prompt) {
+function formatPromptBlock(prompt, sourceUrl) {
   if (!prompt) return '';
-  const lines = prompt.split('\n');
+  const MAX_LENGTH = 350;
+  let display = prompt;
+  let truncated = false;
+  if (prompt.length > MAX_LENGTH) {
+    // Cut at the last newline at or before the limit to avoid mid-line truncation
+    const lastNewline = prompt.lastIndexOf('\n', MAX_LENGTH);
+    const cutAt = lastNewline > 0 ? lastNewline : MAX_LENGTH;
+    display = prompt.slice(0, cutAt).trimEnd() + '…';
+    truncated = true;
+  }
+  const lines = display.split('\n');
   lines[0] = `**${lines[0]}**`;
+  if (truncated && sourceUrl) {
+    lines[lines.length - 1] += ` [See full prompt](${sourceUrl})`;
+  }
   const quoted = lines.map(l => `> ${l}`).join('\n');
   return `**Prompt:**\n\n${quoted}\n\n`;
 }
@@ -158,19 +173,23 @@ function formatRunDate(dateStr) {
 function buildInProgressComment({ agentRunUrl, prompt, model, runnerId, ghActionUrl }) {
   const [flavor, emoji] = randomFlavor();
   const clean = cleanPrompt(prompt);
+  const sourceUrlMatch = (prompt || '').match(/◌\s+(\S+)/);
+  const sourceUrl = sourceUrlMatch ? sourceUrlMatch[1] : '';
 
   let body = agentRunUrl
     ? `### [Netlify Agent Runners ${flavor}](${agentRunUrl}) ${emoji}\n\n`
     : `### Netlify Agent Runners ${flavor} ${emoji}\n\n`;
 
   body += `**Agent:** \`${model}\`\n\n`;
-  if (clean) body += formatPromptBlock(clean);
+  if (clean) body += formatPromptBlock(clean, sourceUrl);
 
   /** @type {string[]} */
   const links = [];
   if (agentRunUrl) links.push(`[View the in progress agent run in Netlify](${agentRunUrl})`);
   if (ghActionUrl) links.push(`[GitHub Action logs](${ghActionUrl})`);
   if (links.length) body += links.join(' • ') + '\n';
+
+  body += `\n*Started at ${formatRunDate(new Date().toISOString())}*\n`;
 
   if (runnerId) {
     body += renderRunnerIdMarker(runnerId);

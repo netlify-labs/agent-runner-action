@@ -51,8 +51,10 @@ module.exports = async function generateHistoryComment({ context, core }) {
     const ghUrl = data.gh_action_url || '';
     const deployUrl = session.deploy_url || '';
     const isFailed = session.state === 'failed' || session.state === 'error';
-    let cleanPrompt = utils.cleanPrompt(session.prompt || '');
-    if (cleanPrompt.length > 450) cleanPrompt = cleanPrompt.substring(0, 450) + '...';
+    const rawPrompt = session.prompt || '';
+    const sourceUrlMatch = rawPrompt.match(/◌\s+(\S+)/);
+    const sourceUrl = sourceUrlMatch ? sourceUrlMatch[1] : '';
+    let cleanPrompt = utils.cleanPrompt(rawPrompt);
 
     const runDate = session.created_at ? utils.formatRunDate(session.created_at) : '';
     const datePart = runDate ? ` at ${runDate}` : '';
@@ -60,7 +62,7 @@ module.exports = async function generateHistoryComment({ context, core }) {
 
     if (isFailed) {
       message += `❌ \`${runHeader}\`\n\nFailed\n\n`;
-      if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
+      if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt, sourceUrl);
       if (ghUrl) message += `[GitHub Action logs](${ghUrl})\n\n`;
     } else {
       const title = session.title || '';
@@ -68,7 +70,7 @@ module.exports = async function generateHistoryComment({ context, core }) {
         message += `<a href="${deployUrl}"><img src="${screenshot}" alt="Preview" width="180" align="right"></a>`;
       }
       message += `✅ \`${runHeader}\`\n\n${title}\n\n`;
-      if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
+      if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt, sourceUrl);
       const commitSha = data.commit_sha || '';
       const prUrl = data.pr_url || '';
       const repoFullName = `${context.repo.owner}/${context.repo.repo}`;

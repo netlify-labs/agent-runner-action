@@ -104,6 +104,26 @@ describe('getContext', () => {
     );
   });
 
+  it('preserves model name in title when title has no trigger', async () => {
+    const context = {
+      eventName: 'issues',
+      payload: {
+        issue: {
+          number: 74,
+          title: '2026-04-24 Gemini Review',
+          body: '@netlify please review and assess current setup',
+          html_url: 'https://github.com/o/r/issues/74',
+        },
+      },
+      repo: { owner: 'o', repo: 'r' },
+    };
+    await getContext({ github: mockGithub(), context, core });
+    assert.ok(
+      core.outputs['trigger-text'].startsWith('2026-04-24 Gemini Review'),
+      `Expected title preserved but got: ${core.outputs['trigger-text'].split('\n')[0]}`
+    );
+  });
+
   it('detects dry-run from @netlify preview', async () => {
     const context = {
       eventName: 'issue_comment',

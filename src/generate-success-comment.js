@@ -73,13 +73,13 @@ module.exports = async function generateSuccessComment({ context, core }) {
   const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}`;
 
   const dryRunTag = isDryRun ? ' (preview)' : '';
-  let message = `### [Netlify Agent Runners run completed${dryRunTag}](${agentRunUrl}) ✅\n\n`;
+  let message = `### [Netlify Agent Run completed${dryRunTag}](${agentRunUrl}) ✅\n\n`;
 
   if (isDryRun) {
     message += `> **Preview mode** — no PR was created and no commits were made.\n\n`;
   }
 
-  if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt);
+  if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt, sourceUrl);
   message += agentTitle ? `### Result: ${agentTitle}\n\n` : `### Result\n\n`;
 
   if (agentScreenshotUrl && agentDeployUrl) {
@@ -111,6 +111,7 @@ module.exports = async function generateSuccessComment({ context, core }) {
     message += `Branch: \`${agentPrBranch}\`\n`;
   }
 
+  message += `\n*Completed at ${utils.formatRunDate(new Date().toISOString())}*\n`;
   message += `\n${renderSessionDataMarker(sessionDataMap)}`;
   message += `\n${renderRunnerIdMarker(agentId)}`;
   message += `\n${STATUS_COMMENT_MARKER}`;

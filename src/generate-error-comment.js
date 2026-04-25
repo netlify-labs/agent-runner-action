@@ -4,6 +4,7 @@
 /** @typedef {import('./types').ActionCore} ActionCore */
 const { STATUS_COMMENT_MARKER, renderRunnerIdMarker } = require('./comment-markers');
 const { classifyFailure } = require('./failure-taxonomy');
+const utils = require('./utils');
 
 const MAX_ERROR_LENGTH = 500;
 const ANSI_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
@@ -122,6 +123,8 @@ module.exports = async function generateErrorComment({ core }) {
     message += links.join(' • ') + '\n\n';
   }
   message += '---\n\nTry again with `@netlify [specific instructions]`\n';
+
+  message += `\n*Failed at ${utils.formatRunDate(new Date().toISOString())}*\n`;
 
   if (agentId) message += `\n${renderRunnerIdMarker(agentId)}`;
   message += `\n${STATUS_COMMENT_MARKER}`;
