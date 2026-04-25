@@ -45,7 +45,7 @@ module.exports = async function checkTrigger({ github, context, core }) {
 
   // Permission / author-association check
   if (shouldRun && event !== 'workflow_dispatch') {
-    const validAssociations = ['COLLABORATOR', 'CONTRIBUTOR', 'MEMBER', 'OWNER'];
+    const validAssociations = ['COLLABORATOR', 'MEMBER', 'OWNER'];
     /** @type {string} */
     let association = '';
     let isFork = false;
