@@ -137,6 +137,9 @@ describe('scenario harness', () => {
       name: 'untrusted fork skip',
       eventName: 'pull_request_target',
       eventFixture: 'fixtures/events/fork-pr-untrusted.json',
+      githubFixtures: {
+        'repos.getCollaboratorPermissionLevel': 'fixtures/github/collaborator-read.json',
+      },
       env: {
         OUTCOME: 'skipped',
       },

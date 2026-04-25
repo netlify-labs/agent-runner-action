@@ -13,11 +13,11 @@ function mockCore() {
   };
 }
 
-function mockGithub() {
+function mockGithub(permission = 'admin') {
   return {
     rest: {
       repos: {
-        getCollaboratorPermissionLevel: async () => ({ data: { permission: 'admin' } }),
+        getCollaboratorPermissionLevel: async () => ({ data: { permission } }),
       },
     },
   };
@@ -98,7 +98,7 @@ describe('checkTrigger', () => {
       sender: { login: 'random-user' },
       comment: { body: '@netlify hack', author_association: 'NONE' },
     });
-    await checkTrigger({ github: mockGithub(), context, core });
+    await checkTrigger({ github: mockGithub('read'), context, core });
     assert.equal(core.outputs['should-run'], 'false');
   });
 
@@ -118,6 +118,33 @@ describe('checkTrigger', () => {
     });
     await checkTrigger({ github: mockGithub(), context, core });
     assert.equal(core.outputs['should-run'], 'true');
+  });
+
+  it('allows issue comments from contributors with admin permission fallback', async () => {
+    const context = makeContext('issue_comment', {
+      sender: { login: 'DavidWells' },
+      comment: { body: '@netlify build', author_association: 'CONTRIBUTOR' },
+    });
+    await checkTrigger({ github: mockGithub('admin'), context, core });
+    assert.equal(core.outputs['should-run'], 'true');
+  });
+
+  it('allows issue creation from contributors with write permission fallback', async () => {
+    const context = makeContext('issues', {
+      issue: { title: 'Review request', body: '@netlify review this', author_association: 'CONTRIBUTOR' },
+      sender: { login: 'DavidWells' },
+    });
+    await checkTrigger({ github: mockGithub('write'), context, core });
+    assert.equal(core.outputs['should-run'], 'true');
+  });
+
+  it('blocks issue comments from contributors without write permission fallback', async () => {
+    const context = makeContext('issue_comment', {
+      sender: { login: 'outside-user' },
+      comment: { body: '@netlify build', author_association: 'CONTRIBUTOR' },
+    });
+    await checkTrigger({ github: mockGithub('read'), context, core });
+    assert.equal(core.outputs['should-run'], 'false');
   });
 
   it('always triggers workflow_dispatch', async () => {
@@ -164,7 +191,7 @@ describe('checkTrigger', () => {
       },
       sender: { login: 'forker' },
     });
-    await checkTrigger({ github: mockGithub(), context, core });
+    await checkTrigger({ github: mockGithub('read'), context, core });
     assert.equal(core.outputs['should-run'], 'false');
   });
 

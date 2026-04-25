@@ -14,6 +14,25 @@ module.exports = async function checkTrigger({ github, context, core }) {
   let shouldRun = false;
   let triggerBody = '';
 
+  /**
+   * @param {string} username
+   * @returns {Promise<boolean>}
+   */
+  async function hasWritePermission(username) {
+    if (!username) return false;
+    try {
+      const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        username,
+      });
+      return ['write', 'maintain', 'admin'].includes(data.permission);
+    } catch (error) {
+      console.log(`Permission check failed for ${username}: ${/** @type {Error} */ (error).message}`);
+      return false;
+    }
+  }
+
   // Determine the text to scan for @netlify
   if (event === 'workflow_dispatch') {
     shouldRun = true;
@@ -65,13 +84,16 @@ module.exports = async function checkTrigger({ github, context, core }) {
 
     const isOwner = sender === context.repo.owner;
     const hasAssociation = validAssociations.includes(association);
+    const hasWriteAccess = !isOwner && !hasAssociation
+      ? await hasWritePermission(sender)
+      : false;
 
     if (event === 'pull_request_target') {
-      if (isFork && !hasAssociation) {
+      if (isFork && !hasAssociation && !hasWriteAccess) {
         console.log(`Fork PR from ${sender} without valid association (${association}), skipping`);
         shouldRun = false;
       }
-    } else if (!isOwner && !hasAssociation) {
+    } else if (!isOwner && !hasAssociation && !hasWriteAccess) {
       console.log(`User ${sender} lacks permission (association: ${association}), skipping`);
       shouldRun = false;
     }
@@ -84,16 +106,8 @@ module.exports = async function checkTrigger({ github, context, core }) {
       const allowedUsers = allowedUsersInput.split(',').map(/** @param {string} u */ u => u.trim()).filter(Boolean);
       const actor = (context.payload.inputs || {}).actor || context.actor;
       if (allowedUsers.length > 0 && !allowedUsers.includes(actor)) {
-        try {
-          const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
-            owner: context.repo.owner, repo: context.repo.repo, username: actor
-          });
-          if (!['write', 'maintain', 'admin'].includes(data.permission)) {
-            console.log(`User ${actor} not in allowed list and lacks write access`);
-            shouldRun = false;
-          }
-        } catch (e) {
-          console.log(`Permission check failed for ${actor}: ${/** @type {Error} */ (e).message}`);
+        if (!(await hasWritePermission(actor))) {
+          console.log(`User ${actor} not in allowed list and lacks write access`);
           shouldRun = false;
         }
       }
