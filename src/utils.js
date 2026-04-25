@@ -23,6 +23,7 @@ const TRIGGER_BASES = ['netlify', 'nelify', 'netlfy', 'netify', 'netlif', 'netfl
 const TRIGGER_BASE_PATTERN = `(?:${TRIGGER_BASES.join('|')})`;
 const TRIGGER_SUFFIX_PATTERN = '(?:[_-](?:agents?(?:[_-]runs?)?|ai))?';
 
+
 /**
  * Standalone @netlify mention (and typos) with optional suffixes like -agent,
  * -agents, or -ai. Rejects package scopes like @netlify/pkg and email-like
