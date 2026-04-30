@@ -5,7 +5,11 @@
 /** @typedef {import('./types').InProgressCommentOptions} InProgressCommentOptions */
 
 const path = require('path');
-const { STATUS_COMMENT_MARKER, renderRunnerIdMarker } = require('./comment-markers');
+const {
+  STATUS_COMMENT_MARKER,
+  renderRunnerIdMarker,
+  stripAllHtmlComments,
+} = require('./comment-markers');
 
 /** @type {[string, string][]} */
 const FLAVOR_MESSAGES = require(path.join(__dirname, 'flavor-messages.json'));
@@ -118,6 +122,11 @@ function ghContainsExpressions(field) {
  * @returns {string}
  */
 function formatPromptBlock(prompt, sourceUrl) {
+  if (!prompt) return '';
+  // Strip every HTML comment the user may have included so attacker-controlled
+  // markers — even ones shaped like ours — can never be reflected into a
+  // bot-authored comment body.
+  prompt = stripAllHtmlComments(prompt);
   if (!prompt) return '';
   const MAX_LENGTH = 350;
   let display = prompt;

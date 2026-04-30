@@ -6,6 +6,57 @@ const RUNNER_ID_MARKER_PREFIX = '<!-- netlify-agent-runner-id:';
 const SESSION_DATA_MARKER_PREFIX = '<!-- netlify-agent-session-data:';
 const MARKER_SUFFIX = '-->';
 
+// Conservative format for runner IDs: alphanumerics, underscore, hyphen only.
+// Rejects characters that could break JSON construction (quotes, backslashes),
+// shell argument boundaries, or Markdown link syntax.
+const RUNNER_ID_FORMAT = /^[A-Za-z0-9_-]{1,128}$/;
+
+// Allowlist of HTML comments the action recognizes. Any other HTML comment
+// found in user-influenced content is stripped before parsing/rendering, so
+// outsiders cannot smuggle fake markers and bot comments cannot accidentally
+// reflect attacker-supplied markers from echoed user content.
+const ALLOWED_MARKER_INNER = /^\s*netlify-agent-(?:run-status|run-history|runner-id:|session-data:)/;
+
+// Allowlist for URL-bearing fields in session-data entries. These URLs flow
+// into bot-rendered Markdown links; anything outside these patterns gets
+// dropped at parse time so phishing links cannot ride through poisoned state.
+const SESSION_URL_ALLOWLIST = {
+  pr_url:        /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+(?:[/?#].*)?$/,
+  gh_action_url: /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/\d+(?:[/?#].*)?$/,
+  screenshot:    /^https:\/\/(?:[A-Za-z0-9-]+\.)*(?:netlify\.app|netlifyusercontent\.com|app\.netlify\.com|api\.netlify\.com)\/[^\s]*$/i,
+};
+// 4 covers git's minimum unique-prefix display; 64 covers full SHA-256.
+const COMMIT_SHA_FORMAT = /^[0-9a-f]{4,64}$/i;
+const SESSION_FIELD_MAX_LENGTH = 2048;
+
+/**
+ * Drop URL/sha fields that don't match their format. Mutates a copy.
+ * @param {Record<string, unknown>} entry
+ * @returns {Record<string, unknown>}
+ */
+function sanitizeSessionEntry(entry) {
+  /** @type {Record<string, unknown>} */
+  const out = {};
+  for (const [key, value] of Object.entries(entry)) {
+    if (typeof value !== 'string') {
+      // Non-string values aren't currently expected; keep them only if scalar.
+      if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+        out[key] = value;
+      }
+      continue;
+    }
+    if (value.length > SESSION_FIELD_MAX_LENGTH) continue;
+    const allowlist = /** @type {Record<string, RegExp>} */ (SESSION_URL_ALLOWLIST);
+    if (Object.prototype.hasOwnProperty.call(allowlist, key)) {
+      if (!allowlist[key].test(value)) continue;
+    } else if (key === 'commit_sha') {
+      if (!COMMIT_SHA_FORMAT.test(value)) continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 /**
  * @param {unknown} body
  * @returns {string}
@@ -77,7 +128,10 @@ function renderRunnerIdMarker(runnerId = '') {
  * @returns {string}
  */
 function parseRunnerId(body) {
-  return readMarkerValue(body, RUNNER_ID_MARKER_PREFIX);
+  const value = readMarkerValue(body, RUNNER_ID_MARKER_PREFIX);
+  if (!value) return '';
+  if (!RUNNER_ID_FORMAT.test(value)) return '';
+  return value;
 }
 
 /**
@@ -98,11 +152,21 @@ function parseSessionData(body) {
   const rawValue = readMarkerValue(body, SESSION_DATA_MARKER_PREFIX);
   if (!rawValue) return {};
 
+  /** @type {Record<string, unknown>} */
+  let map;
   try {
-    return normalizeSessionDataMap(JSON.parse(rawValue));
+    map = normalizeSessionDataMap(JSON.parse(rawValue));
   } catch (_) {
     return {};
   }
+
+  /** @type {Record<string, unknown>} */
+  const sanitized = {};
+  for (const [sessionId, entry] of Object.entries(map)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    sanitized[sessionId] = sanitizeSessionEntry(/** @type {Record<string, unknown>} */ (entry));
+  }
+  return sanitized;
 }
 
 /**
@@ -122,6 +186,39 @@ function parseLinkedPrReference(body) {
   return '';
 }
 
+/**
+ * Remove every HTML comment that is not one of our allowlisted markers.
+ * Used on the read path: sanitize comment/PR-body text before parsing markers,
+ * so a poisoned non-bot comment cannot inject runner-id/session-data values
+ * even if it slipped past upstream author filtering.
+ *
+ * @param {unknown} body
+ * @returns {string}
+ */
+function stripUntrustedHtmlComments(body) {
+  const text = normalizeBody(body);
+  if (!text) return '';
+  return text.replace(/<!--([\s\S]*?)-->/g, (match, inner) => {
+    return ALLOWED_MARKER_INNER.test(inner) ? match : '';
+  });
+}
+
+/**
+ * Remove every HTML comment unconditionally. Used on the write path when
+ * embedding user-authored content (issue/PR/comment bodies) into a
+ * bot-authored comment, so the bot's output never reflects user-supplied
+ * markers — even ones shaped like ours, which a later parser's indexOf would
+ * pick up before the bot's own legitimate marker at the end of the body.
+ *
+ * @param {unknown} body
+ * @returns {string}
+ */
+function stripAllHtmlComments(body) {
+  const text = normalizeBody(body);
+  if (!text) return '';
+  return text.replace(/<!--[\s\S]*?-->/g, '');
+}
+
 module.exports = {
   STATUS_COMMENT_MARKER,
   HISTORY_COMMENT_MARKER,
@@ -132,4 +229,6 @@ module.exports = {
   renderSessionDataMarker,
   parseSessionData,
   parseLinkedPrReference,
+  stripUntrustedHtmlComments,
+  stripAllHtmlComments,
 };

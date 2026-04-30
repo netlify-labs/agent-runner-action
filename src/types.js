@@ -36,7 +36,7 @@
  * @property {(params: {owner: string, repo: string, name: string, color: string, description: string}) => Promise<{data: {id: number, name: string}}>} rest.issues.createLabel
  * @property {(params: {owner: string, repo: string, issue_number: number, per_page: number, headers?: Record<string, string>}) => Promise<{data: TimelineEvent[]}>} rest.issues.listEventsForTimeline
  * @property {object} rest.pulls
- * @property {(params: {owner: string, repo: string, pull_number: number}) => Promise<{data: {head: {ref: string, sha: string}, base: {ref: string}, body?: string}}>} rest.pulls.get
+ * @property {(params: {owner: string, repo: string, pull_number: number}) => Promise<{data: {head: {ref: string, sha: string, repo?: {full_name: string}}, base: {ref: string, repo?: {full_name: string}}, body?: string}}>} rest.pulls.get
  * @property {object} rest.repos
  * @property {(params: {owner: string, repo: string, username: string}) => Promise<{data: {permission: string}}>} rest.repos.getCollaboratorPermissionLevel
  * @property {object} rest.reactions
