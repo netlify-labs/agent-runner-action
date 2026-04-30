@@ -56,13 +56,34 @@ const MODEL_PATTERN = new RegExp(
 // ---------------------------------------------------------------------------
 
 /**
+ * Strip Markdown code regions (fenced blocks and inline code spans) from text
+ * so trigger detection ignores @netlify mentions a user is quoting verbatim.
+ *
+ * Handles:
+ *   - ```fenced``` and ~~~fenced~~~ blocks
+ *   - `inline` and ``inline with backtick`` spans (any number of paired backticks)
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function stripMarkdownCode(text) {
+  if (!text) return '';
+  return text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/~~~[\s\S]*?~~~/g, '')
+    .replace(/(`+)[\s\S]*?\1/g, '');
+}
+
+/**
  * Check whether `text` contains any recognised trigger mention.
+ * Mentions inside Markdown code spans or fenced blocks are ignored so users
+ * can quote `@netlify` verbatim without firing the action.
  * @param {string | null | undefined} text
  * @returns {boolean}
  */
 function matchesTrigger(text) {
   if (!text) return false;
-  return TRIGGER_PATTERN.test(text);
+  return TRIGGER_PATTERN.test(stripMarkdownCode(text));
 }
 
 /**
