@@ -339,8 +339,26 @@ runs:
           core.setOutput('should-continue', shouldContinue ? 'true' : 'false');
 
     # -----------------------------------------------------------------------
-    # 5. Find or create the sticky status comment
+    # 5. Resolve bot identity, then find or create the sticky status comment.
+    #    The bot-identity step lets find-comment filter to comments authored by
+    #    the same identity that posts our status updates, preventing comment
+    #    poisoning from arbitrary users (see SECURITY.md).
     # -----------------------------------------------------------------------
+    - name: Resolve bot identity
+      id: bot-identity
+      if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch'
+      uses: actions/github-script@v8
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          try {
+            const { data } = await github.rest.users.getAuthenticated();
+            core.setOutput('login', data.login);
+          } catch (error) {
+            console.log(`Bot identity lookup failed, falling back to github-actions[bot]: ${error.message}`);
+            core.setOutput('login', 'github-actions[bot]');
+          }
+
     - name: Find existing status comment
       if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch' && steps.context-info.outputs.issue-number != ''
       uses: peter-evans/find-comment@v4
@@ -349,6 +367,8 @@ runs:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.context-info.outputs.issue-number }}
         body-includes: '<!-- netlify-agent-run-status -->'
+        comment-author: ${{ steps.bot-identity.outputs.login }}
+        direction: last
 
     - name: Find existing history comment
       if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch' && steps.context-info.outputs.is-pr == 'true'
@@ -357,6 +377,8 @@ runs:
       with:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.context-info.outputs.issue-number }}
+        comment-author: ${{ steps.bot-identity.outputs.login }}
+        direction: last
         body-includes: '<!-- netlify-agent-run-history -->'
 
     - name: Extract existing agent run ID
@@ -775,12 +797,19 @@ runs:
         # Create or reuse agent run
         if [ -n "${EXISTING_RUNNER_ID:-}" ]; then
           echo "🔄 Follow-up session on runner: $EXISTING_RUNNER_ID"
-          SAFE_PROMPT=$(echo "$TRIGGER_TEXT" | jq -Rs .)
+          # Build the JSON payload with jq so every value is properly escaped.
+          # Direct bash interpolation here would let any special character in
+          # EXISTING_RUNNER_ID smuggle additional JSON keys.
+          SESSION_PAYLOAD=$(jq -n \
+            --arg id "$EXISTING_RUNNER_ID" \
+            --arg agent "$SELECTED_AGENT" \
+            --arg prompt "$TRIGGER_TEXT" \
+            '{agent_runner_id: $id, body: {prompt: $prompt, agent: $agent}}')
           SESSION_CREATED=false
           for ATTEMPT in 1 2 3; do
             echo "  Attempt $ATTEMPT/3..."
             SESSION_RESULT=$(netlify api createAgentRunnerSession \
-              --data "{\"agent_runner_id\": \"$EXISTING_RUNNER_ID\", \"body\": {\"prompt\": $SAFE_PROMPT, \"agent\": \"$SELECTED_AGENT\"}}" 2>/dev/null || true)
+              --data "$SESSION_PAYLOAD" 2>/dev/null || true)
             debug_log "createAgentRunnerSession (attempt $ATTEMPT)" "$SESSION_RESULT"
             SESSION_STATE=$(echo "$SESSION_RESULT" | jq -r '.state // empty')
             if [ "$SESSION_STATE" = "running" ]; then

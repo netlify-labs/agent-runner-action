@@ -2,7 +2,7 @@
 // Sets outputs: agent-runner-id, session-data-map, agent-run-url, has-linked-pr, linked-pr-number
 
 /** @typedef {import('./types').ActionParams} ActionParams */
-const { RUNNER_ID_MARKER_PREFIX } = require('./comment-markers');
+const { RUNNER_ID_MARKER_PREFIX, stripUntrustedHtmlComments } = require('./comment-markers');
 const { reconcileAgentState } = require('./state-reconciliation');
 
 /**
@@ -24,19 +24,28 @@ module.exports = async function extractAgentId({ github, context, core, inputs }
     statusCommentBody = comment.data.body || '';
   }
 
-  // Fallback for PRs: check PR body
+  // Fallback for PRs: check PR body, but ONLY for same-repo PRs.
+  // Fork PR bodies are authored by external contributors and must not be
+  // trusted as durable state — see SECURITY.md (comment-state poisoning).
   if (!statusCommentBody.includes(RUNNER_ID_MARKER_PREFIX) && isPR && prNumber) {
     const pr = await github.rest.pulls.get({
       owner: context.repo.owner, repo: context.repo.repo,
       pull_number: parseInt(prNumber)
     });
-    prBody = pr.data.body || '';
+    const headRepo = pr.data.head && pr.data.head.repo && pr.data.head.repo.full_name;
+    const baseRepo = pr.data.base && pr.data.base.repo && pr.data.base.repo.full_name;
+    const isSameRepo = !!headRepo && !!baseRepo && headRepo === baseRepo;
+    if (isSameRepo) {
+      prBody = pr.data.body || '';
+    } else {
+      console.log(`Skipping PR body fallback for fork PR (head=${headRepo || '?'}, base=${baseRepo || '?'})`);
+    }
   }
 
   const reconciled = reconcileAgentState({
     isPr: isPR,
-    statusCommentBody,
-    prBody,
+    statusCommentBody: stripUntrustedHtmlComments(statusCommentBody),
+    prBody: stripUntrustedHtmlComments(prBody),
   });
 
   if (reconciled.warnings.length > 0) {

@@ -49,6 +49,29 @@ describe('matchesTrigger', () => {
   it('matches trigger mid-text', () => {
     assert.ok(utils.matchesTrigger('please @netlify build a page'));
   });
+
+  it('ignores @netlify mentions inside inline code spans', () => {
+    assert.ok(!utils.matchesTrigger('See `@netlify` documentation for context'));
+    assert.ok(!utils.matchesTrigger('the ``@netlify`` token is a marker'));
+    assert.ok(!utils.matchesTrigger('one `@netlify` and another `@netlify` quoted'));
+  });
+
+  it('ignores @netlify mentions inside fenced code blocks', () => {
+    const fenced = [
+      'Here is some yaml:',
+      '```yaml',
+      'on: issue_comment # @netlify',
+      '```',
+    ].join('\n');
+    assert.ok(!utils.matchesTrigger(fenced));
+
+    const tildeFenced = '~~~\n@netlify run\n~~~';
+    assert.ok(!utils.matchesTrigger(tildeFenced));
+  });
+
+  it('still matches when an unbacticked @netlify appears alongside quoted ones', () => {
+    assert.ok(utils.matchesTrigger('the `@netlify` mention is what fires; please @netlify do the thing'));
+  });
 });
 
 // ---------------------------------------------------------------------------

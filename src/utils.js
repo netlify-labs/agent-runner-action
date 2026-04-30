@@ -5,7 +5,11 @@
 /** @typedef {import('./types').InProgressCommentOptions} InProgressCommentOptions */
 
 const path = require('path');
-const { STATUS_COMMENT_MARKER, renderRunnerIdMarker } = require('./comment-markers');
+const {
+  STATUS_COMMENT_MARKER,
+  renderRunnerIdMarker,
+  stripAllHtmlComments,
+} = require('./comment-markers');
 
 /** @type {[string, string][]} */
 const FLAVOR_MESSAGES = require(path.join(__dirname, 'flavor-messages.json'));
@@ -52,13 +56,34 @@ const MODEL_PATTERN = new RegExp(
 // ---------------------------------------------------------------------------
 
 /**
+ * Strip Markdown code regions (fenced blocks and inline code spans) from text
+ * so trigger detection ignores @netlify mentions a user is quoting verbatim.
+ *
+ * Handles:
+ *   - ```fenced``` and ~~~fenced~~~ blocks
+ *   - `inline` and ``inline with backtick`` spans (any number of paired backticks)
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function stripMarkdownCode(text) {
+  if (!text) return '';
+  return text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/~~~[\s\S]*?~~~/g, '')
+    .replace(/(`+)[\s\S]*?\1/g, '');
+}
+
+/**
  * Check whether `text` contains any recognised trigger mention.
+ * Mentions inside Markdown code spans or fenced blocks are ignored so users
+ * can quote `@netlify` verbatim without firing the action.
  * @param {string | null | undefined} text
  * @returns {boolean}
  */
 function matchesTrigger(text) {
   if (!text) return false;
-  return TRIGGER_PATTERN.test(text);
+  return TRIGGER_PATTERN.test(stripMarkdownCode(text));
 }
 
 /**
@@ -118,6 +143,11 @@ function ghContainsExpressions(field) {
  * @returns {string}
  */
 function formatPromptBlock(prompt, sourceUrl) {
+  if (!prompt) return '';
+  // Strip every HTML comment the user may have included so attacker-controlled
+  // markers — even ones shaped like ours — can never be reflected into a
+  // bot-authored comment body.
+  prompt = stripAllHtmlComments(prompt);
   if (!prompt) return '';
   const MAX_LENGTH = 350;
   let display = prompt;
