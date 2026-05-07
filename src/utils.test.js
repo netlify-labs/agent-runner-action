@@ -225,7 +225,8 @@ describe('buildInProgressComment', () => {
     const result = utils.buildInProgressComment({
       prompt: '@netlify build it', model: 'codex'
     });
-    assert.ok(result.includes('Netlify Agent Runners'));
+    assert.ok(result.includes('### Netlify Agent Run Status'));
+    assert.ok(utils.FLAVOR_MESSAGES.some(([flavor]) => result.includes(`Netlify Agent Runners ${flavor}`)));
     assert.ok(result.includes('`codex`'));
     assert.ok(result.includes('<!-- netlify-agent-run-status -->'));
   });

@@ -117,14 +117,16 @@ function renderStatusComment({ env = process.env, context, outcome }) {
   const resultUrl = env.RESULT_COMMENT_URL ||
     (env.RESULT_COMMENT_ID ? `#issuecomment-${env.RESULT_COMMENT_ID}` : '');
 
-  let headerText = 'Netlify Agent Run completed';
-  if (isDryRun) headerText = 'Netlify Agent Run completed (preview)';
-  if (isFailure) headerText = 'Netlify Agent Run failed';
   const statusIcon = isFailure ? '❌' : '✅';
+  const statusLine = isFailure
+    ? 'Netlify Agent Run failed.'
+    : isDryRun
+      ? 'Netlify Agent Run completed (preview).'
+      : 'Netlify Agent Run completed.';
   const header = agentRunUrl
-    ? `### [${headerText}](${agentRunUrl}) ${statusIcon}`
-    : `### ${headerText} ${statusIcon}`;
-  const subtitle = `Run #${runNumber} | ${model} | ${isFailure ? 'failed' : 'completed'} at ${timestamp}`;
+    ? `### [Netlify Agent Run Status](${agentRunUrl}) ${statusIcon}`
+    : `### Netlify Agent Run Status ${statusIcon}`;
+  const subtitle = `${statusLine}\n\nRun #${runNumber} | ${model} | ${isFailure ? 'failed' : 'completed'} at ${timestamp}`;
 
   const deployUrl = env.AGENT_DEPLOY_URL || (latestSession && latestSession.deploy_url) || '';
   const screenshotUrl = env.AGENT_SCREENSHOT_URL || '';
@@ -132,7 +134,7 @@ function renderStatusComment({ env = process.env, context, outcome }) {
     ? `<a href="${deployUrl}"><img src="${screenshotUrl}" alt="Preview" width="180" align="right"></a>`
     : '';
 
-  let statusTitle = title ? `**${title}**` : '';
+  let statusTitle = title ? `**Prompt summary:** ${title}` : '';
   if (isFailure) {
     const failure = classifyFailure({
       category: env.FAILURE_CATEGORY || env.AGENT_FAILURE_CATEGORY || '',
@@ -140,7 +142,7 @@ function renderStatusComment({ env = process.env, context, outcome }) {
       error: env.AGENT_ERROR || '',
       statusCode: env.FAILURE_STATUS_CODE ? parseInt(env.FAILURE_STATUS_CODE, 10) : undefined,
     });
-    statusTitle = `**${failure.title}**`;
+    statusTitle = `**Failure summary:** ${failure.title}`;
   }
 
   const markers = [

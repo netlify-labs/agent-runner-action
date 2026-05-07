@@ -56,15 +56,16 @@ describe('assembleStatusBody', () => {
 
   it('emits required fields and trailing markers', () => {
     const body = assembleStatusBody({
-      header: '### [Netlify Agent Run completed](https://app.netlify.com/runs/1) ✅',
-      subtitle: 'Run #1 | codex | completed at 2026-05-07T00:00:00Z',
+      header: '### [Netlify Agent Run Status](https://app.netlify.com/runs/1) ✅',
+      subtitle: 'Netlify Agent Run completed.\n\nRun #1 | codex | completed at 2026-05-07T00:00:00Z',
       resultCommentLink: '[Read full result](#issuecomment-1)',
       links: ['[Agent run](https://app.netlify.com/runs/1)'],
-      title: 'Updated the page',
+      title: '**Prompt summary:** Updated the page',
       markers,
       budget: 1000,
     });
 
+    assert.ok(body.indexOf('**Prompt summary:** Updated the page') < body.indexOf('[Read full result](#issuecomment-1)'));
     assert.ok(body.includes('[Read full result](#issuecomment-1)'));
     assert.ok(body.endsWith(markers.join('\n')));
   });

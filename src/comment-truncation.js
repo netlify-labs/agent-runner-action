@@ -153,10 +153,10 @@ function assembleStatusBody({
   const markerBlock = Array.isArray(markers) ? markers.filter(Boolean).join('\n') : markers;
 
   const required = fitRequiredFields(
-    [header, subtitle, resultCommentLink, redirectNote].filter(Boolean),
+    [header, subtitle, title, resultCommentLink, redirectNote].filter(Boolean),
     budget
   );
-  const optional = [screenshot, title, linkRow].filter(Boolean);
+  const optional = [screenshot, linkRow].filter(Boolean);
 
   let visible = joinVisible([...required, ...optional]);
   while (byteLength(visible) > budget && optional.length > 0) {
