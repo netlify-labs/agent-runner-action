@@ -8,6 +8,19 @@ const utils = require('./utils');
 const MAX_HISTORY_BODY_LENGTH = 60000;
 
 /**
+ * @returns {string}
+ */
+function renderHistoryPlaceholder() {
+  return [
+    '### Netlify Agent Run History',
+    '',
+    'Agent run history will appear here after the first result is posted.',
+    '',
+    HISTORY_COMMENT_MARKER,
+  ].join('\n');
+}
+
+/**
  * @param {string} body
  * @returns {{
  *   runNumber: string,
@@ -222,5 +235,6 @@ module.exports = async function generateHistoryToc({ github, context, core }) {
 
 module.exports.parseResultSummary = parseResultSummary;
 module.exports.renderHistoryTocFromComments = renderHistoryTocFromComments;
+module.exports.renderHistoryPlaceholder = renderHistoryPlaceholder;
 module.exports.listAllComments = listAllComments;
 module.exports.MAX_HISTORY_BODY_LENGTH = MAX_HISTORY_BODY_LENGTH;

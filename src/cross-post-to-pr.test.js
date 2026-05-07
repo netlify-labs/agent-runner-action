@@ -72,15 +72,17 @@ describe('crossPostToPR', () => {
 
     assert.equal(created.length, 3);
     assert.equal(created[0].issue_number, 7);
-    assert.equal(created[0].body, resultBody);
+    assert.ok(created[0].body.includes(STATUS_COMMENT_MARKER));
     assert.equal(created[1].issue_number, 7);
-    assert.ok(created[1].body.includes('https://github.com/netlify-labs/agent-runner-action-example/issues/7#issuecomment-101'));
-    assert.ok(created[1].body.includes(STATUS_COMMENT_MARKER));
+    assert.ok(created[1].body.includes(HISTORY_COMMENT_MARKER));
     assert.equal(created[2].issue_number, 7);
-    assert.ok(created[2].body.includes(HISTORY_COMMENT_MARKER));
-    assert.equal(updated.length, 1);
-    assert.ok(updated[0].body.includes('issues/1#issuecomment-55'));
-    assert.ok(updated[0].body.includes('Leave follow-up `@netlify` prompts on PR #7'));
+    assert.equal(created[2].body, resultBody);
+    assert.equal(updated.length, 3);
+    assert.ok(updated[0].body.includes('https://github.com/netlify-labs/agent-runner-action-example/issues/7#issuecomment-103'));
+    assert.ok(updated[0].body.includes(STATUS_COMMENT_MARKER));
+    assert.ok(updated[1].body.includes(HISTORY_COMMENT_MARKER));
+    assert.ok(updated[2].body.includes('issues/1#issuecomment-55'));
+    assert.ok(updated[2].body.includes('Leave follow-up `@netlify` prompts on PR #7'));
   });
 
   it('updates existing PR-local status and history comments on follow-up cross-posts', async () => {

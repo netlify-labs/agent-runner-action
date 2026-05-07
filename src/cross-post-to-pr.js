@@ -6,6 +6,7 @@
 const { renderStatusComment } = require('./generate-status-comment');
 const {
   listAllComments,
+  renderHistoryPlaceholder,
   renderHistoryTocFromComments,
 } = require('./generate-history-toc');
 const { HISTORY_COMMENT_MARKER, STATUS_COMMENT_MARKER } = require('./comment-markers');
@@ -103,7 +104,53 @@ module.exports = async function crossPostToPR({ github, context }) {
   const statusBody = process.env.STATUS_BODY || '';
   const botLogin = process.env.BOT_LOGIN || '';
 
-  // Post a PR-local result comment first so the PR-local status can link to it.
+  const prComments = await listAllComments(github, context, prNumber);
+  const existingStatusComment = findLatestBotCommentWithMarker(prComments, STATUS_COMMENT_MARKER, botLogin);
+  const existingHistoryComment = findLatestBotCommentWithMarker(prComments, HISTORY_COMMENT_MARKER, botLogin);
+
+  // On a new PR, create the sticky comments before appending the immutable
+  // result comment. Later updates keep those sticky comments above run results
+  // in the GitHub timeline.
+  let prStatusComment = existingStatusComment;
+  let prHistoryComment = existingHistoryComment;
+  if (statusBody && !prStatusComment) {
+    const env = Object.assign({}, process.env, {
+      IS_PR: 'true',
+      RESULT_COMMENT_URL: '',
+      RESULT_COMMENT_ID: '',
+      REDIRECT_NOTE: '',
+    });
+    const prStatusBody = renderStatusComment({ env, context }).statusBody;
+    const { data: comment } = await github.rest.issues.createComment({
+      owner, repo, issue_number: prNumber, body: prStatusBody
+    });
+    prStatusComment = Object.assign({
+      issue_number: prNumber,
+      user: { login: botLogin || 'github-actions[bot]' },
+      body: prStatusBody,
+      created_at: new Date().toISOString(),
+    }, comment);
+    prComments.push(prStatusComment);
+    console.log(`Posted status placeholder on PR #${prNumber}`);
+  }
+
+  if (resultBody && !prHistoryComment) {
+    const body = renderHistoryPlaceholder();
+    const { data: comment } = await github.rest.issues.createComment({
+      owner, repo, issue_number: prNumber, body
+    });
+    prHistoryComment = Object.assign({
+      issue_number: prNumber,
+      user: { login: botLogin || 'github-actions[bot]' },
+      body,
+      created_at: new Date().toISOString(),
+    }, comment);
+    prComments.push(prHistoryComment);
+    console.log(`Posted history placeholder on PR #${prNumber}`);
+  }
+
+  // Post a PR-local result comment after sticky placeholders so the timeline
+  // reads status, history, then immutable run result.
   let prResultUrl = '';
   let prResultComment = null;
   if (resultBody) {
@@ -116,7 +163,6 @@ module.exports = async function crossPostToPR({ github, context }) {
     console.log(`Posted result comment on PR #${prNumber}`);
   }
 
-  const prComments = await listAllComments(github, context, prNumber);
   if (prResultComment && !prComments.some(comment => Number(comment.id) === Number(prResultComment.id))) {
     prComments.push(Object.assign({
       issue_number: prNumber,
@@ -141,7 +187,7 @@ module.exports = async function crossPostToPR({ github, context }) {
       owner,
       repo,
       issueNumber: prNumber,
-      existingComment: findLatestBotCommentWithMarker(prComments, STATUS_COMMENT_MARKER, botLogin),
+      existingComment: prStatusComment,
       body: prStatusBody,
       label: 'status',
     });
@@ -160,7 +206,7 @@ module.exports = async function crossPostToPR({ github, context }) {
         owner,
         repo,
         issueNumber: prNumber,
-        existingComment: findLatestBotCommentWithMarker(prComments, HISTORY_COMMENT_MARKER, botLogin),
+        existingComment: prHistoryComment,
         body: historyBody,
         label: 'history TOC',
       });
@@ -171,7 +217,7 @@ module.exports = async function crossPostToPR({ github, context }) {
       owner,
       repo,
       issueNumber: prNumber,
-      existingComment: findLatestBotCommentWithMarker(prComments, HISTORY_COMMENT_MARKER, botLogin),
+      existingComment: prHistoryComment,
       body: process.env.HISTORY_BODY,
       label: 'history',
     });

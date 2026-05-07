@@ -565,6 +565,29 @@ runs:
           });
           core.setOutput('comment-id', comment.id);
 
+    - name: Create initial history comment
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.should-continue.outputs.should-continue == 'true'
+        && steps.context-info.outputs.is-pr == 'true'
+        && steps.find_history_comment.outputs.comment-id == ''
+        && github.event_name != 'workflow_dispatch'
+      uses: actions/github-script@v8
+      id: create_history_comment
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const { renderHistoryPlaceholder } = require(`${process.env.ACTION_DIR}/src/generate-history-toc.js`);
+          const { data: comment } = await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: ${{ steps.context-info.outputs.issue-number }},
+            body: renderHistoryPlaceholder(),
+          });
+          core.setOutput('comment-id', comment.id);
+
     # -----------------------------------------------------------------------
     # 8. Checkout repository
     # -----------------------------------------------------------------------
@@ -1267,7 +1290,7 @@ runs:
       with:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.context-info.outputs.issue-number }}
-        comment-id: ${{ steps.find_history_comment.outputs.comment-id }}
+        comment-id: ${{ steps.find_history_comment.outputs.comment-id || steps.create_history_comment.outputs.comment-id }}
         body: |
           ${{ steps.generate_history_comment.outputs.comment-body }}
         edit-mode: replace
