@@ -57,14 +57,16 @@ describe('assembleStatusBody', () => {
   it('emits required fields and trailing markers', () => {
     const body = assembleStatusBody({
       header: '### [Netlify Agent Run Status](https://app.netlify.com/runs/1) ✅',
-      subtitle: 'Netlify Agent Run completed.\n\nRun #1 | codex | completed at 2026-05-07T00:00:00Z',
+      subtitle: 'Netlify Agent Run completed.',
+      screenshot: '<img src="https://example.com/preview.png" width="250">',
       resultCommentLink: '[Read full result](#issuecomment-1)',
       links: ['[Agent run](https://app.netlify.com/runs/1)'],
-      title: '**Prompt summary:** Updated the page',
+      title: 'Run #1 | codex | completed at 2026-05-07T00:00:00Z\n\n**Prompt summary:** Updated the page',
       markers,
       budget: 1000,
     });
 
+    assert.ok(body.indexOf('<img src="https://example.com/preview.png"') < body.indexOf('Run #1 | codex'));
     assert.ok(body.indexOf('**Prompt summary:** Updated the page') < body.indexOf('[Read full result](#issuecomment-1)'));
     assert.ok(body.includes('[Read full result](#issuecomment-1)'));
     assert.ok(body.endsWith(markers.join('\n')));
@@ -76,14 +78,14 @@ describe('assembleStatusBody', () => {
       subtitle: 'Run #1 | codex',
       resultCommentLink: '[Read full result](#issuecomment-1)',
       screenshot: '<img src="https://example.com/preview.png" width="250">',
-      title: 'A moderately long title that should be dropped',
+      title: 'A moderately long title that should be truncated',
       links: '[Agent run](https://app.netlify.com/runs/1)',
       markers,
       budget: 70,
     });
 
     assert.ok(!body.includes('<img'));
-    assert.ok(!body.includes('moderately long title'));
+    assert.ok(!body.includes('moderately long title that should be truncated'));
     assert.ok(body.includes('[Read full result](#issuecomment-1)'));
     assert.ok(body.includes('<!-- netlify-agent-run-status -->'));
   });

@@ -126,7 +126,8 @@ function renderStatusComment({ env = process.env, context, outcome }) {
   const header = agentRunUrl
     ? `### [Netlify Agent Run Status](${agentRunUrl}) ${statusIcon}`
     : `### Netlify Agent Run Status ${statusIcon}`;
-  const subtitle = `${statusLine}\n\nRun #${runNumber} | ${model} | ${isFailure ? 'failed' : 'completed'} at ${timestamp}`;
+  const subtitle = statusLine;
+  const runLine = `Run #${runNumber} | ${model} | ${isFailure ? 'failed' : 'completed'} at ${timestamp}`;
 
   const deployUrl = env.AGENT_DEPLOY_URL || (latestSession && latestSession.deploy_url) || '';
   const screenshotUrl = env.AGENT_SCREENSHOT_URL || '';
@@ -134,7 +135,7 @@ function renderStatusComment({ env = process.env, context, outcome }) {
     ? `<a href="${deployUrl}"><img src="${screenshotUrl}" alt="Preview" width="180" align="right"></a>`
     : '';
 
-  let statusTitle = title ? `**Prompt summary:** ${title}` : '';
+  let statusTitle = title ? `${runLine}\n\n**Prompt summary:** ${title}` : runLine;
   if (isFailure) {
     const failure = classifyFailure({
       category: env.FAILURE_CATEGORY || env.AGENT_FAILURE_CATEGORY || '',
@@ -142,7 +143,7 @@ function renderStatusComment({ env = process.env, context, outcome }) {
       error: env.AGENT_ERROR || '',
       statusCode: env.FAILURE_STATUS_CODE ? parseInt(env.FAILURE_STATUS_CODE, 10) : undefined,
     });
-    statusTitle = `**Failure summary:** ${failure.title}`;
+    statusTitle = `${runLine}\n\n**Failure summary:** ${failure.title}`;
   }
 
   const markers = [

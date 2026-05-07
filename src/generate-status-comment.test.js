@@ -58,6 +58,7 @@ describe('renderStatusComment', () => {
     assert.ok(rendered.statusBody.includes('Netlify Agent Run completed.'));
     assert.ok(rendered.statusBody.includes('**Prompt summary:** Updated homepage'));
     assert.ok(rendered.statusBody.includes('[Read full result](#issuecomment-123)'));
+    assert.ok(rendered.statusBody.indexOf('<a href="https://site.netlify.app"') < rendered.statusBody.indexOf('Run #1 | codex'));
     assert.equal(parseRunnerId(rendered.statusBody), 'runner_1');
     assert.equal(parseSessionData(rendered.statusBody).session_1.screenshot, 'https://site.netlify.app/screenshot.png');
     assert.ok(rendered.statusBody.includes(STATUS_COMMENT_MARKER));

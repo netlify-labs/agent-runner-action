@@ -152,20 +152,28 @@ function assembleStatusBody({
   const linkRow = Array.isArray(links) ? links.filter(Boolean).join(' | ') : links;
   const markerBlock = Array.isArray(markers) ? markers.filter(Boolean).join('\n') : markers;
 
-  const required = fitRequiredFields(
-    [header, subtitle, title, resultCommentLink, redirectNote].filter(Boolean),
-    budget
-  );
-  const optional = [screenshot, linkRow].filter(Boolean);
+  const requiredFields = [header, subtitle, title, resultCommentLink, redirectNote].filter(Boolean);
+  let includeScreenshot = Boolean(screenshot);
+  let includeLinkRow = Boolean(linkRow);
+  const buildVisible = () => joinVisible([
+    header,
+    subtitle,
+    includeScreenshot ? screenshot : '',
+    title,
+    resultCommentLink,
+    redirectNote,
+    includeLinkRow ? linkRow : '',
+  ].filter(Boolean));
 
-  let visible = joinVisible([...required, ...optional]);
-  while (byteLength(visible) > budget && optional.length > 0) {
-    optional.shift();
-    visible = joinVisible([...required, ...optional]);
+  let visible = buildVisible();
+  while (byteLength(visible) > budget && (includeScreenshot || includeLinkRow)) {
+    if (includeScreenshot) includeScreenshot = false;
+    else includeLinkRow = false;
+    visible = buildVisible();
   }
 
   if (byteLength(visible) > budget) {
-    visible = joinVisible(fitRequiredFields(required, budget));
+    visible = joinVisible(fitRequiredFields(requiredFields, budget));
   }
 
   return markerBlock
