@@ -8,6 +8,7 @@ const {
   listAllComments,
   renderHistoryTocFromComments,
 } = require('./generate-history-toc');
+const { HISTORY_COMMENT_MARKER, STATUS_COMMENT_MARKER } = require('./comment-markers');
 
 /**
  * @param {string} statusBody
@@ -27,6 +28,63 @@ function insertRedirectNote(statusBody, prNumber, agentRunUrl) {
 }
 
 /**
+ * @param {any[]} comments
+ * @param {string} marker
+ * @param {string} botLogin
+ * @returns {any | null}
+ */
+function findLatestBotCommentWithMarker(comments, marker, botLogin) {
+  const allowedLogins = new Set(
+    [botLogin, 'github-actions[bot]', 'netlify-coding[bot]'].filter(Boolean)
+  );
+
+  return (comments || [])
+    .filter(comment => {
+      const login = comment && comment.user && comment.user.login;
+      return allowedLogins.has(login) && String(comment.body || '').includes(marker);
+    })
+    .sort((a, b) => {
+      const aTime = new Date(a.created_at || 0).getTime();
+      const bTime = new Date(b.created_at || 0).getTime();
+      if (aTime !== bTime) return bTime - aTime;
+      return Number(b.id || 0) - Number(a.id || 0);
+    })[0] || null;
+}
+
+/**
+ * @param {{
+ *   github: import('./types').GitHubClient,
+ *   owner: string,
+ *   repo: string,
+ *   issueNumber: number,
+ *   existingComment: any | null,
+ *   body: string,
+ *   label: string,
+ * }} params
+ * @returns {Promise<void>}
+ */
+async function upsertPrComment({ github, owner, repo, issueNumber, existingComment, body, label }) {
+  if (existingComment && existingComment.id) {
+    await github.rest.issues.updateComment({
+      owner,
+      repo,
+      comment_id: Number(existingComment.id),
+      body,
+    });
+    console.log(`Updated ${label} comment on PR #${issueNumber}`);
+    return;
+  }
+
+  await github.rest.issues.createComment({
+    owner,
+    repo,
+    issue_number: issueNumber,
+    body,
+  });
+  console.log(`Posted ${label} comment on PR #${issueNumber}`);
+}
+
+/**
  * @param {ActionParams} params
  * @returns {Promise<void>}
  */
@@ -43,19 +101,32 @@ module.exports = async function crossPostToPR({ github, context }) {
   const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}`;
   const resultBody = process.env.RESULT_BODY || '';
   const statusBody = process.env.STATUS_BODY || '';
+  const botLogin = process.env.BOT_LOGIN || '';
 
   // Post a PR-local result comment first so the PR-local status can link to it.
   let prResultUrl = '';
+  let prResultComment = null;
   if (resultBody) {
     const { data: resultComment } = await github.rest.issues.createComment({
       owner, repo, issue_number: prNumber, body: resultBody
     });
+    prResultComment = resultComment;
     prResultUrl = resultComment.html_url ||
       `https://github.com/${owner}/${repo}/issues/${prNumber}#issuecomment-${resultComment.id}`;
     console.log(`Posted result comment on PR #${prNumber}`);
   }
 
-  // Post status comment on PR. Re-render it so "Read full result" points to
+  const prComments = await listAllComments(github, context, prNumber);
+  if (prResultComment && !prComments.some(comment => Number(comment.id) === Number(prResultComment.id))) {
+    prComments.push(Object.assign({
+      issue_number: prNumber,
+      user: { login: botLogin || 'github-actions[bot]' },
+      body: resultBody,
+      created_at: new Date().toISOString(),
+    }, prResultComment));
+  }
+
+  // Upsert status comment on PR. Re-render it so "Read full result" points to
   // the PR-local result comment, not the issue-local result comment.
   if (statusBody) {
     const env = Object.assign({}, process.env, {
@@ -65,31 +136,45 @@ module.exports = async function crossPostToPR({ github, context }) {
       REDIRECT_NOTE: '',
     });
     const prStatusBody = renderStatusComment({ env, context }).statusBody;
-    await github.rest.issues.createComment({
-      owner, repo, issue_number: prNumber, body: prStatusBody
+    await upsertPrComment({
+      github,
+      owner,
+      repo,
+      issueNumber: prNumber,
+      existingComment: findLatestBotCommentWithMarker(prComments, STATUS_COMMENT_MARKER, botLogin),
+      body: prStatusBody,
+      label: 'status',
     });
-    console.log(`Posted status comment on PR #${prNumber}`);
   }
 
   // Build/update the PR-local TOC by listing comments on the PR number.
   if (resultBody) {
-    const comments = await listAllComments(github, context, prNumber);
     const historyBody = renderHistoryTocFromComments({
-      comments: comments.map(comment => Object.assign({ issue_number: prNumber }, comment)),
-      botLogin: process.env.BOT_LOGIN || '',
+      comments: prComments.map(comment => Object.assign({ issue_number: prNumber }, comment)),
+      botLogin,
       repoUrl: `https://github.com/${owner}/${repo}`,
     });
     if (historyBody) {
-      await github.rest.issues.createComment({
-        owner, repo, issue_number: prNumber, body: historyBody
+      await upsertPrComment({
+        github,
+        owner,
+        repo,
+        issueNumber: prNumber,
+        existingComment: findLatestBotCommentWithMarker(prComments, HISTORY_COMMENT_MARKER, botLogin),
+        body: historyBody,
+        label: 'history TOC',
       });
-      console.log(`Posted history TOC comment on PR #${prNumber}`);
     }
   } else if (process.env.HISTORY_BODY) {
-    await github.rest.issues.createComment({
-      owner, repo, issue_number: prNumber, body: process.env.HISTORY_BODY
+    await upsertPrComment({
+      github,
+      owner,
+      repo,
+      issueNumber: prNumber,
+      existingComment: findLatestBotCommentWithMarker(prComments, HISTORY_COMMENT_MARKER, botLogin),
+      body: process.env.HISTORY_BODY,
+      label: 'history',
     });
-    console.log(`Posted history comment on PR #${prNumber}`);
   }
 
   // Update issue status comment with redirect note
@@ -104,3 +189,4 @@ module.exports = async function crossPostToPR({ github, context }) {
 };
 
 module.exports.insertRedirectNote = insertRedirectNote;
+module.exports.findLatestBotCommentWithMarker = findLatestBotCommentWithMarker;

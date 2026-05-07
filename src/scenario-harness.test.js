@@ -197,7 +197,9 @@ describe('scenario harness', () => {
     assert.ok(trace.comments[1].includes('<!-- netlify-agent-run-status -->'));
     assert.ok(trace.comments[1].includes('[Read full result]('));
     assert.ok(trace.comments[2].includes('<!-- netlify-agent-run-history -->'));
-    assert.ok(trace.comments[2].includes('Run #1'));
+    assert.ok(trace.comments[2].includes('### Netlify Agent Run History'));
+    assert.ok(trace.comments[2].includes('Run 1'));
+    assert.ok(trace.comments[2].includes('Thread history result'));
   });
 
   it('models three sequential PR triggers as three results, one status, and one newest-first TOC', async () => {
@@ -245,9 +247,9 @@ describe('scenario harness', () => {
     assert.equal(historyComments.length, 3);
     assert.ok(latestStatus.includes('#issuecomment-9103'));
 
-    const latestIndex = latestToc.indexOf('#issuecomment-9103');
-    const middleIndex = latestToc.indexOf('#issuecomment-9102');
-    const oldestIndex = latestToc.indexOf('#issuecomment-9101');
+    const latestIndex = latestToc.indexOf('Thread history result 3');
+    const middleIndex = latestToc.indexOf('Thread history result 2');
+    const oldestIndex = latestToc.indexOf('Thread history result 1');
     assert.ok(latestIndex !== -1 && middleIndex !== -1 && oldestIndex !== -1);
     assert.ok(latestIndex < middleIndex);
     assert.ok(middleIndex < oldestIndex);
