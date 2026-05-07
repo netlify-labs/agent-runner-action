@@ -150,8 +150,9 @@ function renderResultComment({ env = process.env, context, outcome }) {
   const title = cleanProse(latestSession.title || env.AGENT_TITLE || '');
   const resultSummary = cleanProse(latestSession.result || env.AGENT_RESULT || '');
   const links = buildLinks(env, context, latestSession, sessions);
+  const statusIcon = isFailure ? '❌' : '✅';
 
-  let body = `### [Run #${runNumber} | ${model} | Agent Run ${isFailure ? 'failed' : 'completed'}](${agentRunUrl}) ${isFailure ? 'FAILED' : 'OK'}\n\n`;
+  let body = `### [Run #${runNumber} | ${model} | Agent Run ${isFailure ? 'failed' : 'completed'}](${agentRunUrl}) ${statusIcon}\n\n`;
   if (cleanPrompt) body += utils.formatPromptBlock(cleanPrompt, sourceUrl);
 
   if (isFailure) {

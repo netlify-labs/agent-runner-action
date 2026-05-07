@@ -21,7 +21,7 @@ describe('crossPostToPR', () => {
   it('posts PR-local result/status/TOC and preserves issue-local result link', async () => {
     const created = [];
     const updated = [];
-    const resultBody = '### [Run #1 | codex | Agent Run completed](https://app) OK\n\nResult\n\n<!-- netlify-agent-run-result:runner:session1 -->';
+    const resultBody = '### [Run #1 | codex | Agent Run completed](https://app) ✅\n\nResult\n\n<!-- netlify-agent-run-result:runner:session1 -->';
 
     const github = {
       rest: {

@@ -120,9 +120,10 @@ function renderStatusComment({ env = process.env, context, outcome }) {
   let headerText = 'Netlify Agent Run completed';
   if (isDryRun) headerText = 'Netlify Agent Run completed (preview)';
   if (isFailure) headerText = 'Netlify Agent Run failed';
+  const statusIcon = isFailure ? '❌' : '✅';
   const header = agentRunUrl
-    ? `### [${headerText}](${agentRunUrl}) ${isFailure ? 'FAILED' : 'OK'}`
-    : `### ${headerText} ${isFailure ? 'FAILED' : 'OK'}`;
+    ? `### [${headerText}](${agentRunUrl}) ${statusIcon}`
+    : `### ${headerText} ${statusIcon}`;
   const subtitle = `Run #${runNumber} | ${model} | ${isFailure ? 'failed' : 'completed'} at ${timestamp}`;
 
   const deployUrl = env.AGENT_DEPLOY_URL || (latestSession && latestSession.deploy_url) || '';

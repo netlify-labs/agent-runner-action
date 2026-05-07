@@ -9,11 +9,11 @@ const { HISTORY_COMMENT_MARKER } = require('./comment-markers');
 describe('parseResultSummary', () => {
   it('extracts run number, model, and status from result comment headers', () => {
     assert.deepEqual(
-      parseResultSummary('### [Run #3 | codex | Agent Run completed](https://app) OK\n\nbody'),
+      parseResultSummary('### [Run #3 | codex | Agent Run completed](https://app) ✅\n\nbody'),
       { runNumber: '3', model: 'codex', status: 'completed' }
     );
     assert.deepEqual(
-      parseResultSummary('### [Run #4 | claude | Agent Run failed](https://app) FAILED\n\nbody'),
+      parseResultSummary('### [Run #4 | claude | Agent Run failed](https://app) ❌\n\nbody'),
       { runNumber: '4', model: 'claude', status: 'failed' }
     );
   });
@@ -27,14 +27,14 @@ describe('renderHistoryTocFromComments', () => {
         issue_number: 9,
         created_at: '2026-05-07T10:00:00Z',
         user: { login: 'github-actions[bot]' },
-        body: '### [Run #1 | codex | Agent Run completed](https://app) OK\n\n<!-- netlify-agent-run-result:runner:session1 -->',
+        body: '### [Run #1 | codex | Agent Run completed](https://app) ✅\n\n<!-- netlify-agent-run-result:runner:session1 -->',
       },
       {
         id: 2,
         issue_number: 9,
         created_at: '2026-05-07T11:00:00Z',
         user: { login: 'github-actions[bot]' },
-        body: '### [Run #2 | codex | Agent Run failed](https://app) FAILED\n\n<!-- netlify-agent-run-result:runner:session2 -->',
+        body: '### [Run #2 | codex | Agent Run failed](https://app) ❌\n\n<!-- netlify-agent-run-result:runner:session2 -->',
       },
     ];
 
@@ -56,14 +56,14 @@ describe('renderHistoryTocFromComments', () => {
         issue_number: 9,
         created_at: '2026-05-07T10:00:00Z',
         user: { login: 'attacker' },
-        body: '### [Run #1 | codex | Agent Run completed](https://app) OK\n\n<!-- netlify-agent-run-result:runner:session1 -->',
+        body: '### [Run #1 | codex | Agent Run completed](https://app) ✅\n\n<!-- netlify-agent-run-result:runner:session1 -->',
       },
       {
         id: 2,
         issue_number: 9,
         created_at: '2026-05-07T11:00:00Z',
         user: { login: 'github-actions[bot]' },
-        body: '### [Run #2 | codex | Agent Run completed](https://app) OK\n\n<!-- netlify-agent-run-result:bad/id:session2 -->',
+        body: '### [Run #2 | codex | Agent Run completed](https://app) ✅\n\n<!-- netlify-agent-run-result:bad/id:session2 -->',
       },
       {
         id: 3,
@@ -90,7 +90,7 @@ describe('renderHistoryTocFromComments', () => {
         issue_number: 9,
         created_at: '2026-05-07T10:00:00Z',
         user: { login: 'github-actions[bot]' },
-        body: '### [Run #1 | codex | Agent Run completed](https://app) OK\n\n<!-- netlify-agent-run-result:runner:session1 -->',
+        body: '### [Run #1 | codex | Agent Run completed](https://app) ✅\n\n<!-- netlify-agent-run-result:runner:session1 -->',
       }],
       botLogin: 'github-actions[bot]',
       repoUrl: 'https://github.com/o/r',

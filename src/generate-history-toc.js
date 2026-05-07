@@ -10,7 +10,7 @@ const { HISTORY_COMMENT_MARKER, parseResultCommentIdentifiers } = require('./com
 function parseResultSummary(body) {
   const firstLine = (body || '').split('\n').find(line => line.trim()) || '';
   const runMatch = firstLine.match(/Run #(\d+)\s*\|\s*([^|]+)\s*\|\s*Agent Run\s+([^\]]+)/i);
-  const failed = /Agent Run failed|FAILED/i.test(firstLine);
+  const failed = /Agent Run failed|FAILED|❌/i.test(firstLine);
   return {
     runNumber: runMatch ? runMatch[1] : '?',
     model: runMatch ? runMatch[2].trim() : 'agent',
@@ -72,7 +72,7 @@ function renderHistoryTocFromComments({ comments, botLogin, repoUrl }) {
       const summary = parseResultSummary(comment.body || '');
       const when = formatIso(comment.created_at);
       const anchor = `${repoUrl}/issues/${comment.issue_number || ''}#issuecomment-${comment.id}`;
-      const status = summary.status === 'failed' ? 'FAILED' : 'OK';
+      const status = summary.status === 'failed' ? '❌' : '✅';
       return `- ${status} [Run #${summary.runNumber} | ${summary.model}](${anchor})${when ? ` | ${when}` : ''}`;
     });
 

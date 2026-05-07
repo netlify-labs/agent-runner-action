@@ -56,7 +56,7 @@ describe('assembleStatusBody', () => {
 
   it('emits required fields and trailing markers', () => {
     const body = assembleStatusBody({
-      header: '### [Netlify Agent Run completed](https://app.netlify.com/runs/1) OK',
+      header: '### [Netlify Agent Run completed](https://app.netlify.com/runs/1) ✅',
       subtitle: 'Run #1 | codex | completed at 2026-05-07T00:00:00Z',
       resultCommentLink: '[Read full result](#issuecomment-1)',
       links: ['[Agent run](https://app.netlify.com/runs/1)'],
