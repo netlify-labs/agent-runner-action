@@ -1095,7 +1095,7 @@ runs:
           await github.rest.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: autoLabels });
 
     # -----------------------------------------------------------------------
-    # 15. Generate and post success / error / history comments
+    # 15. Generate result/status/history comments
     # -----------------------------------------------------------------------
     - name: Generate success comment
       if: >-
@@ -1125,27 +1125,7 @@ runs:
       with:
         github-token: ${{ inputs.github-token }}
         script: |
-          const run = require(`${process.env.ACTION_DIR}/src/generate-success-comment.js`);
-          await run({ context, core });
-
-    - name: Generate history comment
-      if: >-
-        steps.trigger-check.outputs.should-run == 'true'
-        && steps.netlify-agent.outputs.outcome == 'success'
-        && steps.context-info.outputs.issue-number != ''
-      id: generate_history_comment
-      continue-on-error: true
-      uses: actions/github-script@v8
-      env:
-        ACTION_DIR: ${{ github.action_path }}
-        AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
-        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
-        SESSION_DATA_MAP: ${{ steps.generate_success_comment.outputs.session-data-map }}
-        TZ: ${{ inputs.timezone }}
-      with:
-        github-token: ${{ inputs.github-token }}
-        script: |
-          const run = require(`${process.env.ACTION_DIR}/src/generate-history-comment.js`);
+          const run = require(`${process.env.ACTION_DIR}/src/generate-result-comment.js`);
           await run({ context, core });
 
     - name: Generate error comment
@@ -1164,24 +1144,86 @@ runs:
         FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.preflight.outputs.failure-category }}
         FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
+        AGENT_SCREENSHOT_URL: ${{ steps.netlify-agent.outputs.agent-screenshot-url }}
+        AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
+        AGENT_COMMIT_SHA: ${{ steps.netlify-agent.outputs.agent-commit-sha }}
+        AGENT_TITLE: ${{ steps.netlify-agent.outputs.agent-title }}
+        TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
+        SESSION_DATA_MAP: ${{ steps.extract-agent-id.outputs.session-data-map }}
         SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+        REPOSITORY_NAME: ${{ github.repository }}
         GH_ACTION_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
-          const run = require(`${process.env.ACTION_DIR}/src/generate-error-comment.js`);
-          await run({ core });
+          const run = require(`${process.env.ACTION_DIR}/src/generate-result-comment.js`);
+          await run({ context, core });
 
     # -----------------------------------------------------------------------
     # 16. Post / update comments
     # -----------------------------------------------------------------------
+    - name: Post result comment
+      if: >-
+        always()
+        && steps.trigger-check.outputs.should-run == 'true'
+        && (steps.generate_success_comment.outputs.result-body || steps.generate_error_comment.outputs.result-body)
+        && steps.context-info.outputs.issue-number != ''
+      id: post_result_comment
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+        RESULT_BODY: ${{ steps.generate_success_comment.outputs.result-body || steps.generate_error_comment.outputs.result-body }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/post-result-comment.js`);
+          await run({ github, context, core });
+
+    - name: Generate status comment
+      if: >-
+        always()
+        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.context-info.outputs.issue-number != ''
+        && (steps.generate_success_comment.outputs.result-body || steps.generate_error_comment.outputs.result-body || steps.netlify-agent.outputs.outcome != 'success')
+      id: generate_status_comment
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
+        AGENT_SCREENSHOT_URL: ${{ steps.netlify-agent.outputs.agent-screenshot-url }}
+        AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
+        AGENT_COMMIT_SHA: ${{ steps.netlify-agent.outputs.agent-commit-sha }}
+        AGENT_TITLE: ${{ steps.netlify-agent.outputs.agent-title }}
+        AGENT_ERROR: ${{ steps.netlify-agent.outputs.agent-error }}
+        FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.preflight.outputs.failure-category }}
+        FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
+        SESSION_DATA_MAP: ${{ steps.generate_success_comment.outputs.session-data-map || steps.generate_error_comment.outputs.session-data-map || steps.extract-agent-id.outputs.session-data-map }}
+        IS_PR: ${{ steps.context-info.outputs.is-pr }}
+        IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
+        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
+        REPOSITORY_NAME: ${{ github.repository }}
+        GH_ACTION_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        RESULT_COMMENT_ID: ${{ steps.post_result_comment.outputs.result-comment-id }}
+        RESULT_COMMENT_URL: ${{ steps.post_result_comment.outputs.result-comment-url }}
+        RESULT_COMMENT_ERROR: ${{ steps.post_result_comment.outputs.result-comment-error }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/generate-status-comment.js`);
+          await run({ context, core });
+
     - name: Post or update status comment
       if: >-
         always()
         && steps.trigger-check.outputs.should-run == 'true'
-        && (steps.generate_success_comment.outputs.comment-body || steps.generate_error_comment.outputs.comment-body)
+        && steps.generate_status_comment.outputs.comment-body
         && (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) != ''
       continue-on-error: true
       uses: peter-evans/create-or-update-comment@v5
@@ -1190,8 +1232,28 @@ runs:
         issue-number: ${{ steps.context-info.outputs.issue-number }}
         comment-id: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
         body: |
-          ${{ steps.generate_success_comment.outputs.comment-body || steps.generate_error_comment.outputs.comment-body }}
+          ${{ steps.generate_status_comment.outputs.comment-body }}
         edit-mode: replace
+
+    - name: Generate history comment
+      if: >-
+        always()
+        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.context-info.outputs.is-pr == 'true'
+        && steps.context-info.outputs.issue-number != ''
+        && steps.post_result_comment.outputs.result-comment-id != ''
+      id: generate_history_comment
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+        BOT_LOGIN: ${{ steps.bot-identity.outputs.login }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/generate-history-toc.js`);
+          await run({ github, context, core });
 
     - name: Post or update history comment
       if: >-
@@ -1216,17 +1278,26 @@ runs:
         && steps.trigger-check.outputs.should-run == 'true'
         && steps.context-info.outputs.is-pr != 'true'
         && steps.netlify-agent.outputs.agent-pr-url != ''
-        && (steps.generate_success_comment.outputs.comment-body || steps.generate_error_comment.outputs.comment-body)
+        && steps.generate_status_comment.outputs.comment-body
       continue-on-error: true
       uses: actions/github-script@v8
       env:
         ACTION_DIR: ${{ github.action_path }}
         AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
+        AGENT_SCREENSHOT_URL: ${{ steps.netlify-agent.outputs.agent-screenshot-url }}
+        AGENT_COMMIT_SHA: ${{ steps.netlify-agent.outputs.agent-commit-sha }}
+        AGENT_TITLE: ${{ steps.netlify-agent.outputs.agent-title }}
+        SESSION_DATA_MAP: ${{ steps.generate_status_comment.outputs.session-data-map }}
         SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
-        STATUS_BODY: ${{ steps.generate_success_comment.outputs.comment-body || steps.generate_error_comment.outputs.comment-body }}
+        REPOSITORY_NAME: ${{ github.repository }}
+        GH_ACTION_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        STATUS_BODY: ${{ steps.generate_status_comment.outputs.comment-body }}
+        RESULT_BODY: ${{ steps.generate_success_comment.outputs.result-body || steps.generate_error_comment.outputs.result-body }}
         HISTORY_BODY: ${{ steps.generate_history_comment.outputs.comment-body }}
         STATUS_COMMENT_ID: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
+        BOT_LOGIN: ${{ steps.bot-identity.outputs.login }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
@@ -1314,6 +1385,8 @@ runs:
         AGENT_RUN_URL: ${{ steps.extract-agent-id.outputs.agent-run-url || format('https://app.netlify.com/projects/{0}/agent-runs/{1}', steps.resolve-site-name.outputs.site-name, steps.netlify-agent.outputs.agent-id) }}
         AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
         AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
+        STATUS_COMMENT_URL: "${{ (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) && format('https://github.com/{0}/issues/{1}#issuecomment-{2}', github.repository, steps.context-info.outputs.issue-number, steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) || '' }}"
+        RESULT_COMMENT_URL: ${{ steps.post_result_comment.outputs.result-comment-url }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
         TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
         FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.preflight.outputs.failure-category }}
@@ -1378,6 +1451,8 @@ runs:
             dashboardUrl: process.env.AGENT_RUN_URL,
             deployUrl: process.env.AGENT_DEPLOY_URL,
             pullRequestUrl: process.env.AGENT_PR_URL,
+            statusCommentUrl: process.env.STATUS_COMMENT_URL,
+            resultCommentUrl: process.env.RESULT_COMMENT_URL,
             prompt: process.env.TRIGGER_TEXT,
             timeoutMinutes: process.env.TIMEOUT_MINUTES,
             failure,

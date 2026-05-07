@@ -32,6 +32,7 @@
  * @property {(params: {owner: string, repo: string, issue_number: number, body: string}) => Promise<{data: IssueComment}>} rest.issues.createComment
  * @property {(params: {owner: string, repo: string, comment_id: number}) => Promise<{data: {body: string}}>} rest.issues.getComment
  * @property {(params: {owner: string, repo: string, comment_id: number, body: string}) => Promise<{data: IssueComment}>} rest.issues.updateComment
+ * @property {(params: {owner: string, repo: string, issue_number: number, per_page?: number, page?: number}) => Promise<{data: IssueComment[]}>} rest.issues.listComments
  * @property {(params: {owner: string, repo: string, issue_number: number, labels: string[]}) => Promise<{data: {id: number, name: string}[]}>} rest.issues.addLabels
  * @property {(params: {owner: string, repo: string, name: string, color: string, description: string}) => Promise<{data: {id: number, name: string}}>} rest.issues.createLabel
  * @property {(params: {owner: string, repo: string, issue_number: number, per_page: number, headers?: Record<string, string>}) => Promise<{data: TimelineEvent[]}>} rest.issues.listEventsForTimeline

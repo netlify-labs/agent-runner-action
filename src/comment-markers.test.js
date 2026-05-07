@@ -8,6 +8,7 @@ describe('comment marker constants', () => {
     assert.equal(markers.HISTORY_COMMENT_MARKER, '<!-- netlify-agent-run-history -->');
     assert.equal(markers.RUNNER_ID_MARKER_PREFIX, '<!-- netlify-agent-runner-id:');
     assert.equal(markers.SESSION_DATA_MARKER_PREFIX, '<!-- netlify-agent-session-data:');
+    assert.equal(markers.RESULT_COMMENT_MARKER_PREFIX, '<!-- netlify-agent-run-result:');
   });
 });
 
@@ -27,6 +28,24 @@ describe('render helpers', () => {
     assert.equal(
       marker,
       '<!-- netlify-agent-session-data:{"session_1":{"gh_action_url":"https://github.com/org/repo/actions/runs/1"}} -->'
+    );
+  });
+
+  it('renders result comment markers when ids are valid', () => {
+    assert.equal(
+      markers.renderResultCommentMarker({ runnerId: 'runner_123', sessionId: 'session-456' }),
+      '<!-- netlify-agent-run-result:runner_123:session-456 -->'
+    );
+  });
+
+  it('refuses to render result markers with invalid ids', () => {
+    assert.equal(
+      markers.renderResultCommentMarker({ runnerId: 'runner 123', sessionId: 'session-456' }),
+      ''
+    );
+    assert.equal(
+      markers.renderResultCommentMarker({ runnerId: 'runner_123', sessionId: 'session:456' }),
+      ''
     );
   });
 });
@@ -140,19 +159,61 @@ describe('parseSessionData url allowlist', () => {
   });
 });
 
+describe('parseResultCommentIdentifiers', () => {
+  it('extracts validated runner and session ids', () => {
+    const body = [
+      '### Result',
+      '<!-- netlify-agent-run-result:runner_123:session-456 -->',
+    ].join('\n');
+    assert.deepEqual(markers.parseResultCommentIdentifiers(body), {
+      runnerId: 'runner_123',
+      sessionId: 'session-456',
+    });
+  });
+
+  it('returns null for missing, malformed, or invalid result markers', () => {
+    assert.equal(markers.parseResultCommentIdentifiers(''), null);
+    assert.equal(markers.parseResultCommentIdentifiers('<!-- netlify-agent-run-result:one -->'), null);
+    assert.equal(markers.parseResultCommentIdentifiers('<!-- netlify-agent-run-result:one:two:three -->'), null);
+    assert.equal(markers.parseResultCommentIdentifiers('<!-- netlify-agent-run-result:bad id:two -->'), null);
+    assert.equal(markers.parseResultCommentIdentifiers('<!-- netlify-agent-run-result:one:bad/id -->'), null);
+  });
+});
+
 describe('stripUntrustedHtmlComments', () => {
   it('keeps allowlisted netlify markers and drops everything else', () => {
     const input = [
       '<!-- something else -->',
       '<!-- netlify-agent-run-status -->',
       '<!-- netlify-agent-runner-id:abc -->',
+      '<!-- netlify-agent-run-result:runner:session -->',
       '<!-- evil -->',
     ].join('\n');
     const out = markers.stripUntrustedHtmlComments(input);
     assert.ok(out.includes('<!-- netlify-agent-run-status -->'));
     assert.ok(out.includes('<!-- netlify-agent-runner-id:abc -->'));
+    assert.ok(out.includes('<!-- netlify-agent-run-result:runner:session -->'));
     assert.ok(!out.includes('something else'));
     assert.ok(!out.includes('evil'));
+  });
+});
+
+describe('state marker guards', () => {
+  it('detects markers that must never appear in result bodies', () => {
+    assert.equal(markers.containsStateMarker('plain text'), false);
+    assert.equal(markers.containsStateMarker('<!-- netlify-agent-run-result:r:s -->'), false);
+    assert.equal(markers.containsStateMarker('<!-- netlify-agent-run-status -->'), true);
+    assert.equal(markers.containsStateMarker('<!-- netlify-agent-run-history -->'), true);
+    assert.equal(markers.containsStateMarker('<!-- netlify-agent-runner-id:x -->'), true);
+    assert.equal(markers.containsStateMarker('<!-- netlify-agent-session-data:{} -->'), true);
+  });
+
+  it('throws when a result body contains state markers', () => {
+    assert.doesNotThrow(() => markers.assertNoStateMarkers('safe body'));
+    assert.throws(
+      () => markers.assertNoStateMarkers('unsafe <!-- netlify-agent-run-status -->'),
+      /state marker/
+    );
   });
 });
 

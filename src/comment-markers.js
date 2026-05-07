@@ -4,6 +4,7 @@ const STATUS_COMMENT_MARKER = '<!-- netlify-agent-run-status -->';
 const HISTORY_COMMENT_MARKER = '<!-- netlify-agent-run-history -->';
 const RUNNER_ID_MARKER_PREFIX = '<!-- netlify-agent-runner-id:';
 const SESSION_DATA_MARKER_PREFIX = '<!-- netlify-agent-session-data:';
+const RESULT_COMMENT_MARKER_PREFIX = '<!-- netlify-agent-run-result:';
 const MARKER_SUFFIX = '-->';
 
 // Conservative format for runner IDs: alphanumerics, underscore, hyphen only.
@@ -15,7 +16,7 @@ const RUNNER_ID_FORMAT = /^[A-Za-z0-9_-]{1,128}$/;
 // found in user-influenced content is stripped before parsing/rendering, so
 // outsiders cannot smuggle fake markers and bot comments cannot accidentally
 // reflect attacker-supplied markers from echoed user content.
-const ALLOWED_MARKER_INNER = /^\s*netlify-agent-(?:run-status|run-history|runner-id:|session-data:)/;
+const ALLOWED_MARKER_INNER = /^\s*netlify-agent-(?:run-status|run-history|run-result:|runner-id:|session-data:)/;
 
 // Allowlist for URL-bearing fields in session-data entries. These URLs flow
 // into bot-rendered Markdown links; anything outside these patterns gets
@@ -135,6 +136,56 @@ function parseRunnerId(body) {
 }
 
 /**
+ * @param {{runnerId?: string, sessionId?: string}} identifiers
+ * @returns {string}
+ */
+function renderResultCommentMarker({ runnerId = '', sessionId = '' } = {}) {
+  if (!RUNNER_ID_FORMAT.test(runnerId) || !RUNNER_ID_FORMAT.test(sessionId)) {
+    return '';
+  }
+  return renderMarker(`${RESULT_COMMENT_MARKER_PREFIX}${runnerId}:${sessionId}`);
+}
+
+/**
+ * @param {unknown} body
+ * @returns {{runnerId: string, sessionId: string} | null}
+ */
+function parseResultCommentIdentifiers(body) {
+  const value = readMarkerValue(body, RESULT_COMMENT_MARKER_PREFIX);
+  if (!value) return null;
+
+  const parts = value.split(':');
+  if (parts.length !== 2) return null;
+  const [runnerId, sessionId] = parts;
+  if (!RUNNER_ID_FORMAT.test(runnerId) || !RUNNER_ID_FORMAT.test(sessionId)) {
+    return null;
+  }
+  return { runnerId, sessionId };
+}
+
+/**
+ * @param {unknown} body
+ * @returns {boolean}
+ */
+function containsStateMarker(body) {
+  const text = normalizeBody(body);
+  return text.includes(STATUS_COMMENT_MARKER) ||
+    text.includes(HISTORY_COMMENT_MARKER) ||
+    text.includes(RUNNER_ID_MARKER_PREFIX) ||
+    text.includes(SESSION_DATA_MARKER_PREFIX);
+}
+
+/**
+ * @param {unknown} body
+ * @returns {void}
+ */
+function assertNoStateMarkers(body) {
+  if (containsStateMarker(body)) {
+    throw new Error('Result comment body contains a state marker');
+  }
+}
+
+/**
  * @param {unknown} sessionDataMap
  * @returns {string}
  */
@@ -224,11 +275,17 @@ module.exports = {
   HISTORY_COMMENT_MARKER,
   RUNNER_ID_MARKER_PREFIX,
   SESSION_DATA_MARKER_PREFIX,
+  RESULT_COMMENT_MARKER_PREFIX,
+  RUNNER_ID_FORMAT,
   renderRunnerIdMarker,
   parseRunnerId,
+  renderResultCommentMarker,
+  parseResultCommentIdentifiers,
   renderSessionDataMarker,
   parseSessionData,
   parseLinkedPrReference,
+  containsStateMarker,
+  assertNoStateMarkers,
   stripUntrustedHtmlComments,
   stripAllHtmlComments,
 };

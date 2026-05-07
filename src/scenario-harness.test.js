@@ -172,7 +172,167 @@ describe('scenario harness', () => {
       'expected malformed marker warning in trace'
     );
     assert.deepEqual(trace.state.reconciled.sessionDataMap, {});
+    assert.ok(trace.comments.some(comment => comment.includes('<!-- netlify-agent-run-status -->')));
+  });
+
+  it('renders result, status, and one-row TOC comments for PR success scenarios', async () => {
+    const trace = await runScenario({
+      name: 'thread history PR success',
+      eventName: 'issue_comment',
+      eventFixture: 'fixtures/events/issue-comment-on-pr.json',
+      env: {
+        OUTCOME: 'success',
+        SITE_NAME: 'agent-runner-action-example',
+        AGENT_ID: 'runner-thread',
+        AGENT_SESSION_ID: 'session-thread',
+        AGENT_TITLE: 'Thread history result',
+        AGENT_RESULT: 'Full result narrative.',
+      },
+      commentMode: 'success',
+    });
+
+    assert.equal(trace.outputs['is-pr'], 'true');
+    assert.equal(trace.comments.length, 3);
+    assert.ok(trace.comments[0].includes('<!-- netlify-agent-run-result:runner-thread:session-thread -->'));
+    assert.ok(trace.comments[1].includes('<!-- netlify-agent-run-status -->'));
+    assert.ok(trace.comments[1].includes('[Read full result]('));
+    assert.ok(trace.comments[2].includes('<!-- netlify-agent-run-history -->'));
+    assert.ok(trace.comments[2].includes('Run #1'));
+  });
+
+  it('models three sequential PR triggers as three results, one status, and one newest-first TOC', async () => {
+    const historyComments = [];
+    let latestTrace = null;
+
+    for (let index = 1; index <= 3; index += 1) {
+      const id = 9100 + index;
+      const createdAt = `2026-05-07T17:0${index}:00.000Z`;
+      const trace = await runScenario({
+        name: `thread history PR trigger ${index}`,
+        eventName: 'issue_comment',
+        eventFixture: 'fixtures/events/issue-comment-on-pr.json',
+        env: {
+          OUTCOME: 'success',
+          SITE_NAME: 'agent-runner-action-example',
+          AGENT_ID: `runner-thread-${index}`,
+          AGENT_SESSION_ID: `session-thread-${index}`,
+          AGENT_TITLE: `Thread history result ${index}`,
+          AGENT_RESULT: `Full result narrative ${index}.`,
+          RESULT_COMMENT_ID: String(id),
+          RESULT_COMMENT_CREATED_AT: createdAt,
+        },
+        seedHistoryComments: historyComments,
+        commentMode: 'success',
+      });
+
+      const resultBody = trace.comments.find(comment => comment.includes('<!-- netlify-agent-run-result:'));
+      assert.ok(resultBody, `expected run ${index} result comment`);
+      historyComments.push({
+        id,
+        issue_number: 58,
+        created_at: createdAt,
+        user: { login: 'github-actions[bot]' },
+        body: resultBody,
+      });
+      latestTrace = trace;
+    }
+
+    assert.ok(latestTrace);
+    const latestStatus = latestTrace.comments.find(comment => comment.includes('<!-- netlify-agent-run-status -->'));
+    const latestToc = latestTrace.comments.find(comment => comment.includes('<!-- netlify-agent-run-history -->'));
+    assert.ok(latestStatus);
+    assert.ok(latestToc);
+    assert.equal(historyComments.length, 3);
+    assert.ok(latestStatus.includes('#issuecomment-9103'));
+
+    const latestIndex = latestToc.indexOf('#issuecomment-9103');
+    const middleIndex = latestToc.indexOf('#issuecomment-9102');
+    const oldestIndex = latestToc.indexOf('#issuecomment-9101');
+    assert.ok(latestIndex !== -1 && middleIndex !== -1 && oldestIndex !== -1);
+    assert.ok(latestIndex < middleIndex);
+    assert.ok(middleIndex < oldestIndex);
+
+    const recovery = await runScenario({
+      name: 'thread history latest status recovery',
+      eventName: 'issue_comment',
+      eventFixture: 'fixtures/events/issue-comment-on-pr.json',
+      githubFixtures: {
+        'issues.getComment': { data: { body: latestStatus } },
+      },
+      runExtractAgentId: true,
+      extractInputs: { commentId: '9103' },
+      commentMode: 'none',
+    });
+
+    assert.equal(recovery.state.reconciled.runnerId, 'runner-thread-3');
+    assert.ok(recovery.outputs['session-data-map'].includes('session-thread-3'));
+  });
+
+  it('keeps no-session failures status-only in the scenario harness', async () => {
+    const trace = await runScenario({
+      name: 'no-session setup failure',
+      eventName: 'issues',
+      eventFixture: 'fixtures/events/issue-opened-body-trigger.json',
+      env: {
+        OUTCOME: 'failure',
+        AGENT_ERROR: 'Missing required setup before a Netlify session was created.',
+      },
+      commentMode: 'failure',
+    });
+
+    assert.equal(trace.comments.length, 1);
     assert.ok(trace.comments[0].includes('<!-- netlify-agent-run-status -->'));
+    assert.ok(!trace.comments[0].includes('<!-- netlify-agent-run-result:'));
+  });
+
+  it('keeps result-post failures status-only with no history TOC', async () => {
+    const trace = await runScenario({
+      name: 'result post failure',
+      eventName: 'issue_comment',
+      eventFixture: 'fixtures/events/issue-comment-on-pr.json',
+      env: {
+        OUTCOME: 'success',
+        SITE_NAME: 'agent-runner-action-example',
+        AGENT_ID: 'runner-post-failure',
+        AGENT_SESSION_ID: 'session-post-failure',
+      },
+      simulateResultPostFailure: true,
+      commentMode: 'success',
+    });
+
+    assert.equal(trace.comments.length, 1);
+    assert.ok(trace.comments[0].includes('<!-- netlify-agent-run-status -->'));
+    assert.ok(!trace.comments[0].includes('[Read full result]('));
+    assert.equal(trace.outputs['result-comment-error'], 'simulated result comment post failure');
+  });
+
+  it('keeps poisoned result comments out of state recovery sources', async () => {
+    const trace = await runScenario({
+      name: 'poisoned result comment ignored',
+      eventName: 'issue_comment',
+      eventFixture: 'fixtures/events/issue-comment-on-pr.json',
+      githubFixtures: {
+        'issues.getComment': {
+          data: {
+            body: [
+              '### Status',
+              '<!-- netlify-agent-runner-id:trusted-runner -->',
+              '<!-- netlify-agent-session-data:{} -->',
+              '<!-- netlify-agent-run-status -->',
+            ].join('\n'),
+          },
+        },
+      },
+      runExtractAgentId: true,
+      extractInputs: { commentId: '42' },
+      env: {
+        OUTCOME: 'success',
+      },
+      commentMode: 'none',
+    });
+
+    assert.equal(trace.state.reconciled.runnerId, 'trusted-runner');
+    assert.equal(trace.state.reconciled.recoveryAction, 'resume-runner');
   });
 
   it('warns when seeded existing session data output is malformed', async () => {

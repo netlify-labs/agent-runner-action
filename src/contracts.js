@@ -78,6 +78,8 @@
  * @property {string} dashboardUrl
  * @property {string} deployUrl
  * @property {string} pullRequestUrl
+ * @property {string} statusCommentUrl
+ * @property {string} resultCommentUrl
  * @property {string} prompt
  * @property {FailureClassification | null} failure
  * @property {PreflightResult | null} preflight
@@ -256,6 +258,8 @@ function createStepSummaryInput(overrides = {}) {
     dashboardUrl: overrides.dashboardUrl || '',
     deployUrl: overrides.deployUrl || '',
     pullRequestUrl: overrides.pullRequestUrl || '',
+    statusCommentUrl: overrides.statusCommentUrl || '',
+    resultCommentUrl: overrides.resultCommentUrl || '',
     prompt: overrides.prompt || '',
     failure: overrides.failure ? createFailureClassification(overrides.failure) : null,
     preflight: overrides.preflight ? createPreflightResult(overrides.preflight) : null,
