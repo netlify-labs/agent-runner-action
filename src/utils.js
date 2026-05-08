@@ -207,9 +207,10 @@ function buildInProgressComment({ agentRunUrl, prompt, model, runnerId, ghAction
   const sourceUrl = sourceUrlMatch ? sourceUrlMatch[1] : '';
 
   let body = agentRunUrl
-    ? `### [Netlify Agent Runners ${flavor}](${agentRunUrl}) ${emoji}\n\n`
-    : `### Netlify Agent Runners ${flavor} ${emoji}\n\n`;
+    ? `### [Netlify Agent Run Status](${agentRunUrl})\n\n`
+    : `### Netlify Agent Run Status\n\n`;
 
+  body += `Netlify Agent Runners ${flavor} ${emoji}\n\n`;
   body += `**Agent:** \`${model}\`\n\n`;
   if (clean) body += formatPromptBlock(clean, sourceUrl);
 

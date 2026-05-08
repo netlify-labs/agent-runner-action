@@ -219,6 +219,15 @@ describe('action.yml wiring', () => {
     assert.match(errorCommentBlock, /FAILURE_STAGE:\s+\$\{\{\s*steps\.netlify-agent\.outputs\.failure-stage/);
   });
 
+  it('creates PR history placeholder before posting immutable result comments', () => {
+    const historyCreateIndex = actionYml.indexOf('- name: Create initial history comment');
+    const resultPostIndex = actionYml.indexOf('- name: Post result comment');
+    assert.ok(historyCreateIndex !== -1, 'Create initial history comment step should exist');
+    assert.ok(resultPostIndex !== -1, 'Post result comment step should exist');
+    assert.ok(historyCreateIndex < resultPostIndex, 'History placeholder must be created before result comments');
+    assert.match(actionYml, /comment-id:\s+\$\{\{\s*steps\.find_history_comment\.outputs\.comment-id\s+\|\|\s+steps\.create_history_comment\.outputs\.comment-id\s*\}\}/);
+  });
+
   it('has at least the expected inputs', () => {
     const inputs = extractInputNames(actionYml);
     const expected = [

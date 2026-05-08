@@ -8,8 +8,9 @@ const path = require('node:path');
 const checkTrigger = require('./check-trigger');
 const getContext = require('./get-context');
 const extractAgentId = require('./extract-agent-id');
-const generateErrorComment = require('./generate-error-comment');
-const generateSuccessComment = require('./generate-success-comment');
+const { renderResultComment } = require('./generate-result-comment');
+const { renderStatusComment } = require('./generate-status-comment');
+const { renderHistoryTocFromComments } = require('./generate-history-toc');
 const { classifyFailure } = require('./failure-taxonomy');
 const { renderStepSummary } = require('./generate-step-summary');
 const { reconcileAgentState } = require('./state-reconciliation');
@@ -35,6 +36,8 @@ const { createScenarioTrace } = require('./contracts');
  * @property {Record<string, unknown>} [preflight]
  * @property {number} [timeoutMinutes]
  * @property {Record<string, string>} [seedOutputs]
+ * @property {Array<Record<string, unknown>>} [seedHistoryComments]
+ * @property {boolean} [simulateResultPostFailure]
  * @property {boolean} [runContextEvenIfSkipped]
  */
 
@@ -243,6 +246,7 @@ function createMockGithub(fixtures, callLog, fallbackPull) {
         createComment: async () => ({ data: /** @type {any} */ (unwrapDataEnvelope(readFixture('issues.createComment', { id: 1, body: '' }))) }),
         getComment: async () => ({ data: /** @type {any} */ (unwrapDataEnvelope(readFixture('issues.getComment', { id: 1, body: '' }))) }),
         updateComment: async () => ({ data: /** @type {any} */ (unwrapDataEnvelope(readFixture('issues.updateComment', { id: 1, body: '' }))) }),
+        listComments: async () => ({ data: /** @type {any} */ (unwrapDataEnvelope(readFixture('issues.listComments', []))) }),
         addLabels: async () => ({ data: /** @type {any} */ (unwrapDataEnvelope(readFixture('issues.addLabels', []))) }),
         createLabel: async () => ({ data: /** @type {any} */ (unwrapDataEnvelope(readFixture('issues.createLabel', { id: 1, name: 'netlify-agent' }))) }),
         listEventsForTimeline: async () => ({ data: /** @type {any} */ (unwrapDataEnvelope(readFixture('issues.listEventsForTimeline', []))) }),
@@ -349,11 +353,11 @@ function inferIssueNumber(outputs, context) {
  * @param {Record<string, string>} outputs
  * @param {FailureClassification | null} failure
  * @param {import('./contracts').ReconciledState} reconciled
- * @returns {Promise<string>}
+ * @returns {Promise<string[]>}
  */
 async function generateScenarioComment(scenario, context, outputs, failure, reconciled) {
   const mode = scenario.commentMode || 'auto';
-  if (mode === 'none') return '';
+  if (mode === 'none') return [];
 
   const outcome = toText(
     scenario.outcome
@@ -364,18 +368,6 @@ async function generateScenarioComment(scenario, context, outputs, failure, reco
 
   const shouldRenderSuccess = mode === 'success' || (mode === 'auto' && isSuccessOutcome(outcome));
   const shouldRenderFailure = mode === 'failure' || (mode === 'auto' && !isSuccessOutcome(outcome));
-
-  /** @type {Record<string, string>} */
-  const commentOutputs = {};
-  /** @type {import('./types').ActionCore} */
-  const commentCore = {
-    setOutput: (name, value) => {
-      commentOutputs[name] = toText(value);
-    },
-    setFailed: () => {
-      // no-op for deterministic harness runs
-    },
-  };
 
   const issueNumber = inferIssueNumber(outputs, context);
   process.env.IS_PR = outputs['is-pr'] || 'false';
@@ -390,17 +382,76 @@ async function generateScenarioComment(scenario, context, outputs, failure, reco
   process.env.REPOSITORY_NAME = toText((scenario.env || {}).REPOSITORY_NAME) || `${context.repo.owner}/${context.repo.repo}`;
   process.env.AGENT_ERROR = toText((scenario.env || {}).AGENT_ERROR) || (failure ? failure.summary : '');
 
-  if (shouldRenderSuccess) {
-    await generateSuccessComment({ context, core: commentCore });
-  } else if (shouldRenderFailure) {
-    await generateErrorComment({ core: commentCore });
+  const agentId = process.env.AGENT_ID;
+  if (agentId && process.env.RUNNER_TEMP) {
+    const sessionPath = path.join(process.env.RUNNER_TEMP, `agent-sessions-${agentId}.json`);
+    if (!fs.existsSync(sessionPath)) {
+      const session = {
+        id: toText((scenario.env || {}).AGENT_SESSION_ID) || 'session-fixture',
+        prompt: process.env.TRIGGER_TEXT,
+        title: toText((scenario.env || {}).AGENT_TITLE) || 'Fixture result',
+        result: toText((scenario.env || {}).AGENT_RESULT) || 'Fixture result summary.',
+        deploy_url: toText((scenario.env || {}).AGENT_DEPLOY_URL),
+        created_at: new Date().toISOString(),
+        state: shouldRenderFailure ? 'failed' : 'completed',
+        agent_config: { agent: process.env.AGENT_MODEL || 'codex' },
+      };
+      fs.writeFileSync(sessionPath, JSON.stringify([session]), 'utf8');
+    }
   }
 
-  if (commentOutputs['session-data-map']) {
-    outputs['session-data-map'] = commentOutputs['session-data-map'];
+  const comments = [];
+  const result = renderResultComment({
+    context,
+    outcome: shouldRenderFailure ? 'failure' : 'success',
+  });
+  if (result.sessionDataMap) {
+    outputs['session-data-map'] = JSON.stringify(result.sessionDataMap);
+  }
+  const resultWasPosted = Boolean(result.resultBody && !scenario.simulateResultPostFailure);
+  if (resultWasPosted) {
+    comments.push(result.resultBody);
+  } else if (result.resultBody && scenario.simulateResultPostFailure) {
+    outputs['result-comment-error'] = 'simulated result comment post failure';
   }
 
-  return commentOutputs['comment-body'] || '';
+  process.env.SESSION_DATA_MAP = outputs['session-data-map'] || process.env.SESSION_DATA_MAP || '{}';
+  const resultCommentId = parseInt(toText((scenario.env || {}).RESULT_COMMENT_ID) || '9001', 10) || 9001;
+  process.env.RESULT_COMMENT_URL = resultWasPosted
+    ? `https://github.com/${context.repo.owner}/${context.repo.repo}/issues/${issueNumber || 1}#issuecomment-${resultCommentId}`
+    : '';
+  outputs['result-comment-url'] = process.env.RESULT_COMMENT_URL;
+
+  const status = renderStatusComment({
+    context,
+    outcome: shouldRenderFailure ? 'failure' : 'success',
+  });
+  if (status.sessionDataMap) {
+    outputs['session-data-map'] = JSON.stringify(status.sessionDataMap);
+  }
+  if (status.statusBody) comments.push(status.statusBody);
+
+  if (outputs['is-pr'] === 'true' && resultWasPosted) {
+    const createdAt = toText((scenario.env || {}).RESULT_COMMENT_CREATED_AT) || new Date().toISOString();
+    const historyComments = Array.isArray(scenario.seedHistoryComments)
+      ? scenario.seedHistoryComments.map(comment => ({ ...comment }))
+      : [];
+    historyComments.push({
+      id: resultCommentId,
+      issue_number: issueNumber || 1,
+      created_at: createdAt,
+      user: { login: 'github-actions[bot]' },
+      body: result.resultBody,
+    });
+    const toc = renderHistoryTocFromComments({
+      comments: historyComments,
+      botLogin: 'github-actions[bot]',
+      repoUrl: `https://github.com/${context.repo.owner}/${context.repo.repo}`,
+    });
+    if (toc) comments.push(toc);
+  }
+
+  return comments;
 }
 
 /**
@@ -421,7 +472,7 @@ async function runScenario(scenario, options = {}) {
     DEFAULT_AGENT: 'codex',
     DEFAULT_MODEL: 'codex',
     DRY_RUN: 'false',
-    RUNNER_TEMP: os.tmpdir(),
+    RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'agent-scenario-')),
     TZ: 'America/Los_Angeles',
     ...(scenario.env || {}),
   };
@@ -524,6 +575,8 @@ async function runScenario(scenario, options = {}) {
         dashboardUrl: reconciled.agentRunUrl,
         deployUrl: toText((scenario.env || {}).AGENT_DEPLOY_URL),
         pullRequestUrl: toText((scenario.env || {}).AGENT_PR_URL),
+        statusCommentUrl: toText((scenario.env || {}).STATUS_COMMENT_URL),
+        resultCommentUrl: toText((scenario.env || {}).RESULT_COMMENT_URL),
         prompt: outputs['trigger-text'] || toText((scenario.env || {}).TRIGGER_TEXT),
         isDryRun: outputs['is-dry-run'] || toText((scenario.env || {}).DRY_RUN || 'false'),
         isPreflightOnly: toText((scenario.env || {}).IS_PREFLIGHT_ONLY || 'false'),
@@ -535,15 +588,15 @@ async function runScenario(scenario, options = {}) {
 
       trace.summary = renderStepSummary(summaryInput);
 
-      const commentBody = await generateScenarioComment(
+      const commentBodies = await generateScenarioComment(
         scenario,
         context,
         outputs,
         failure,
         reconciled
       );
-      if (commentBody) {
-        trace.comments.push(commentBody);
+      for (const commentBody of commentBodies) {
+        if (commentBody) trace.comments.push(commentBody);
       }
     });
 

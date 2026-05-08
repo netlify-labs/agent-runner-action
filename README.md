@@ -10,7 +10,7 @@ A GitHub Action that starts [Netlify Agent Runners](https://www.netlify.com/prod
 1. Create an issue or comment on a PR with `@netlify` followed by your prompt
 2. The action picks up the trigger, adds a 👀 reaction, and creates an in-progress status comment
 3. Netlify Agent Runners creates an agent run to build or modify your site based on the prompt
-4. On completion, the status comment is updated with a screenshot, deploy preview link, and result summary
+4. On completion, the action posts a full result comment, then updates the status comment with a short summary and a link to that result
 5. If triggered from an issue, a PR is automatically created with the changes
 
 ### Trigger examples
@@ -235,8 +235,9 @@ The repo includes `.actrc` plus push and pull request payloads under `.act/`. No
 
 ## What gets posted
 
-- **Status comment** — current run result with screenshot, deploy preview, and links
-- **History comment** — chronological list of all runs (on PRs only)
+- **Status comment** — one mutable current-state comment with a short summary, deploy/agent/log links, and hidden state markers used to resume follow-up runs
+- **Result comments** — one immutable full narrative comment per Netlify session run, including the prompt, result prose, screenshot, and links
+- **History TOC** — one compact PR-only table of contents linking to result comments, newest-first
 - **Issue redirect** — after a PR is created from an issue, a note directs users to the PR
 
 ## Follow-up prompts
@@ -250,3 +251,4 @@ After the first run creates a PR, add follow-up `@netlify` comments on the PR. T
 - Concurrency control ensures one run per issue/PR at a time
 - The `allowed-users` input can further restrict access to specific users
 - Common `@netlify` typos (`@nelify`, `@netlfy`, etc.) are recognised
+- Only status comments carry runner/session state markers. Result comments are scrubbed so user or agent prose cannot reflect status/history/state markers into bot-authored comments; they carry only a result identifier marker for the PR history TOC.

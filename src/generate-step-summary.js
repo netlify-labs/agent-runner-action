@@ -166,6 +166,12 @@ function normalizeStepSummaryInput(source = {}) {
     pullRequestUrl: toText(
       source.pullRequestUrl || source.AGENT_PR_URL || source.PULL_REQUEST_URL
     ).trim(),
+    statusCommentUrl: toText(
+      source.statusCommentUrl || source.STATUS_COMMENT_URL
+    ).trim(),
+    resultCommentUrl: toText(
+      source.resultCommentUrl || source.RESULT_COMMENT_URL
+    ).trim(),
     prompt: toText(source.prompt || source.TRIGGER_TEXT || source.PROMPT).trim(),
     failure: normalizeFailure(source),
     preflight: normalizePreflight(source),
@@ -223,6 +229,8 @@ function renderStepSummary(source = {}) {
     ['Dashboard', formatLink('Open run', normalized.dashboardUrl) || 'n/a'],
     ['Deploy Preview', formatLink('Open deploy', normalized.deployUrl) || 'n/a'],
     ['Pull Request', formatLink('Open PR', normalized.pullRequestUrl) || 'n/a'],
+    ['Status Comment', formatLink('Open status', normalized.statusCommentUrl) || 'n/a'],
+    ['Result Comment', formatLink('Open result', normalized.resultCommentUrl) || 'n/a'],
   ]);
 
   markdown += '## Prompt\n\n';

@@ -361,15 +361,22 @@ jobs:
     <li>The action reacts with eyes emoji and posts an in-progress status comment</li>
     <li>It creates an agent run with your prompt</li>
     <li>The selected agent builds or modifies your site</li>
-    <li>On completion, the status comment is updated with a result summary, screenshot, and deploy preview link</li>
+    <li>On completion, the action posts a full result comment, then updates the status comment with a short summary and a link to that result</li>
     <li>If triggered from an issue, a pull request is automatically created with the changes</li>
   </ol>
+  <h3>Comments</h3>
+  <ul>
+    <li><strong>Status comment</strong>: one mutable current-state comment with hidden state markers for follow-up runs</li>
+    <li><strong>Result comments</strong>: immutable full narratives for each Netlify session run</li>
+    <li><strong>History TOC</strong>: a newest-first PR table of contents linking to result comments</li>
+  </ul>
   <h3>Security</h3>
   <ul>
     <li>Only repository collaborators, members, and owners can trigger</li>
     <li>Bot accounts are excluded to prevent loops</li>
     <li>Concurrency control ensures one run per issue/PR at a time</li>
     <li>The <code>allowed-users</code> input can further restrict access</li>
+    <li>Only status comments carry runner/session state markers; result comments are scrubbed and carry only a result identifier marker</li>
   </ul>
 </section>
 

@@ -19,6 +19,8 @@ describe('renderStepSummary', () => {
       dashboardUrl: 'https://app.netlify.com/projects/example-site/agent-runs/runner-123',
       deployUrl: 'https://example-site.netlify.app',
       pullRequestUrl: 'https://github.com/o/r/pull/9',
+      statusCommentUrl: 'https://github.com/o/r/issues/42#issuecomment-100',
+      resultCommentUrl: 'https://github.com/o/r/issues/42#issuecomment-101',
       prompt: 'Build a landing page',
     });
 
@@ -28,6 +30,8 @@ describe('renderStepSummary', () => {
     assert.ok(markdown.includes('runner-123'));
     assert.ok(markdown.includes('[Open deploy](https://example-site.netlify.app)'));
     assert.ok(markdown.includes('[Open PR](https://github.com/o/r/pull/9)'));
+    assert.ok(markdown.includes('[Open status](https://github.com/o/r/issues/42#issuecomment-100)'));
+    assert.ok(markdown.includes('[Open result](https://github.com/o/r/issues/42#issuecomment-101)'));
   });
 
   it('renders failure category and remediation', () => {
@@ -118,6 +122,8 @@ describe('normalizeStepSummaryInput', () => {
       AGENT_RUN_URL: 'https://app.netlify.com/projects/my-site/agent-runs/abc123',
       AGENT_DEPLOY_URL: 'https://my-site.netlify.app',
       AGENT_PR_URL: 'https://github.com/o/r/pull/55',
+      STATUS_COMMENT_URL: 'https://github.com/o/r/issues/55#issuecomment-1',
+      RESULT_COMMENT_URL: 'https://github.com/o/r/issues/55#issuecomment-2',
       TRIGGER_TEXT: 'Ship it',
     });
 
@@ -127,6 +133,8 @@ describe('normalizeStepSummaryInput', () => {
     assert.equal(normalized.model, 'claude');
     assert.equal(normalized.runnerId, 'abc123');
     assert.equal(normalized.siteName, 'my-site');
+    assert.equal(normalized.statusCommentUrl, 'https://github.com/o/r/issues/55#issuecomment-1');
+    assert.equal(normalized.resultCommentUrl, 'https://github.com/o/r/issues/55#issuecomment-2');
     assert.equal(normalized.prompt, 'Ship it');
   });
 
