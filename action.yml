@@ -590,6 +590,33 @@ runs:
 
     # -----------------------------------------------------------------------
     # 8. Checkout repository
+    #
+    # SECURITY INVARIANT — do not break this without reading the whole note:
+    #
+    # This workflow runs under `pull_request_target`, which means secrets
+    # (NETLIFY_AUTH_TOKEN, elevated GITHUB_TOKEN) are in scope, AND we check
+    # out `head.sha` — the PR author's code, from a fork they control. This
+    # is the exact "pwn request" pattern described at
+    # https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/
+    #
+    # It is currently safe ONLY because:
+    #   1. src/check-trigger.js gates on author_association BEFORE this step
+    #      runs, so untrusted fork-PR authors never reach checkout.
+    #   2. NOTHING that runs after this checkout executes PR-supplied code.
+    #      The remaining steps only `grep package.json`, `git fetch`/`diff`,
+    #      install a pinned netlify CLI, and call the remote Netlify API.
+    #      The agent itself runs on Netlify's infra, not on this runner.
+    #
+    # Do not add steps below that:
+    #   - run `npm/bun/yarn/pnpm install` against the PR's package.json
+    #     (preinstall/postinstall scripts execute attacker code)
+    #   - run the project's tests, linter, formatter, type-checker, or build
+    #   - invoke any tool that loads config files from the workspace
+    #     (eslint plugins, prettier plugins, vite/webpack configs, etc.)
+    #   - `source` or `eval` any file from the checkout
+    #
+    # If you need to do any of the above, split this into a two-workflow
+    # pattern (pull_request + workflow_run) as the article recommends.
     # -----------------------------------------------------------------------
     - name: Checkout repository
       if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'

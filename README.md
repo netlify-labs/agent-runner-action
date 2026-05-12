@@ -252,3 +252,14 @@ After the first run creates a PR, add follow-up `@netlify` comments on the PR. T
 - The `allowed-users` input can further restrict access to specific users
 - Common `@netlify` typos (`@nelify`, `@netlfy`, etc.) are recognised
 - Only status comments carry runner/session state markers. Result comments are scrubbed so user or agent prose cannot reflect status/history/state markers into bot-authored comments; they carry only a result identifier marker for the PR history TOC.
+
+### Trust model and `pull_request_target`
+
+The example workflow uses the `pull_request_target` trigger so that PRs opened from forks can trigger agent runs. This trigger is powerful: it runs in the context of the base repository with access to repository secrets (`NETLIFY_AUTH_TOKEN`) and a write-scoped `GITHUB_TOKEN`. Combined with checking out the PR's head commit, this is the pattern GitHub Security Lab describes as a ["pwn request"](https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/) — if misused, it lets a fork PR author exfiltrate secrets or push to your repo.
+
+This action is safe under that trigger because:
+
+1. **Author-association gate.** Before checkout, the action checks `author_association` on the event and drops anything that isn't `COLLABORATOR`, `MEMBER`, `OWNER`, or a user with write permission on the repo. Fork PRs from outside contributors are skipped.
+2. **No PR code is executed on the runner.** After checkout, the workflow only inspects `package.json` for framework detection, runs `git diff` against the base branch, installs a pinned Netlify CLI, and hands the prompt to Netlify's remote agent service. The agent itself runs on Netlify infrastructure, not on your runner.
+
+**If you fork this workflow, do not add steps that execute PR-supplied code** (e.g. `npm install` against the PR's `package.json`, running the project's tests/linter/build, or any tool that loads config files from the workspace). Any such step turns this from "trusted-only trigger that calls a remote API" into a credential exfiltration vector. If you need to run PR code, switch to the two-workflow `pull_request` + `workflow_run` pattern described in the GitHub Security Lab article above.
