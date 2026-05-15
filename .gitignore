@@ -48,3 +48,6 @@ next-env.d.ts
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# ntm (multi-agent tmux orchestration) local state
+.ntm/
