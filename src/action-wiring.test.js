@@ -210,6 +210,12 @@ describe('action.yml wiring', () => {
     assert.match(actionYml, /Latest follow-up session produced no deploy\/code artifacts; reusing existing PR without a new commit/);
   });
 
+  it('fails completed runners when the latest session failed', () => {
+    assert.match(actionYml, /LATEST_SESSION_STATE=\$\(echo "\$LATEST_SESSION" \| jq -r '.state \/\/ empty'/);
+    assert.match(actionYml, /failed\|error\|cancelled\|canceled\)/);
+    assert.match(actionYml, /emit_failure_context "poll-session" "agent-failed"/);
+  });
+
   it('generates rich error comments even after the agent step fails', () => {
     const errorCommentBlock = extractStepBlocks(actionYml)
       .find(block => block.includes('- name: Generate error comment'));

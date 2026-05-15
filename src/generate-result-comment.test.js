@@ -128,6 +128,32 @@ describe('renderResultComment', () => {
     assert.ok(rendered.resultBody.includes(RESULT_COMMENT_MARKER_PREFIX));
   });
 
+  it('treats latest error sessions as failure results even without AGENT_ERROR', () => {
+    writeSessions('runner_5', [{
+      id: 'session_5',
+      state: 'error',
+      prompt: '@netlify try again',
+      title: 'Cross-score ideas',
+      result: 'Encountered a temporary issue — the agent will attempt to continue.',
+      agent_config: { agent: 'claude' },
+    }]);
+
+    const rendered = renderResultComment({
+      context: context(),
+      env: {
+        RUNNER_TEMP: tempDir,
+        AGENT_ID: 'runner_5',
+        SITE_NAME: 'site',
+        SESSION_DATA_MAP: '{}',
+      },
+    });
+
+    assert.ok(rendered.resultBody.includes('### [Run #1 | claude | Agent Run failed]'));
+    assert.ok(rendered.resultBody.includes('**Error excerpt:**'));
+    assert.ok(rendered.resultBody.includes('Encountered a temporary issue'));
+    assert.ok(rendered.resultBody.includes(RESULT_COMMENT_MARKER_PREFIX));
+  });
+
   it('emits no result body when there is no latest session id', () => {
     const rendered = renderResultComment({
       context: context(),

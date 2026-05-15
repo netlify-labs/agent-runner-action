@@ -137,7 +137,10 @@ function renderResultComment({ env = process.env, context, outcome }) {
 
   const siteName = env.SITE_NAME || context.repo.repo;
   const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}`;
-  const isFailure = outcome ? outcome === 'failure' : Boolean(env.AGENT_ERROR);
+  const latestSessionState = String(latestSession.state || '').toLowerCase();
+  const isFailure = outcome
+    ? outcome === 'failure'
+    : Boolean(env.AGENT_ERROR) || ['failed', 'error', 'cancelled', 'canceled'].includes(latestSessionState);
   const model = (latestSession.agent_config && latestSession.agent_config.agent) || env.AGENT_MODEL || 'codex';
   const runNumber = sessions.length;
   const timestamp = new Date().toISOString();
@@ -173,7 +176,9 @@ function renderResultComment({ env = process.env, context, outcome }) {
       for (const step of failure.remediation) body += `- ${cleanProse(step)}\n`;
       body += '\n';
     }
-    const errorText = truncateErrorText(cleanProse(env.AGENT_ERROR || '').replace(/```/g, "'''"));
+    const errorText = truncateErrorText(
+      cleanProse(env.AGENT_ERROR || latestSession.error_message || latestSession.error || latestSession.result || '').replace(/```/g, "'''")
+    );
     if (errorText) body += `**Error excerpt:**\n\n\`\`\`text\n${errorText}\n\`\`\`\n\n`;
   } else {
     body += title ? `### Result: ${title}\n\n` : '### Result\n\n';

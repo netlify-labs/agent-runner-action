@@ -933,7 +933,6 @@ runs:
           case "$STATE" in
             completed|done)
               echo "✅ Agent completed"
-              echo "outcome=success" >> $GITHUB_OUTPUT
 
               # Fetch session details
               SESSION_OUTPUT=$(netlify api listAgentRunnerSessions --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
@@ -953,6 +952,19 @@ runs:
               else
                 LATEST_SESSION='{}'
               fi
+
+              LATEST_SESSION_STATE=$(echo "$LATEST_SESSION" | jq -r '.state // empty' | tr '[:upper:]' '[:lower:]')
+              case "$LATEST_SESSION_STATE" in
+                failed|error|cancelled|canceled)
+                  echo "❌ Latest agent session finished with state: $LATEST_SESSION_STATE"
+                  LATEST_SESSION_ERROR=$(echo "$LATEST_SESSION" | jq -r '.error_message // .error // .result // empty')
+                  echo "outcome=failure" >> $GITHUB_OUTPUT
+                  emit_failure_context "poll-session" "agent-failed" "${LATEST_SESSION_ERROR:-Latest agent session finished with state: $LATEST_SESSION_STATE}"
+                  exit 1
+                  ;;
+              esac
+
+              echo "outcome=success" >> $GITHUB_OUTPUT
 
               # Re-fetch runner
               AGENT_RESULT=$(netlify agents:show "$AGENT_ID" --json 2>/dev/null || true)
