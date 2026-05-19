@@ -246,3 +246,30 @@ describe('parseLinkedPrReference', () => {
     assert.equal(markers.parseLinkedPrReference(null), '');
   });
 });
+
+describe('parseAgentRunReference', () => {
+  it('extracts bare Netlify agent run URLs from out-of-band PR bodies', () => {
+    assert.deepEqual(
+      markers.parseAgentRunReference('🔗 **View agent run:** https://app.netlify.com/projects/gmail-emailer/agent-runs/6a0bd975b0decdb25b6b3a23'),
+      {
+        runnerId: '6a0bd975b0decdb25b6b3a23',
+        agentRunUrl: 'https://app.netlify.com/projects/gmail-emailer/agent-runs/6a0bd975b0decdb25b6b3a23',
+      }
+    );
+  });
+
+  it('extracts markdown-linked Netlify agent run URLs', () => {
+    assert.deepEqual(
+      markers.parseAgentRunReference('[Agent run](https://app.netlify.com/projects/site-a/agent-runs/runner_123)'),
+      {
+        runnerId: 'runner_123',
+        agentRunUrl: 'https://app.netlify.com/projects/site-a/agent-runs/runner_123',
+      }
+    );
+  });
+
+  it('ignores non-Netlify and malformed run URLs', () => {
+    assert.equal(markers.parseAgentRunReference('https://example.com/projects/site/agent-runs/runner'), null);
+    assert.equal(markers.parseAgentRunReference('https://app.netlify.com/projects/site/agent-runs/bad/id'), null);
+  });
+});

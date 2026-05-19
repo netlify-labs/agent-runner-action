@@ -98,6 +98,31 @@ describe('extractAgentId', () => {
     assert.equal(core.outputs['session-data-map'], '{}');
   });
 
+  it('falls back to a visible PR body agent run URL for out-of-band agent PRs', async () => {
+    const core = mockCore();
+    const github = mockGithub({
+      commentBody: 'status body without markers',
+      prBody: [
+        '🔗 **View agent run:** https://app.netlify.com/projects/gmail-emailer/agent-runs/6a0bd975b0decdb25b6b3a23',
+        '',
+        '🤖 **Agent:** Claude',
+      ].join('\n'),
+    });
+
+    await extractAgentId({
+      github,
+      context: context(),
+      core,
+      inputs: { isPR: 'true', commentId: '20', prNumber: '20' },
+    });
+
+    assert.equal(core.outputs['agent-runner-id'], '6a0bd975b0decdb25b6b3a23');
+    assert.equal(
+      core.outputs['agent-run-url'],
+      'https://app.netlify.com/projects/gmail-emailer/agent-runs/6a0bd975b0decdb25b6b3a23'
+    );
+  });
+
   it('ignores PR body markers on fork PRs to prevent state poisoning', async () => {
     const core = mockCore();
     const github = mockGithub({

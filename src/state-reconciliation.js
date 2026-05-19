@@ -12,6 +12,7 @@ const {
   parseRunnerId,
   parseSessionData,
   parseLinkedPrReference,
+  parseAgentRunReference,
 } = require('./comment-markers');
 
 /**
@@ -135,6 +136,8 @@ function reconcileAgentState(input = {}) {
 
   const statusRunnerId = parseRunnerId(statusCommentBody);
   const prRunnerId = parseRunnerId(prBody);
+  const statusAgentRunReference = isPr ? parseAgentRunReference(statusCommentBody) : null;
+  const prAgentRunReference = isPr ? parseAgentRunReference(prBody) : null;
   const existingRunnerId = toText(input.existingRunnerIdOutput).trim();
   const contextRunnerId = toText(
     contextOutputs.runnerId ||
@@ -145,12 +148,22 @@ function reconcileAgentState(input = {}) {
 
   /** @type {string} */
   let runnerId = '';
-  if (statusRunnerId) {
+  if (statusRunnerId && prAgentRunReference && !prRunnerId && statusRunnerId !== prAgentRunReference.runnerId) {
+    runnerId = prAgentRunReference.runnerId;
+    sources.push('pr-body:agent-run-url');
+    warnings.push('status comment runner marker differs from PR body agent run URL; using PR body URL because PR body has no hidden runner marker');
+  } else if (statusRunnerId) {
     runnerId = statusRunnerId;
     sources.push('status-comment:runner-id');
+  } else if (statusAgentRunReference) {
+    runnerId = statusAgentRunReference.runnerId;
+    sources.push('status-comment:agent-run-url');
   } else if (prRunnerId) {
     runnerId = prRunnerId;
     sources.push('pr-body:runner-id');
+  } else if (prAgentRunReference) {
+    runnerId = prAgentRunReference.runnerId;
+    sources.push('pr-body:agent-run-url');
   } else if (existingRunnerId) {
     runnerId = existingRunnerId;
     sources.push('existing-output:runner-id');
@@ -161,6 +174,12 @@ function reconcileAgentState(input = {}) {
 
   if (statusRunnerId && prRunnerId && statusRunnerId !== prRunnerId) {
     warnings.push('status comment and PR body contain different runner IDs');
+  }
+  if (statusRunnerId && statusAgentRunReference && statusRunnerId !== statusAgentRunReference.runnerId) {
+    warnings.push('status comment runner marker and agent run URL contain different runner IDs');
+  }
+  if (prRunnerId && prAgentRunReference && prRunnerId !== prAgentRunReference.runnerId) {
+    warnings.push('PR body runner marker and agent run URL contain different runner IDs');
   }
 
   const statusSessionData = parseSessionDataFromBody(statusCommentBody, warnings, sources, 'status-comment');
@@ -225,13 +244,24 @@ function reconcileAgentState(input = {}) {
   }
 
   const siteName = toText(input.siteName).trim();
-  const agentRunUrl = runnerId && siteName
+  const referencedAgentRunUrl =
+    (runnerId && statusAgentRunReference && statusAgentRunReference.runnerId === runnerId)
+      ? statusAgentRunReference.agentRunUrl
+      : (runnerId && prAgentRunReference && prAgentRunReference.runnerId === runnerId)
+        ? prAgentRunReference.agentRunUrl
+        : '';
+  const agentRunUrl = referencedAgentRunUrl || (runnerId && siteName
     ? `https://app.netlify.com/projects/${siteName}/agent-runs/${runnerId}`
-    : '';
+    : '');
 
   /** @type {'none' | 'low' | 'medium' | 'high'} */
   let confidence = 'none';
-  if (sources.includes('status-comment:runner-id') || sources.includes('pr-body:runner-id')) {
+  if (
+    sources.includes('status-comment:runner-id') ||
+    sources.includes('pr-body:runner-id') ||
+    sources.includes('status-comment:agent-run-url') ||
+    sources.includes('pr-body:agent-run-url')
+  ) {
     confidence = 'high';
   } else if (runnerId) {
     confidence = 'medium';

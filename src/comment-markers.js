@@ -26,6 +26,7 @@ const SESSION_URL_ALLOWLIST = {
   gh_action_url: /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/\d+(?:[/?#].*)?$/,
   screenshot:    /^https:\/\/(?:[A-Za-z0-9-]+\.)*(?:netlify\.app|netlifyusercontent\.com|app\.netlify\.com|api\.netlify\.com)\/[^\s]*$/i,
 };
+const AGENT_RUN_URL_PATTERN = /https:\/\/app\.netlify\.com\/projects\/([A-Za-z0-9_.-]+)\/agent-runs\/([A-Za-z0-9_-]{1,128})(?=$|[\s)\]>}.,!?])/g;
 // 4 covers git's minimum unique-prefix display; 64 covers full SHA-256.
 const COMMIT_SHA_FORMAT = /^[0-9a-f]{4,64}$/i;
 const SESSION_FIELD_MAX_LENGTH = 2048;
@@ -238,6 +239,29 @@ function parseLinkedPrReference(body) {
 }
 
 /**
+ * @param {unknown} body
+ * @returns {{runnerId: string, agentRunUrl: string} | null}
+ */
+function parseAgentRunReference(body) {
+  const text = normalizeBody(body);
+  if (!text) return null;
+
+  AGENT_RUN_URL_PATTERN.lastIndex = 0;
+  let match;
+  while ((match = AGENT_RUN_URL_PATTERN.exec(text)) !== null) {
+    const siteName = match[1];
+    const runnerId = match[2];
+    if (!RUNNER_ID_FORMAT.test(runnerId)) continue;
+    return {
+      runnerId,
+      agentRunUrl: `https://app.netlify.com/projects/${siteName}/agent-runs/${runnerId}`,
+    };
+  }
+
+  return null;
+}
+
+/**
  * Remove every HTML comment that is not one of our allowlisted markers.
  * Used on the read path: sanitize comment/PR-body text before parsing markers,
  * so a poisoned non-bot comment cannot inject runner-id/session-data values
@@ -284,6 +308,7 @@ module.exports = {
   renderSessionDataMarker,
   parseSessionData,
   parseLinkedPrReference,
+  parseAgentRunReference,
   containsStateMarker,
   assertNoStateMarkers,
   stripUntrustedHtmlComments,

@@ -43,6 +43,34 @@ describe('reconcileAgentState', () => {
     assert.equal(result.confidence, 'high');
   });
 
+  it('uses a visible PR body agent run URL when no hidden marker exists', () => {
+    const result = reconcileAgentState({
+      isPr: true,
+      statusCommentBody: 'no runner marker',
+      prBody: '🔗 **View agent run:** https://app.netlify.com/projects/gmail-emailer/agent-runs/6a0bd975b0decdb25b6b3a23',
+    });
+
+    assert.equal(result.runnerId, '6a0bd975b0decdb25b6b3a23');
+    assert.equal(
+      result.agentRunUrl,
+      'https://app.netlify.com/projects/gmail-emailer/agent-runs/6a0bd975b0decdb25b6b3a23'
+    );
+    assert.equal(result.recoveryAction, 'resume-runner');
+    assert.equal(result.confidence, 'high');
+  });
+
+  it('uses PR body agent run URL over a conflicting status marker when PR body lacks hidden state', () => {
+    const result = reconcileAgentState({
+      isPr: true,
+      statusCommentBody: '<!-- netlify-agent-runner-id:6a0ce38cf93d2b1b9da1d699 -->',
+      prBody: '🔗 **View agent run:** https://app.netlify.com/projects/gmail-emailer/agent-runs/6a0bd975b0decdb25b6b3a23',
+    });
+
+    assert.equal(result.runnerId, '6a0bd975b0decdb25b6b3a23');
+    assert.equal(result.recoveryAction, 'resume-runner');
+    assert.ok(result.warnings.some(w => w.includes('status comment runner marker differs from PR body agent run URL')));
+  });
+
   it('treats malformed status session marker as warning and safe fallback', () => {
     const result = reconcileAgentState({
       statusCommentBody: '<!-- netlify-agent-session-data:{not-json} -->',
