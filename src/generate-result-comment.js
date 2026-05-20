@@ -124,9 +124,9 @@ function formatCredits(value) {
 function formatUsageSummary(usage) {
   if (!usage) return '';
   const parts = [];
-  if (usage.totalTokens !== undefined) parts.push(`${numberWithCommas(usage.totalTokens)} tokens`);
-  if (usage.stepsCount !== undefined) parts.push(`${numberWithCommas(usage.stepsCount)} steps`);
   if (usage.totalCreditsCost !== undefined) parts.push(`${formatCredits(usage.totalCreditsCost)} credits`);
+  if (usage.stepsCount !== undefined) parts.push(`${numberWithCommas(usage.stepsCount)} steps`);
+  if (usage.totalTokens !== undefined) parts.push(`${numberWithCommas(usage.totalTokens)} tokens`);
   if (usage.creditLimitExceeded) parts.push('credit limit exceeded');
   return parts.join(' · ');
 }
