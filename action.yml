@@ -139,6 +139,12 @@ runs:
           const run = require(`${process.env.ACTION_DIR}/src/check-trigger.js`);
           await run({ github, context, core });
 
+    - name: Install action dependencies
+      if: steps.trigger-check.outputs.should-run == 'true'
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
     # -----------------------------------------------------------------------
     # 2. React with 👀 to acknowledge
     # -----------------------------------------------------------------------

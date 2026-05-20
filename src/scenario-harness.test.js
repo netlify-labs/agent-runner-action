@@ -193,7 +193,7 @@ describe('scenario harness', () => {
 
     assert.equal(trace.outputs['is-pr'], 'true');
     assert.equal(trace.comments.length, 3);
-    assert.ok(trace.comments[0].includes('<!-- netlify-agent-run-result:runner-thread:session-thread -->'));
+    assert.ok(trace.comments[0].includes('<!-- netlify-agent-run-result runnerId="runner-thread" sessionId="session-thread"'));
     assert.ok(trace.comments[1].includes('<!-- netlify-agent-run-status -->'));
     assert.ok(trace.comments[1].includes('[Read full result]('));
     assert.ok(trace.comments[2].includes('<!-- netlify-agent-run-history -->'));
@@ -227,7 +227,7 @@ describe('scenario harness', () => {
         commentMode: 'success',
       });
 
-      const resultBody = trace.comments.find(comment => comment.includes('<!-- netlify-agent-run-result:'));
+      const resultBody = trace.comments.find(comment => comment.includes('<!-- netlify-agent-run-result '));
       assert.ok(resultBody, `expected run ${index} result comment`);
       historyComments.push({
         id,
@@ -284,7 +284,7 @@ describe('scenario harness', () => {
 
     assert.equal(trace.comments.length, 1);
     assert.ok(trace.comments[0].includes('<!-- netlify-agent-run-status -->'));
-    assert.ok(!trace.comments[0].includes('<!-- netlify-agent-run-result:'));
+    assert.ok(!trace.comments[0].includes('<!-- netlify-agent-run-result'));
   });
 
   it('keeps result-post failures status-only with no history TOC', async () => {

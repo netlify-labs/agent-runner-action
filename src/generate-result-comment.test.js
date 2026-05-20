@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { renderResultComment } = require('./generate-result-comment');
 const {
-  RESULT_COMMENT_MARKER_PREFIX,
+  RESULT_COMMENT_MARKER_NAME,
   STATUS_COMMENT_MARKER,
   HISTORY_COMMENT_MARKER,
   RUNNER_ID_MARKER_PREFIX,
@@ -44,6 +44,12 @@ describe('renderResultComment', () => {
       result: 'Made the requested changes.',
       deploy_url: 'https://site.netlify.app',
       agent_config: { agent: 'codex' },
+      usage: {
+        total_tokens: 661381,
+        total_credits_cost: 145.98018,
+      },
+      steps_count: 46,
+      credit_limit_exceeded: false,
     }]);
 
     const rendered = renderResultComment({
@@ -62,11 +68,12 @@ describe('renderResultComment', () => {
     });
 
     assert.ok(rendered.resultBody.includes('### [Run #1 | codex | Agent Run completed]'));
+    assert.ok(rendered.resultBody.includes('**Usage:** 661,381 tokens · 46 steps · 145.98 credits'));
     assert.ok(rendered.resultBody.includes('**Prompt:**'));
     assert.ok(rendered.resultBody.includes('### Result: Updated homepage'));
     assert.ok(rendered.resultBody.includes('[Code Changes]'));
     assert.ok(rendered.resultBody.includes('[Pull Request](https://github.com/netlify-labs/agent-runner-action-example/pull/5)'));
-    assert.ok(rendered.resultBody.includes(RESULT_COMMENT_MARKER_PREFIX));
+    assert.ok(rendered.resultBody.includes('<!-- netlify-agent-run-result runnerId="runner_1" sessionId="session_1" totalTokens=661381 totalCreditsCost=145.98018 stepsCount=46 creditLimitExceeded=false -->'));
     assert.deepEqual(parseResultCommentIdentifiers(rendered.resultBody), {
       runnerId: 'runner_1',
       sessionId: 'session_1',
@@ -99,7 +106,7 @@ describe('renderResultComment', () => {
     assert.ok(!rendered.resultBody.includes(STATUS_COMMENT_MARKER));
     assert.ok(!rendered.resultBody.includes(RUNNER_ID_MARKER_PREFIX));
     assert.ok(!rendered.resultBody.includes(SESSION_DATA_MARKER_PREFIX));
-    assert.ok(rendered.resultBody.includes(RESULT_COMMENT_MARKER_PREFIX));
+    assert.ok(rendered.resultBody.includes(`<!-- ${RESULT_COMMENT_MARKER_NAME} `));
   });
 
   it('renders failure result comments when a latest session exists', () => {
@@ -126,7 +133,7 @@ describe('renderResultComment', () => {
 
     assert.ok(rendered.resultBody.includes('Agent Run failed'));
     assert.ok(rendered.resultBody.includes('Suggested next steps'));
-    assert.ok(rendered.resultBody.includes(RESULT_COMMENT_MARKER_PREFIX));
+    assert.ok(rendered.resultBody.includes(`<!-- ${RESULT_COMMENT_MARKER_NAME} `));
   });
 
   it('treats latest error sessions as failure results even without AGENT_ERROR', () => {
@@ -152,7 +159,7 @@ describe('renderResultComment', () => {
     assert.ok(rendered.resultBody.includes('### [Run #1 | claude | Agent Run failed]'));
     assert.ok(rendered.resultBody.includes('**Error excerpt:**'));
     assert.ok(rendered.resultBody.includes('Encountered a temporary issue'));
-    assert.ok(rendered.resultBody.includes(RESULT_COMMENT_MARKER_PREFIX));
+    assert.ok(rendered.resultBody.includes(`<!-- ${RESULT_COMMENT_MARKER_NAME} `));
   });
 
   it('emits no result body when there is no latest session id', () => {
