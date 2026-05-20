@@ -54,7 +54,7 @@ describe('renderStatusComment', () => {
 
     const visible = rendered.statusBody.split('<!-- netlify-agent-session-data:')[0].trim();
     assert.ok(byteLength(visible) <= STATUS_COMMENT_VISIBLE_BYTES);
-    assert.ok(rendered.statusBody.includes('### [Netlify Agent Run Status](https://app.netlify.com/projects/site/agent-runs/runner_1) ✅'));
+    assert.ok(rendered.statusBody.includes('### [Netlify Agent Run Status](https://app.netlify.com/projects/site/agent-runs/runner_1?session=session_1) ✅'));
     assert.ok(rendered.statusBody.includes('Netlify Agent Run completed.'));
     assert.ok(rendered.statusBody.includes('**Prompt summary:** Updated homepage'));
     assert.ok(rendered.statusBody.includes('[Read full result](#issuecomment-123)'));
@@ -97,7 +97,7 @@ describe('renderStatusComment', () => {
         SESSION_DATA_MAP: '{}',
       },
     });
-    assert.ok(rendered.statusBody.includes('### [Netlify Agent Run Status](https://app.netlify.com/projects/site/agent-runs/runner_3) ❌'));
+    assert.ok(rendered.statusBody.includes('### [Netlify Agent Run Status](https://app.netlify.com/projects/site/agent-runs/runner_3?session=session_3) ❌'));
     assert.ok(rendered.statusBody.includes('Netlify Agent Run failed.'));
     assert.ok(rendered.statusBody.includes('**Failure summary:**'));
     assert.ok(rendered.statusBody.includes('[Read full result](#issuecomment-777)'));

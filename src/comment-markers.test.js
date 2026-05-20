@@ -34,7 +34,23 @@ describe('render helpers', () => {
   it('renders result comment markers when ids are valid', () => {
     assert.equal(
       markers.renderResultCommentMarker({ runnerId: 'runner_123', sessionId: 'session-456' }),
-      '<!-- netlify-agent-run-result:runner_123:session-456 -->'
+      '<!-- netlify-agent-run-result runnerId="runner_123" sessionId="session-456" -->'
+    );
+  });
+
+  it('renders compact usage attributes on result comment markers', () => {
+    assert.equal(
+      markers.renderResultCommentMarker({
+        runnerId: 'runner_123',
+        sessionId: 'session-456',
+        usage: {
+          total_tokens: 661381,
+          total_credits_cost: 145.98018,
+          steps_count: 46,
+          credit_limit_exceeded: false,
+        },
+      }),
+      '<!-- netlify-agent-run-result runnerId="runner_123" sessionId="session-456" totalTokens=661381 totalCreditsCost=145.98018 stepsCount=46 creditLimitExceeded=false -->'
     );
   });
 
@@ -163,8 +179,35 @@ describe('parseResultCommentIdentifiers', () => {
   it('extracts validated runner and session ids', () => {
     const body = [
       '### Result',
-      '<!-- netlify-agent-run-result:runner_123:session-456 -->',
+      '<!-- netlify-agent-run-result runnerId="runner_123" sessionId="session-456" -->',
     ].join('\n');
+    assert.deepEqual(markers.parseResultCommentIdentifiers(body), {
+      runnerId: 'runner_123',
+      sessionId: 'session-456',
+    });
+  });
+
+  it('parses compact usage attributes from result comment markers', () => {
+    const body = '<!-- netlify-agent-run-result runnerId="runner_123" sessionId="session-456" totalTokens=661381 totalCreditsCost=145.98018 stepsCount=46 creditLimitExceeded=false -->';
+    assert.deepEqual(markers.parseResultCommentMarker(body), {
+      runnerId: 'runner_123',
+      sessionId: 'session-456',
+      usage: {
+        totalTokens: 661381,
+        totalCreditsCost: 145.98018,
+        stepsCount: 46,
+        creditLimitExceeded: false,
+      },
+    });
+  });
+
+  it('keeps parsing legacy colon result markers', () => {
+    const body = '<!-- netlify-agent-run-result:runner_123:session-456 -->';
+    assert.deepEqual(markers.parseResultCommentMarker(body), {
+      runnerId: 'runner_123',
+      sessionId: 'session-456',
+      usage: null,
+    });
     assert.deepEqual(markers.parseResultCommentIdentifiers(body), {
       runnerId: 'runner_123',
       sessionId: 'session-456',
@@ -186,13 +229,13 @@ describe('stripUntrustedHtmlComments', () => {
       '<!-- something else -->',
       '<!-- netlify-agent-run-status -->',
       '<!-- netlify-agent-runner-id:abc -->',
-      '<!-- netlify-agent-run-result:runner:session -->',
+      '<!-- netlify-agent-run-result runnerId="runner" sessionId="session" -->',
       '<!-- evil -->',
     ].join('\n');
     const out = markers.stripUntrustedHtmlComments(input);
     assert.ok(out.includes('<!-- netlify-agent-run-status -->'));
     assert.ok(out.includes('<!-- netlify-agent-runner-id:abc -->'));
-    assert.ok(out.includes('<!-- netlify-agent-run-result:runner:session -->'));
+    assert.ok(out.includes('<!-- netlify-agent-run-result runnerId="runner" sessionId="session" -->'));
     assert.ok(!out.includes('something else'));
     assert.ok(!out.includes('evil'));
   });
@@ -248,6 +291,17 @@ describe('parseLinkedPrReference', () => {
 });
 
 describe('parseAgentRunReference', () => {
+  it('formats session-specific Netlify agent run URLs', () => {
+    assert.equal(
+      markers.formatAgentRunUrl('site-a', 'runner_123', 'session-456'),
+      'https://app.netlify.com/projects/site-a/agent-runs/runner_123?session=session-456'
+    );
+    assert.equal(
+      markers.formatAgentRunUrl('site-a', 'runner_123', 'bad/session'),
+      'https://app.netlify.com/projects/site-a/agent-runs/runner_123'
+    );
+  });
+
   it('extracts bare Netlify agent run URLs from out-of-band PR bodies', () => {
     assert.deepEqual(
       markers.parseAgentRunReference('🔗 **View agent run:** https://app.netlify.com/projects/gmail-emailer/agent-runs/6a0bd975b0decdb25b6b3a23'),
@@ -261,6 +315,16 @@ describe('parseAgentRunReference', () => {
   it('extracts markdown-linked Netlify agent run URLs', () => {
     assert.deepEqual(
       markers.parseAgentRunReference('[Agent run](https://app.netlify.com/projects/site-a/agent-runs/runner_123)'),
+      {
+        runnerId: 'runner_123',
+        agentRunUrl: 'https://app.netlify.com/projects/site-a/agent-runs/runner_123',
+      }
+    );
+  });
+
+  it('extracts runner references from session-specific Netlify agent run URLs', () => {
+    assert.deepEqual(
+      markers.parseAgentRunReference('[Agent run](https://app.netlify.com/projects/site-a/agent-runs/runner_123?session=session-456)'),
       {
         runnerId: 'runner_123',
         agentRunUrl: 'https://app.netlify.com/projects/site-a/agent-runs/runner_123',

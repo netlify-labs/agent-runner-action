@@ -5,6 +5,7 @@ const utils = require('./utils');
 const { classifyFailure } = require('./failure-taxonomy');
 const {
   STATUS_COMMENT_MARKER,
+  formatAgentRunUrl,
   renderRunnerIdMarker,
   renderSessionDataMarker,
   stripAllHtmlComments,
@@ -74,7 +75,8 @@ function buildLinks(env, context, latestSession) {
   const repoName = env.REPOSITORY_NAME || `${context.repo.owner}/${context.repo.repo}`;
   const agentId = env.AGENT_ID || env.RUNNER_ID || '';
   const siteName = env.SITE_NAME || context.repo.repo;
-  const agentRunUrl = agentId ? `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}` : '';
+  const sessionId = latestSession && latestSession.id ? String(latestSession.id) : '';
+  const agentRunUrl = formatAgentRunUrl(siteName, agentId, sessionId);
   const deployUrl = env.AGENT_DEPLOY_URL || (latestSession && latestSession.deploy_url) || '';
   const ghActionUrl = env.GH_ACTION_URL || '';
   const commitSha = env.AGENT_COMMIT_SHA || '';
@@ -107,7 +109,8 @@ function renderStatusComment({ env = process.env, context, outcome }) {
   const latestSession = sessions.length > 0 ? sessions[sessions.length - 1] : null;
   const sessionDataMap = buildSessionDataMap(env, sessions);
   const siteName = env.SITE_NAME || context.repo.repo;
-  const agentRunUrl = agentId ? `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}` : '';
+  const sessionId = latestSession && latestSession.id ? String(latestSession.id) : '';
+  const agentRunUrl = formatAgentRunUrl(siteName, agentId, sessionId);
   const isFailure = outcome ? outcome === 'failure' : Boolean(env.AGENT_ERROR);
   const isDryRun = env.IS_DRY_RUN === 'true';
   const model = (latestSession && latestSession.agent_config && latestSession.agent_config.agent) || env.AGENT_MODEL || 'codex';

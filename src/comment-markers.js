@@ -5,6 +5,7 @@ const HISTORY_COMMENT_MARKER = '<!-- netlify-agent-run-history -->';
 const RUNNER_ID_MARKER_PREFIX = '<!-- netlify-agent-runner-id:';
 const SESSION_DATA_MARKER_PREFIX = '<!-- netlify-agent-session-data:';
 const RESULT_COMMENT_MARKER_PREFIX = '<!-- netlify-agent-run-result:';
+const RESULT_COMMENT_MARKER_NAME = 'netlify-agent-run-result';
 const MARKER_SUFFIX = '-->';
 
 // Conservative format for runner IDs: alphanumerics, underscore, hyphen only.
@@ -16,7 +17,7 @@ const RUNNER_ID_FORMAT = /^[A-Za-z0-9_-]{1,128}$/;
 // found in user-influenced content is stripped before parsing/rendering, so
 // outsiders cannot smuggle fake markers and bot comments cannot accidentally
 // reflect attacker-supplied markers from echoed user content.
-const ALLOWED_MARKER_INNER = /^\s*netlify-agent-(?:run-status|run-history|run-result:|runner-id:|session-data:)/;
+const ALLOWED_MARKER_INNER = /^\s*netlify-agent-(?:run-status|run-history|run-result(?::|\s|$)|runner-id:|session-data:)/;
 
 // Allowlist for URL-bearing fields in session-data entries. These URLs flow
 // into bot-rendered Markdown links; anything outside these patterns gets
@@ -26,7 +27,7 @@ const SESSION_URL_ALLOWLIST = {
   gh_action_url: /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/\d+(?:[/?#].*)?$/,
   screenshot:    /^https:\/\/(?:[A-Za-z0-9-]+\.)*(?:netlify\.app|netlifyusercontent\.com|app\.netlify\.com|api\.netlify\.com)\/[^\s]*$/i,
 };
-const AGENT_RUN_URL_PATTERN = /https:\/\/app\.netlify\.com\/projects\/([A-Za-z0-9_.-]+)\/agent-runs\/([A-Za-z0-9_-]{1,128})(?=$|[\s)\]>}.,!?])/g;
+const AGENT_RUN_URL_PATTERN = /https:\/\/app\.netlify\.com\/projects\/([A-Za-z0-9_.-]+)\/agent-runs\/([A-Za-z0-9_-]{1,128})(?:\?session=([A-Za-z0-9_-]{1,128}))?(?=$|[\s)\]>}.,!?])/g;
 // 4 covers git's minimum unique-prefix display; 64 covers full SHA-256.
 const COMMIT_SHA_FORMAT = /^[0-9a-f]{4,64}$/i;
 const SESSION_FIELD_MAX_LENGTH = 2048;
@@ -95,6 +96,76 @@ function renderMarker(markerWithValue) {
 }
 
 /**
+ * @param {string} value
+ * @returns {string}
+ */
+function quoteAttribute(value) {
+  return JSON.stringify(String(value));
+}
+
+/**
+ * @param {unknown} value
+ * @returns {number | null}
+ */
+function finiteNumber(value) {
+  const number = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+/**
+ * @param {unknown} usage
+ * @returns {{totalTokens?: number, totalCreditsCost?: number, stepsCount?: number, creditLimitExceeded?: boolean} | null}
+ */
+function normalizeResultUsage(usage) {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return null;
+  const record = /** @type {Record<string, unknown>} */ (usage);
+  /** @type {{totalTokens?: number, totalCreditsCost?: number, stepsCount?: number, creditLimitExceeded?: boolean}} */
+  const out = {};
+
+  const totalTokens = finiteNumber(record.totalTokens ?? record.total_tokens);
+  if (totalTokens !== null) out.totalTokens = totalTokens;
+
+  const totalCreditsCost = finiteNumber(record.totalCreditsCost ?? record.total_credits_cost);
+  if (totalCreditsCost !== null) out.totalCreditsCost = totalCreditsCost;
+
+  const stepsCount = finiteNumber(record.stepsCount ?? record.steps_count);
+  if (stepsCount !== null) out.stepsCount = Math.floor(stepsCount);
+
+  if (typeof record.creditLimitExceeded === 'boolean') {
+    out.creditLimitExceeded = record.creditLimitExceeded;
+  } else if (typeof record.credit_limit_exceeded === 'boolean') {
+    out.creditLimitExceeded = record.credit_limit_exceeded;
+  }
+
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * @param {string} siteName
+ * @param {string} runnerId
+ * @param {string} [sessionId]
+ * @returns {string}
+ */
+function formatAgentRunUrl(siteName, runnerId, sessionId = '') {
+  if (!siteName || !RUNNER_ID_FORMAT.test(runnerId)) return '';
+  const base = `https://app.netlify.com/projects/${siteName}/agent-runs/${runnerId}`;
+  if (!RUNNER_ID_FORMAT.test(sessionId)) return base;
+  return `${base}?session=${encodeURIComponent(sessionId)}`;
+}
+
+/**
+ * Load the parser only on the read path that needs it. This keeps early
+ * trigger checks working before the composite action installs dependencies.
+ * @param {string} content
+ * @param {Record<string, unknown>} options
+ * @returns {{blocks?: Array<Record<string, any>>}}
+ */
+function parseCommentBlocks(content, options) {
+  const { parseBlocks } = require('comment-block-parser');
+  return /** @type {{blocks?: Array<Record<string, any>>}} */ (parseBlocks(content, options));
+}
+
+/**
  * @param {unknown} body
  * @param {string} markerPrefix
  * @returns {string}
@@ -137,21 +208,63 @@ function parseRunnerId(body) {
 }
 
 /**
- * @param {{runnerId?: string, sessionId?: string}} identifiers
+ * @param {{runnerId?: string, sessionId?: string, usage?: Record<string, unknown> | null}} identifiers
  * @returns {string}
  */
-function renderResultCommentMarker({ runnerId = '', sessionId = '' } = {}) {
+function renderResultCommentMarker({ runnerId = '', sessionId = '', usage = null } = {}) {
   if (!RUNNER_ID_FORMAT.test(runnerId) || !RUNNER_ID_FORMAT.test(sessionId)) {
     return '';
   }
-  return renderMarker(`${RESULT_COMMENT_MARKER_PREFIX}${runnerId}:${sessionId}`);
+  const normalizedUsage = normalizeResultUsage(usage);
+  const attributes = [
+    `runnerId=${quoteAttribute(runnerId)}`,
+    `sessionId=${quoteAttribute(sessionId)}`,
+  ];
+  if (normalizedUsage && normalizedUsage.totalTokens !== undefined) {
+    attributes.push(`totalTokens=${normalizedUsage.totalTokens}`);
+  }
+  if (normalizedUsage && normalizedUsage.totalCreditsCost !== undefined) {
+    attributes.push(`totalCreditsCost=${normalizedUsage.totalCreditsCost}`);
+  }
+  if (normalizedUsage && normalizedUsage.stepsCount !== undefined) {
+    attributes.push(`stepsCount=${normalizedUsage.stepsCount}`);
+  }
+  if (normalizedUsage && normalizedUsage.creditLimitExceeded !== undefined) {
+    attributes.push(`creditLimitExceeded=${normalizedUsage.creditLimitExceeded ? 'true' : 'false'}`);
+  }
+  return renderMarker(`<!-- ${RESULT_COMMENT_MARKER_NAME} ${attributes.join(' ')}`);
 }
 
 /**
  * @param {unknown} body
- * @returns {{runnerId: string, sessionId: string} | null}
+ * @returns {{runnerId: string, sessionId: string, usage: {totalTokens?: number, totalCreditsCost?: number, stepsCount?: number, creditLimitExceeded?: boolean} | null} | null}
  */
-function parseResultCommentIdentifiers(body) {
+function parseResultCommentMarker(body) {
+  const text = normalizeBody(body);
+  if (!text) return null;
+
+  const parsed = parseCommentBlocks(text, {
+    syntax: 'md',
+    open: RESULT_COMMENT_MARKER_NAME,
+    close: false,
+  });
+  const block = parsed.blocks && parsed.blocks[0];
+  const options = block && block.options && typeof block.options === 'object'
+    ? /** @type {Record<string, unknown>} */ (block.options)
+    : null;
+  if (options && (options.runnerId !== undefined || options.sessionId !== undefined)) {
+    const runnerId = typeof options.runnerId === 'string' ? options.runnerId : '';
+    const sessionId = typeof options.sessionId === 'string' ? options.sessionId : '';
+    if (!RUNNER_ID_FORMAT.test(runnerId) || !RUNNER_ID_FORMAT.test(sessionId)) {
+      return null;
+    }
+    return {
+      runnerId,
+      sessionId,
+      usage: normalizeResultUsage(options),
+    };
+  }
+
   const value = readMarkerValue(body, RESULT_COMMENT_MARKER_PREFIX);
   if (!value) return null;
 
@@ -161,7 +274,17 @@ function parseResultCommentIdentifiers(body) {
   if (!RUNNER_ID_FORMAT.test(runnerId) || !RUNNER_ID_FORMAT.test(sessionId)) {
     return null;
   }
-  return { runnerId, sessionId };
+  return { runnerId, sessionId, usage: null };
+}
+
+/**
+ * @param {unknown} body
+ * @returns {{runnerId: string, sessionId: string} | null}
+ */
+function parseResultCommentIdentifiers(body) {
+  const parsed = parseResultCommentMarker(body);
+  if (!parsed) return null;
+  return { runnerId: parsed.runnerId, sessionId: parsed.sessionId };
 }
 
 /**
@@ -254,7 +377,7 @@ function parseAgentRunReference(body) {
     if (!RUNNER_ID_FORMAT.test(runnerId)) continue;
     return {
       runnerId,
-      agentRunUrl: `https://app.netlify.com/projects/${siteName}/agent-runs/${runnerId}`,
+      agentRunUrl: formatAgentRunUrl(siteName, runnerId),
     };
   }
 
@@ -300,10 +423,14 @@ module.exports = {
   RUNNER_ID_MARKER_PREFIX,
   SESSION_DATA_MARKER_PREFIX,
   RESULT_COMMENT_MARKER_PREFIX,
+  RESULT_COMMENT_MARKER_NAME,
   RUNNER_ID_FORMAT,
+  normalizeResultUsage,
+  formatAgentRunUrl,
   renderRunnerIdMarker,
   parseRunnerId,
   renderResultCommentMarker,
+  parseResultCommentMarker,
   parseResultCommentIdentifiers,
   renderSessionDataMarker,
   parseSessionData,

@@ -6,6 +6,8 @@ const utils = require('./utils');
 const { classifyFailure } = require('./failure-taxonomy');
 const {
   renderResultCommentMarker,
+  normalizeResultUsage,
+  formatAgentRunUrl,
   assertNoStateMarkers,
   stripAllHtmlComments,
 } = require('./comment-markers');
@@ -86,6 +88,50 @@ function buildSessionDataMap(env, sessions) {
 }
 
 /**
+ * @param {Record<string, any> | null} latestSession
+ * @returns {{totalTokens?: number, totalCreditsCost?: number, stepsCount?: number, creditLimitExceeded?: boolean} | null}
+ */
+function usageFromSession(latestSession) {
+  if (!latestSession || typeof latestSession !== 'object') return null;
+  return normalizeResultUsage({
+    ...(latestSession.usage && typeof latestSession.usage === 'object' ? latestSession.usage : {}),
+    steps_count: latestSession.steps_count,
+    credit_limit_exceeded: latestSession.credit_limit_exceeded,
+  });
+}
+
+/**
+ * @param {number} value
+ * @returns {string}
+ */
+function numberWithCommas(value) {
+  return Number.isFinite(value) ? Math.round(value).toLocaleString('en-US') : '';
+}
+
+/**
+ * @param {number} value
+ * @returns {string}
+ */
+function formatCredits(value) {
+  if (!Number.isFinite(value)) return '';
+  return value.toFixed(2).replace(/\.?0+$/, '');
+}
+
+/**
+ * @param {{totalTokens?: number, totalCreditsCost?: number, stepsCount?: number, creditLimitExceeded?: boolean} | null} usage
+ * @returns {string}
+ */
+function formatUsageSummary(usage) {
+  if (!usage) return '';
+  const parts = [];
+  if (usage.totalTokens !== undefined) parts.push(`${numberWithCommas(usage.totalTokens)} tokens`);
+  if (usage.stepsCount !== undefined) parts.push(`${numberWithCommas(usage.stepsCount)} steps`);
+  if (usage.totalCreditsCost !== undefined) parts.push(`${formatCredits(usage.totalCreditsCost)} credits`);
+  if (usage.creditLimitExceeded) parts.push('credit limit exceeded');
+  return parts.join(' · ');
+}
+
+/**
  * @param {Record<string, string | undefined>} env
  * @param {import('./types').ActionContext} context
  * @param {Record<string, any>} latestSession
@@ -96,7 +142,8 @@ function buildLinks(env, context, latestSession, sessions) {
   const repoName = env.REPOSITORY_NAME || `${context.repo.owner}/${context.repo.repo}`;
   const agentId = env.AGENT_ID || '';
   const siteName = env.SITE_NAME || context.repo.repo;
-  const agentRunUrl = agentId ? `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}` : '';
+  const sessionId = latestSession && latestSession.id ? String(latestSession.id) : '';
+  const agentRunUrl = formatAgentRunUrl(siteName, agentId, sessionId);
   const deployUrl = env.AGENT_DEPLOY_URL || latestSession.deploy_url || '';
   const commitSha = env.AGENT_COMMIT_SHA || '';
   const prUrl = env.AGENT_PR_URL || '';
@@ -129,7 +176,9 @@ function renderResultComment({ env = process.env, context, outcome }) {
   const sessions = readSessions(agentId, env.RUNNER_TEMP);
   const latestSession = sessions.length > 0 ? sessions[sessions.length - 1] : null;
   const sessionId = latestSession && latestSession.id ? String(latestSession.id) : '';
-  const resultMarker = renderResultCommentMarker({ runnerId: agentId, sessionId });
+  const usage = usageFromSession(latestSession);
+  const usageSummary = formatUsageSummary(usage);
+  const resultMarker = renderResultCommentMarker({ runnerId: agentId, sessionId, usage });
   const sessionDataMap = buildSessionDataMap(env, sessions);
 
   if (!resultMarker || !latestSession) {
@@ -137,7 +186,7 @@ function renderResultComment({ env = process.env, context, outcome }) {
   }
 
   const siteName = env.SITE_NAME || context.repo.repo;
-  const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}`;
+  const agentRunUrl = formatAgentRunUrl(siteName, agentId, sessionId);
   const latestSessionState = String(latestSession.state || '').toLowerCase();
   const isFailure = outcome
     ? outcome === 'failure'
@@ -157,6 +206,7 @@ function renderResultComment({ env = process.env, context, outcome }) {
   const statusIcon = isFailure ? '❌' : '✅';
 
   let body = `### [Run #${runNumber} | ${model} | Agent Run ${isFailure ? 'failed' : 'completed'}](${agentRunUrl}) ${statusIcon}\n\n`;
+  if (usageSummary) body += `**Usage:** ${usageSummary}\n\n`;
   if (cleanPrompt) body += utils.formatPromptBlock(cleanPrompt, sourceUrl);
 
   if (isFailure) {
@@ -214,3 +264,5 @@ module.exports = async function generateResultComment({ context, core }) {
 module.exports.renderResultComment = renderResultComment;
 module.exports.cleanProse = cleanProse;
 module.exports.readSessions = readSessions;
+module.exports.usageFromSession = usageFromSession;
+module.exports.formatUsageSummary = formatUsageSummary;
