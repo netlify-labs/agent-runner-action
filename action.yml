@@ -1359,6 +1359,7 @@ runs:
         RESULT_BODY: ${{ steps.generate_success_comment.outputs.result-body || steps.generate_error_comment.outputs.result-body }}
         HISTORY_BODY: ${{ steps.generate_history_comment.outputs.comment-body }}
         STATUS_COMMENT_ID: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
+        RESULT_COMMENT_ID: ${{ steps.post_result_comment.outputs.result-comment-id }}
         BOT_LOGIN: ${{ steps.bot-identity.outputs.login }}
       with:
         github-token: ${{ inputs.github-token }}

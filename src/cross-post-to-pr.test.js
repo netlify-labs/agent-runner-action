@@ -65,6 +65,7 @@ describe('crossPostToPR', () => {
       STATUS_COMMENT_MARKER,
     ].join('\n');
     process.env.STATUS_COMMENT_ID = '55';
+    process.env.RESULT_COMMENT_ID = '66';
     process.env.BOT_LOGIN = 'github-actions[bot]';
     process.env.SESSION_DATA_MAP = '{}';
 
@@ -77,12 +78,20 @@ describe('crossPostToPR', () => {
     assert.ok(created[1].body.includes(HISTORY_COMMENT_MARKER));
     assert.equal(created[2].issue_number, 7);
     assert.equal(created[2].body, resultBody);
-    assert.equal(updated.length, 3);
+    assert.equal(updated.length, 4);
     assert.ok(updated[0].body.includes('https://github.com/netlify-labs/agent-runner-action-example/issues/7#issuecomment-103'));
     assert.ok(updated[0].body.includes(STATUS_COMMENT_MARKER));
     assert.ok(updated[1].body.includes(HISTORY_COMMENT_MARKER));
     assert.ok(updated[2].body.includes('issues/1#issuecomment-55'));
     assert.ok(updated[2].body.includes('Leave follow-up `@netlify` prompts on PR #7'));
+    const resultUpdate = updated.find(update => update.comment_id === 66);
+    assert.ok(resultUpdate, 'expected issue result comment to be updated');
+    assert.ok(resultUpdate.body.includes('A Pull Request was opened for this here #7'));
+    assert.ok(resultUpdate.body.includes('Leave follow-up `@netlify` prompts on PR #7'));
+    const headerIdx = resultUpdate.body.indexOf('### [Run #1');
+    const noteIdx = resultUpdate.body.indexOf('> [!NOTE]');
+    const promptIdx = resultUpdate.body.indexOf('Result\n');
+    assert.ok(headerIdx < noteIdx && noteIdx < promptIdx, 'note must sit between header and prompt');
   });
 
   it('updates existing PR-local status and history comments on follow-up cross-posts', async () => {

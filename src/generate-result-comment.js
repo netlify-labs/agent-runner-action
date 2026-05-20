@@ -112,6 +112,7 @@ function buildLinks(env, context, latestSession, sessions) {
     links.push(`[Code Changes](https://github.com/${repoName}/commit/${commitSha})`);
   }
   if (ghActionUrl) links.push(`[Action logs](${ghActionUrl})`);
+  if (prUrl) links.push(`[Pull Request](${prUrl})`);
   return links;
 }
 

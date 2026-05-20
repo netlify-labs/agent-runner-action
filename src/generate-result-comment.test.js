@@ -65,6 +65,7 @@ describe('renderResultComment', () => {
     assert.ok(rendered.resultBody.includes('**Prompt:**'));
     assert.ok(rendered.resultBody.includes('### Result: Updated homepage'));
     assert.ok(rendered.resultBody.includes('[Code Changes]'));
+    assert.ok(rendered.resultBody.includes('[Pull Request](https://github.com/netlify-labs/agent-runner-action-example/pull/5)'));
     assert.ok(rendered.resultBody.includes(RESULT_COMMENT_MARKER_PREFIX));
     assert.deepEqual(parseResultCommentIdentifiers(rendered.resultBody), {
       runnerId: 'runner_1',

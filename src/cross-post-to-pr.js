@@ -232,6 +232,24 @@ module.exports = async function crossPostToPR({ github, context }) {
     });
     console.log(`Updated issue comment with redirect to PR #${prNumber}`);
   }
+
+  // Update issue result comment with the same redirect note so readers landing
+  // on the run that opened the PR see the pointer too.
+  const issueResultCommentId = process.env.RESULT_COMMENT_ID || '';
+  if (issueResultCommentId && resultBody) {
+    try {
+      const noteBody = insertRedirectNote(resultBody, prNumber, agentRunUrl);
+      await github.rest.issues.updateComment({
+        owner, repo, comment_id: parseInt(issueResultCommentId), body: noteBody
+      });
+      console.log(`Updated issue result comment with redirect to PR #${prNumber}`);
+    } catch (error) {
+      const message = error && typeof error === 'object' && 'message' in error
+        ? String(error.message)
+        : String(error);
+      console.warn(`Unable to update issue result comment with redirect: ${message}`);
+    }
+  }
 };
 
 module.exports.insertRedirectNote = insertRedirectNote;
