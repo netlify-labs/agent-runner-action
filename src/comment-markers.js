@@ -27,7 +27,7 @@ const SESSION_URL_ALLOWLIST = {
   gh_action_url: /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/\d+(?:[/?#].*)?$/,
   screenshot:    /^https:\/\/(?:[A-Za-z0-9-]+\.)*(?:netlify\.app|netlifyusercontent\.com|app\.netlify\.com|api\.netlify\.com)\/[^\s]*$/i,
 };
-const AGENT_RUN_URL_PATTERN = /https:\/\/app\.netlify\.com\/projects\/([A-Za-z0-9_.-]+)\/agent-runs\/([A-Za-z0-9_-]{1,128})(?=$|[\s)\]>}.,!?])/g;
+const AGENT_RUN_URL_PATTERN = /https:\/\/app\.netlify\.com\/projects\/([A-Za-z0-9_.-]+)\/agent-runs\/([A-Za-z0-9_-]{1,128})(?:\?session=([A-Za-z0-9_-]{1,128}))?(?=$|[\s)\]>}.,!?])/g;
 // 4 covers git's minimum unique-prefix display; 64 covers full SHA-256.
 const COMMIT_SHA_FORMAT = /^[0-9a-f]{4,64}$/i;
 const SESSION_FIELD_MAX_LENGTH = 2048;
@@ -138,6 +138,19 @@ function normalizeResultUsage(usage) {
   }
 
   return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * @param {string} siteName
+ * @param {string} runnerId
+ * @param {string} [sessionId]
+ * @returns {string}
+ */
+function formatAgentRunUrl(siteName, runnerId, sessionId = '') {
+  if (!siteName || !RUNNER_ID_FORMAT.test(runnerId)) return '';
+  const base = `https://app.netlify.com/projects/${siteName}/agent-runs/${runnerId}`;
+  if (!RUNNER_ID_FORMAT.test(sessionId)) return base;
+  return `${base}?session=${encodeURIComponent(sessionId)}`;
 }
 
 /**
@@ -364,7 +377,7 @@ function parseAgentRunReference(body) {
     if (!RUNNER_ID_FORMAT.test(runnerId)) continue;
     return {
       runnerId,
-      agentRunUrl: `https://app.netlify.com/projects/${siteName}/agent-runs/${runnerId}`,
+      agentRunUrl: formatAgentRunUrl(siteName, runnerId),
     };
   }
 
@@ -413,6 +426,7 @@ module.exports = {
   RESULT_COMMENT_MARKER_NAME,
   RUNNER_ID_FORMAT,
   normalizeResultUsage,
+  formatAgentRunUrl,
   renderRunnerIdMarker,
   parseRunnerId,
   renderResultCommentMarker,

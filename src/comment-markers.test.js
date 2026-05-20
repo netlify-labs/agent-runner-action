@@ -291,6 +291,17 @@ describe('parseLinkedPrReference', () => {
 });
 
 describe('parseAgentRunReference', () => {
+  it('formats session-specific Netlify agent run URLs', () => {
+    assert.equal(
+      markers.formatAgentRunUrl('site-a', 'runner_123', 'session-456'),
+      'https://app.netlify.com/projects/site-a/agent-runs/runner_123?session=session-456'
+    );
+    assert.equal(
+      markers.formatAgentRunUrl('site-a', 'runner_123', 'bad/session'),
+      'https://app.netlify.com/projects/site-a/agent-runs/runner_123'
+    );
+  });
+
   it('extracts bare Netlify agent run URLs from out-of-band PR bodies', () => {
     assert.deepEqual(
       markers.parseAgentRunReference('🔗 **View agent run:** https://app.netlify.com/projects/gmail-emailer/agent-runs/6a0bd975b0decdb25b6b3a23'),
@@ -304,6 +315,16 @@ describe('parseAgentRunReference', () => {
   it('extracts markdown-linked Netlify agent run URLs', () => {
     assert.deepEqual(
       markers.parseAgentRunReference('[Agent run](https://app.netlify.com/projects/site-a/agent-runs/runner_123)'),
+      {
+        runnerId: 'runner_123',
+        agentRunUrl: 'https://app.netlify.com/projects/site-a/agent-runs/runner_123',
+      }
+    );
+  });
+
+  it('extracts runner references from session-specific Netlify agent run URLs', () => {
+    assert.deepEqual(
+      markers.parseAgentRunReference('[Agent run](https://app.netlify.com/projects/site-a/agent-runs/runner_123?session=session-456)'),
       {
         runnerId: 'runner_123',
         agentRunUrl: 'https://app.netlify.com/projects/site-a/agent-runs/runner_123',

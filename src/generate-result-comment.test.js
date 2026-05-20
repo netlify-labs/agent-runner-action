@@ -68,6 +68,7 @@ describe('renderResultComment', () => {
     });
 
     assert.ok(rendered.resultBody.includes('### [Run #1 | codex | Agent Run completed]'));
+    assert.ok(rendered.resultBody.includes('https://app.netlify.com/projects/site/agent-runs/runner_1?session=session_1'));
     assert.ok(rendered.resultBody.includes('**Usage:** 661,381 tokens · 46 steps · 145.98 credits'));
     assert.ok(rendered.resultBody.includes('**Prompt:**'));
     assert.ok(rendered.resultBody.includes('### Result: Updated homepage'));

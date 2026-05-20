@@ -7,6 +7,7 @@ const { classifyFailure } = require('./failure-taxonomy');
 const {
   renderResultCommentMarker,
   normalizeResultUsage,
+  formatAgentRunUrl,
   assertNoStateMarkers,
   stripAllHtmlComments,
 } = require('./comment-markers');
@@ -141,7 +142,8 @@ function buildLinks(env, context, latestSession, sessions) {
   const repoName = env.REPOSITORY_NAME || `${context.repo.owner}/${context.repo.repo}`;
   const agentId = env.AGENT_ID || '';
   const siteName = env.SITE_NAME || context.repo.repo;
-  const agentRunUrl = agentId ? `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}` : '';
+  const sessionId = latestSession && latestSession.id ? String(latestSession.id) : '';
+  const agentRunUrl = formatAgentRunUrl(siteName, agentId, sessionId);
   const deployUrl = env.AGENT_DEPLOY_URL || latestSession.deploy_url || '';
   const commitSha = env.AGENT_COMMIT_SHA || '';
   const prUrl = env.AGENT_PR_URL || '';
@@ -184,7 +186,7 @@ function renderResultComment({ env = process.env, context, outcome }) {
   }
 
   const siteName = env.SITE_NAME || context.repo.repo;
-  const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${agentId}`;
+  const agentRunUrl = formatAgentRunUrl(siteName, agentId, sessionId);
   const latestSessionState = String(latestSession.state || '').toLowerCase();
   const isFailure = outcome
     ? outcome === 'failure'
