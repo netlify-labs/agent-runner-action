@@ -304,7 +304,7 @@ jobs:
     <tr><th>Input</th><th>Required</th><th>Default</th><th>Description</th></tr>
     <tr><td><code>netlify-auth-token</code></td><td>Yes</td><td>&mdash;</td><td>Netlify personal access token</td></tr>
     <tr><td><code>netlify-site-id</code></td><td>Yes</td><td>&mdash;</td><td>Netlify site ID</td></tr>
-    <tr><td><code>netlify-filter</code></td><td>No</td><td><code>''</code></td><td>Netlify CLI monorepo app filter (<code>--filter</code>)</td></tr>
+    <tr><td><code>netlify-filter</code></td><td>No</td><td>auto-detect</td><td>Netlify CLI monorepo app filter (<code>--filter</code>). Overrides auto-detection from a single <code>netlify.toml</code> build command filter.</td></tr>
     <tr><td><code>github-token</code></td><td>No</td><td><code>github.token</code></td><td>GitHub token for API calls</td></tr>
     <tr><td><code>allowed-users</code></td><td>No</td><td><code>''</code></td><td>Comma-separated usernames allowed to trigger</td></tr>
     <tr><td><code>default-agent</code></td><td>No</td><td><code>codex</code></td><td>Default agent (<code>claude</code>, <code>codex</code>, <code>gemini</code>)</td></tr>

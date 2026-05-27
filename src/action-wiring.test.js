@@ -258,10 +258,24 @@ describe('action.yml wiring', () => {
       .find(block => block.includes('- name: Run Netlify Agent Runners'));
     assert.ok(runBlock, 'Run Netlify Agent Runners step should exist');
     assert.match(runBlock, /NETLIFY_FILTER:\s+\$\{\{\s*inputs\.netlify-filter\s*\}\}/);
+    assert.match(runBlock, /RESOLVED_NETLIFY_FILTER="\$\{NETLIFY_FILTER:-\}"/);
     assert.match(runBlock, /NETLIFY_FILTER_ARGS=\(\)/);
-    assert.match(runBlock, /NETLIFY_FILTER_ARGS=\(--filter "\$NETLIFY_FILTER"\)/);
+    assert.match(runBlock, /NETLIFY_FILTER_ARGS=\(--filter "\$RESOLVED_NETLIFY_FILTER"\)/);
     assert.match(runBlock, /netlify agents:create "\$TRIGGER_TEXT" "\$\{AGENT_ARGS\[@\]\}" "\$\{NETLIFY_FILTER_ARGS\[@\]\}"/);
     assert.match(runBlock, /netlify agents:show "\$AGENT_ID" --json "\$\{NETLIFY_FILTER_ARGS\[@\]\}"/);
+  });
+
+  it('auto-detects a single Netlify monorepo filter from netlify.toml build commands', () => {
+    const runBlock = extractStepBlocks(actionYml)
+      .find(block => block.includes('- name: Run Netlify Agent Runners'));
+    assert.ok(runBlock, 'Run Netlify Agent Runners step should exist');
+    assert.match(runBlock, /findNetlifyConfigPaths/);
+    assert.match(runBlock, /entry\.name === 'netlify\.toml'/);
+    assert.match(runBlock, /readNetlifyBuildCommand/);
+    assert.match(runBlock, /inferNetlifyFilterFromCommand/);
+    assert.match(runBlock, /word === '--filter' \|\| word === '-F'/);
+    assert.match(runBlock, /uniqueFilters\.length === 1/);
+    assert.match(runBlock, /auto-detected from \$RESOLVED_NETLIFY_FILTER_SOURCE/);
   });
 
   it('has at least the expected outputs', () => {
