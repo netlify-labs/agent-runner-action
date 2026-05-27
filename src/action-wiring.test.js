@@ -257,8 +257,8 @@ describe('action.yml wiring', () => {
     const runBlock = extractStepBlocks(actionYml)
       .find(block => block.includes('- name: Run Netlify Agent Runners'));
     assert.ok(runBlock, 'Run Netlify Agent Runners step should exist');
-    assert.match(runBlock, /NETLIFY_FILTER:\s+\$\{\{\s*inputs\.netlify-filter\s*\}\}/);
-    assert.match(runBlock, /RESOLVED_NETLIFY_FILTER="\$\{NETLIFY_FILTER:-\}"/);
+    assert.match(runBlock, /RESOLVED_NETLIFY_FILTER:\s+\$\{\{\s*steps\.resolve-netlify-filter\.outputs\.filter\s*\}\}/);
+    assert.match(runBlock, /RESOLVED_NETLIFY_FILTER_SOURCE:\s+\$\{\{\s*steps\.resolve-netlify-filter\.outputs\.source\s*\}\}/);
     assert.match(runBlock, /NETLIFY_FILTER_ARGS=\(\)/);
     assert.match(runBlock, /NETLIFY_FILTER_ARGS=\(--filter "\$RESOLVED_NETLIFY_FILTER"\)/);
     assert.match(runBlock, /netlify agents:create "\$TRIGGER_TEXT" "\$\{AGENT_ARGS\[@\]\}" "\$\{NETLIFY_FILTER_ARGS\[@\]\}"/);
@@ -266,15 +266,16 @@ describe('action.yml wiring', () => {
   });
 
   it('auto-detects a single Netlify monorepo filter from netlify.toml build commands', () => {
+    const resolveBlock = extractStepBlocks(actionYml)
+      .find(block => block.includes('- name: Resolve Netlify app filter'));
     const runBlock = extractStepBlocks(actionYml)
       .find(block => block.includes('- name: Run Netlify Agent Runners'));
+    assert.ok(resolveBlock, 'Resolve Netlify app filter step should exist');
     assert.ok(runBlock, 'Run Netlify Agent Runners step should exist');
-    assert.match(runBlock, /findNetlifyConfigPaths/);
-    assert.match(runBlock, /entry\.name === 'netlify\.toml'/);
-    assert.match(runBlock, /readNetlifyBuildCommand/);
-    assert.match(runBlock, /inferNetlifyFilterFromCommand/);
-    assert.match(runBlock, /word === '--filter' \|\| word === '-F'/);
-    assert.match(runBlock, /uniqueFilters\.length === 1/);
+    assert.match(resolveBlock, /NETLIFY_FILTER:\s+\$\{\{\s*inputs\.netlify-filter\s*\}\}/);
+    assert.match(resolveBlock, /node "\$ACTION_DIR\/src\/netlify-filter\.js"/);
+    assert.match(resolveBlock, /--project-root "\$GITHUB_WORKSPACE"/);
+    assert.match(resolveBlock, /--filter "\$\{NETLIFY_FILTER:-\}"/);
     assert.match(runBlock, /auto-detected from \$RESOLVED_NETLIFY_FILTER_SOURCE/);
   });
 

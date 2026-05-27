@@ -779,7 +779,24 @@ runs:
           });
 
     # -----------------------------------------------------------------------
-    # 13. Run Netlify Agent Runners (create an agent run, poll for completion)
+    # 13. Resolve Netlify monorepo app filter.
+    #     Explicit netlify-filter input wins; otherwise infer one unambiguous
+    #     filter from netlify.toml build commands.
+    # -----------------------------------------------------------------------
+    - name: Resolve Netlify app filter
+      id: resolve-netlify-filter
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
+      shell: bash
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        NETLIFY_FILTER: ${{ inputs.netlify-filter }}
+      run: |
+        node "$ACTION_DIR/src/netlify-filter.js" \
+          --project-root "$GITHUB_WORKSPACE" \
+          --filter "${NETLIFY_FILTER:-}"
+
+    # -----------------------------------------------------------------------
+    # 14. Run Netlify Agent Runners (create an agent run, poll for completion)
     #     Dry-run mode skips PR creation and commits.
     # -----------------------------------------------------------------------
     - name: Run Netlify Agent Runners
@@ -789,7 +806,8 @@ runs:
       env:
         NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
         NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
-        NETLIFY_FILTER: ${{ inputs.netlify-filter }}
+        RESOLVED_NETLIFY_FILTER: ${{ steps.resolve-netlify-filter.outputs.filter }}
+        RESOLVED_NETLIFY_FILTER_SOURCE: ${{ steps.resolve-netlify-filter.outputs.source }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
         NETLIFY_AGENT: ${{ steps.context-info.outputs.agent || steps.context-info.outputs.model }}
@@ -847,152 +865,8 @@ runs:
         SELECTED_AGENT="${NETLIFY_AGENT:-${AGENT_MODEL:-codex}}"
         echo "Agent: $SELECTED_AGENT | Site: ${SITE_NAME:-unknown} | Dry-run: ${IS_DRY_RUN:-false}"
 
-        RESOLVED_NETLIFY_FILTER="${NETLIFY_FILTER:-}"
-        RESOLVED_NETLIFY_FILTER_SOURCE="input"
-        if [ -z "$RESOLVED_NETLIFY_FILTER" ]; then
-          NETLIFY_FILTER_DISCOVERY=$(node <<'NODE'
-        const { spawnSync } = require('node:child_process');
-        const fs = require('node:fs');
-        const path = require('node:path');
-
-        const root = process.cwd();
-        const skipDirs = new Set([
-          '.git',
-          '.netlify',
-          '.nax',
-          '.next',
-          '.nuxt',
-          '.output',
-          '.vercel',
-          'build',
-          'coverage',
-          'dist',
-          'node_modules',
-        ]);
-
-        function shellWords(value) {
-          const words = [];
-          let current = '';
-          let quote = '';
-          let escaped = false;
-          for (const char of String(value || '')) {
-            if (escaped) {
-              current += char;
-              escaped = false;
-              continue;
-            }
-            if (char === '\\') {
-              escaped = true;
-              continue;
-            }
-            if (quote) {
-              if (char === quote) quote = '';
-              else current += char;
-              continue;
-            }
-            if (char === '"' || char === "'") {
-              quote = char;
-              continue;
-            }
-            if (/\s/.test(char)) {
-              if (current) {
-                words.push(current);
-                current = '';
-              }
-              continue;
-            }
-            current += char;
-          }
-          if (current) words.push(current);
-          return words;
-        }
-
-        function readNetlifyBuildCommand(configPath) {
-          if (!fs.existsSync(configPath)) return '';
-          const text = fs.readFileSync(configPath, 'utf8');
-          const buildMatch = text.match(/(?:^|\n)\s*\[build]\s*\n([\s\S]*?)(?=\n\s*\[[^\]]+]\s*(?:\n|$)|$)/);
-          const buildBlock = buildMatch ? buildMatch[1] : text;
-          const commandMatch = buildBlock.match(/(?:^|\n)\s*command\s*=\s*(["'])([\s\S]*?)\1/);
-          return commandMatch ? commandMatch[2] : '';
-        }
-
-        function inferNetlifyFilterFromCommand(command) {
-          const filters = [];
-          const words = shellWords(command);
-          for (let index = 0; index < words.length; index += 1) {
-            const word = words[index];
-            if (word === '--filter' || word === '-F') {
-              if (words[index + 1]) filters.push(words[index + 1]);
-              index += 1;
-              continue;
-            }
-            if (word.startsWith('--filter=')) {
-              const value = word.slice('--filter='.length);
-              if (value) filters.push(value);
-            }
-          }
-          const unique = [...new Set(filters)];
-          return unique.length === 1 ? unique[0] : '';
-        }
-
-        function filterOutGitignored(paths) {
-          if (!paths.length) return paths;
-          const result = spawnSync('git', ['check-ignore', '--stdin', '-z'], {
-            cwd: root,
-            input: Buffer.from(paths.join('\0') + '\0'),
-            timeout: 5000,
-          });
-          if (result.error || (result.status !== 0 && result.status !== 1)) return paths;
-          const ignored = new Set((result.stdout || Buffer.alloc(0)).toString('utf8').split('\0').filter(Boolean));
-          return paths.filter((candidate) => !ignored.has(candidate));
-        }
-
-        function findNetlifyConfigPaths(dir, depth = 0, configs = []) {
-          if (depth > 6) return configs;
-          let entries = [];
-          try {
-            entries = fs.readdirSync(dir, { withFileTypes: true });
-          } catch {
-            return configs;
-          }
-          entries.sort((a, b) => a.name.localeCompare(b.name));
-          for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            if (entry.isFile() && entry.name === 'netlify.toml') {
-              configs.push(fullPath);
-              continue;
-            }
-            if (!entry.isDirectory()) continue;
-            if (skipDirs.has(entry.name) || entry.name.startsWith('.')) continue;
-            findNetlifyConfigPaths(fullPath, depth + 1, configs);
-          }
-          return configs;
-        }
-
-        const matches = filterOutGitignored(findNetlifyConfigPaths(root))
-          .map((configPath) => ({
-            source: path.relative(root, configPath) || 'netlify.toml',
-            filter: inferNetlifyFilterFromCommand(readNetlifyBuildCommand(configPath)),
-          }))
-          .filter((candidate) => candidate.filter);
-        const uniqueFilters = [...new Set(matches.map((candidate) => candidate.filter))];
-        if (uniqueFilters.length === 1) {
-          const source = matches.find((candidate) => candidate.filter === uniqueFilters[0])?.source || 'netlify.toml';
-          console.log(`${uniqueFilters[0]}\t${source}`);
-        }
-        NODE
-          )
-          if [[ "$NETLIFY_FILTER_DISCOVERY" == *$'\t'* ]]; then
-            RESOLVED_NETLIFY_FILTER="${NETLIFY_FILTER_DISCOVERY%%$'\t'*}"
-            RESOLVED_NETLIFY_FILTER_SOURCE="${NETLIFY_FILTER_DISCOVERY#*$'\t'}"
-          else
-            RESOLVED_NETLIFY_FILTER=""
-            RESOLVED_NETLIFY_FILTER_SOURCE=""
-          fi
-        fi
-
         NETLIFY_FILTER_ARGS=()
-        if [ -n "$RESOLVED_NETLIFY_FILTER" ]; then
+        if [ -n "${RESOLVED_NETLIFY_FILTER:-}" ]; then
           NETLIFY_FILTER_ARGS=(--filter "$RESOLVED_NETLIFY_FILTER")
           if [ "$RESOLVED_NETLIFY_FILTER_SOURCE" = "input" ]; then
             echo "Netlify app filter: $RESOLVED_NETLIFY_FILTER"
