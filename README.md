@@ -93,6 +93,7 @@ jobs:
         with:
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
+          # netlify-filter: ${{ vars.NETLIFY_FILTER }} # for Netlify monorepo sites
 ```
 
 ### 4. Trigger a run
@@ -112,6 +113,7 @@ Or comment `@netlify make it blue` on an existing PR.
 |---|---|---|---|
 | `netlify-auth-token` | Yes | — | Netlify personal access token |
 | `netlify-site-id` | Yes | — | Netlify site ID |
+| `netlify-filter` | No | `''` | Netlify CLI monorepo app filter (`--filter`) |
 | `github-token` | No | `github.token` | GitHub token for API calls |
 | `allowed-users` | No | `''` | Comma-separated usernames allowed to trigger (empty = repo collaborators) |
 | `default-agent` | No | `codex` | Default agent (`claude`, `codex`, or `gemini`) |
@@ -153,6 +155,7 @@ If `preflight-only` fails, inspect `preflight-summary` and `preflight-json` outp
 
 - `netlify-auth-token` is present and valid
 - `netlify-site-id` matches a site your token can access
+- `netlify-filter` is set in the workflow when the Netlify site contains multiple monorepo apps
 - `default-agent` selects one of the supported agents: `claude`, `codex`, or `gemini`
 - `default-model` remains supported as a backward-compatible alias
 - `timeout-minutes` is a positive integer

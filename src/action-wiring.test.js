@@ -239,6 +239,7 @@ describe('action.yml wiring', () => {
     const expected = [
       'netlify-auth-token',
       'netlify-site-id',
+      'netlify-filter',
       'github-token',
       'default-agent',
       'default-model',
@@ -250,6 +251,17 @@ describe('action.yml wiring', () => {
     for (const name of expected) {
       assert.ok(inputs.has(name), `Missing expected input: ${name}`);
     }
+  });
+
+  it('passes the Netlify monorepo filter to CLI agent commands', () => {
+    const runBlock = extractStepBlocks(actionYml)
+      .find(block => block.includes('- name: Run Netlify Agent Runners'));
+    assert.ok(runBlock, 'Run Netlify Agent Runners step should exist');
+    assert.match(runBlock, /NETLIFY_FILTER:\s+\$\{\{\s*inputs\.netlify-filter\s*\}\}/);
+    assert.match(runBlock, /NETLIFY_FILTER_ARGS=\(\)/);
+    assert.match(runBlock, /NETLIFY_FILTER_ARGS=\(--filter "\$NETLIFY_FILTER"\)/);
+    assert.match(runBlock, /netlify agents:create "\$TRIGGER_TEXT" "\$\{AGENT_ARGS\[@\]\}" "\$\{NETLIFY_FILTER_ARGS\[@\]\}"/);
+    assert.match(runBlock, /netlify agents:show "\$AGENT_ID" --json "\$\{NETLIFY_FILTER_ARGS\[@\]\}"/);
   });
 
   it('has at least the expected outputs', () => {

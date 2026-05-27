@@ -14,6 +14,10 @@ inputs:
   netlify-site-id:
     description: 'Netlify site ID (NETLIFY_SITE_ID)'
     required: true
+  netlify-filter:
+    description: 'Netlify CLI monorepo app filter (--filter), for sites with multiple apps'
+    required: false
+    default: ''
   github-token:
     description: 'GitHub token for API calls (defaults to GITHUB_TOKEN)'
     required: false
@@ -785,6 +789,7 @@ runs:
       env:
         NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
         NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
+        NETLIFY_FILTER: ${{ inputs.netlify-filter }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
         NETLIFY_AGENT: ${{ steps.context-info.outputs.agent || steps.context-info.outputs.model }}
@@ -842,6 +847,12 @@ runs:
         SELECTED_AGENT="${NETLIFY_AGENT:-${AGENT_MODEL:-codex}}"
         echo "Agent: $SELECTED_AGENT | Site: ${SITE_NAME:-unknown} | Dry-run: ${IS_DRY_RUN:-false}"
 
+        NETLIFY_FILTER_ARGS=()
+        if [ -n "${NETLIFY_FILTER:-}" ]; then
+          NETLIFY_FILTER_ARGS=(--filter "$NETLIFY_FILTER")
+          echo "Netlify app filter: $NETLIFY_FILTER"
+        fi
+
         # Build agent args
         AGENT_ARGS=(--json --agent "$SELECTED_AGENT")
         if [ -n "${HEAD_BRANCH:-}" ]; then
@@ -887,7 +898,7 @@ runs:
         else
           echo "📡 Creating new agent run..."
           AGENT_STDERR=$(mktemp)
-          AGENT_OUTPUT=$(netlify agents:create "$TRIGGER_TEXT" "${AGENT_ARGS[@]}" 2>"$AGENT_STDERR" || true)
+          AGENT_OUTPUT=$(netlify agents:create "$TRIGGER_TEXT" "${AGENT_ARGS[@]}" "${NETLIFY_FILTER_ARGS[@]}" 2>"$AGENT_STDERR" || true)
           debug_log "agents:create" "$AGENT_OUTPUT"
           AGENT_ID=$(echo "$AGENT_OUTPUT" | jq -r '.id // empty' 2>/dev/null || true)
           if [ -z "$AGENT_ID" ]; then
@@ -931,7 +942,7 @@ runs:
         ELAPSED=$INITIAL_WAIT
 
         while [ $ELAPSED -lt $MAX_WAIT ]; do
-          AGENT_RESULT=$(netlify agents:show "$AGENT_ID" --json 2>/dev/null || true)
+          AGENT_RESULT=$(netlify agents:show "$AGENT_ID" --json "${NETLIFY_FILTER_ARGS[@]}" 2>/dev/null || true)
           STATE=$(echo "$AGENT_RESULT" | jq -r '.state // empty' 2>/dev/null)
           echo "  [$ELAPSED/${MAX_WAIT}s] Status: ${STATE:-unknown}"
           debug_log "agents:show (poll $ELAPSED)" "$AGENT_RESULT"
@@ -973,7 +984,7 @@ runs:
               echo "outcome=success" >> $GITHUB_OUTPUT
 
               # Re-fetch runner
-              AGENT_RESULT=$(netlify agents:show "$AGENT_ID" --json 2>/dev/null || true)
+              AGENT_RESULT=$(netlify agents:show "$AGENT_ID" --json "${NETLIFY_FILTER_ARGS[@]}" 2>/dev/null || true)
               debug_log "agents:show (post-completion)" "$AGENT_RESULT"
 
               # Validate deploy URL
