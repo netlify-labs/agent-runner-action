@@ -66,10 +66,12 @@ module.exports = async function generateHistoryComment({ context, core }) {
       if (ghUrl) message += `[GitHub Action logs](${ghUrl})\n\n`;
     } else {
       const title = session.title || '';
-      if (screenshot && deployUrl) {
-        message += `<a href="${deployUrl}"><img src="${screenshot}" alt="Preview" width="180" align="right"></a>`;
+      const safeDeployUrl = utils.safeHttpUrl(deployUrl);
+      const safeScreenshot = utils.safeHttpUrl(screenshot);
+      if (safeScreenshot && safeDeployUrl) {
+        message += `<a href="${utils.escapeAttr(safeDeployUrl)}"><img src="${utils.escapeAttr(safeScreenshot)}" alt="Preview" width="180" align="right"></a>`;
       }
-      message += `✅ \`${runHeader}\`\n\n${title}\n\n`;
+      message += `✅ \`${runHeader}\`\n\n${utils.escapeMarkdownLinks(title)}\n\n`;
       if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt, sourceUrl);
       const commitSha = data.commit_sha || '';
       const prUrl = data.pr_url || '';

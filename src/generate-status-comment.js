@@ -132,13 +132,13 @@ function renderStatusComment({ env = process.env, context, outcome }) {
   const subtitle = statusLine;
   const runLine = `Run #${runNumber} | ${model} | ${isFailure ? 'failed' : 'completed'} at ${timestamp}`;
 
-  const deployUrl = env.AGENT_DEPLOY_URL || (latestSession && latestSession.deploy_url) || '';
-  const screenshotUrl = env.AGENT_SCREENSHOT_URL || '';
+  const deployUrl = utils.safeHttpUrl(env.AGENT_DEPLOY_URL || (latestSession && latestSession.deploy_url) || '');
+  const screenshotUrl = utils.safeHttpUrl(env.AGENT_SCREENSHOT_URL || '');
   const screenshot = screenshotUrl && deployUrl
-    ? `<a href="${deployUrl}"><img src="${screenshotUrl}" alt="Preview" width="180" align="right"></a>`
+    ? `<a href="${utils.escapeAttr(deployUrl)}"><img src="${utils.escapeAttr(screenshotUrl)}" alt="Preview" width="180" align="right"></a>`
     : '';
 
-  let statusTitle = title ? `${runLine}\n\n**Prompt summary:** ${title}` : runLine;
+  let statusTitle = title ? `${runLine}\n\n**Prompt summary:** ${utils.escapeMarkdownLinks(title)}` : runLine;
   if (isFailure) {
     const failure = classifyFailure({
       category: env.FAILURE_CATEGORY || env.AGENT_FAILURE_CATEGORY || '',
