@@ -55,6 +55,10 @@ describe('detectFailureCategory', () => {
         signal: { stage: 'create-session', error: 'Failed to create follow-up session after 3 attempts' },
       },
       {
+        category: 'prompt-too-large',
+        signal: { stage: 'validate-env', error: 'An error occurred trying to start process node. Argument list too long' },
+      },
+      {
         category: 'agent-timeout',
         signal: { outcome: 'timeout', error: 'Agent timed out after 600s' },
       },
@@ -164,6 +168,13 @@ describe('classifyFailure', () => {
         category: 'session-create-failed',
         retryable: true,
         userActionRequired: false,
+      },
+      {
+        name: 'oversized prompt',
+        signal: { stage: 'validate-env', error: 'Prompt too large for Netlify Agent Runner GitHub Actions transport' },
+        category: 'prompt-too-large',
+        retryable: false,
+        userActionRequired: true,
       },
       {
         name: 'timeout',

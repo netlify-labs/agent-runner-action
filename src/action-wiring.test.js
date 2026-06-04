@@ -197,6 +197,31 @@ describe('action.yml wiring', () => {
     assert.match(actionYml, /Netlify site access confirmed/);
   });
 
+  it('guards oversized trigger text before Node-based preflight steps receive TRIGGER_TEXT', () => {
+    const guardIndex = actionYml.indexOf('- name: Check trigger text size');
+    const preflightIndex = actionYml.indexOf('- name: Run preflight checks');
+    assert.ok(guardIndex !== -1, 'Check trigger text size step should exist');
+    assert.ok(preflightIndex !== -1, 'Run preflight checks step should exist');
+    assert.ok(guardIndex < preflightIndex, 'Trigger text size guard must run before preflight');
+
+    const guardBlock = extractStepBlocks(actionYml)
+      .find(block => block.includes('- name: Check trigger text size'));
+    const preflightBlock = extractStepBlocks(actionYml)
+      .find(block => block.includes('- name: Run preflight checks'));
+    const preflightCommentBlock = extractStepBlocks(actionYml)
+      .find(block => block.includes('- name: Post preflight status comment'));
+
+    assert.ok(guardBlock, 'Guard block should exist');
+    assert.ok(preflightBlock, 'Preflight block should exist');
+    assert.ok(preflightCommentBlock, 'Preflight status comment block should exist');
+    assert.match(guardBlock, /SAFE_MAX_BYTES=120000/);
+    assert.match(guardBlock, /trigger-text-env-bytes/);
+    assert.match(guardBlock, /failure-category=prompt-too-large/);
+    assert.doesNotMatch(guardBlock, /env:\s*[\s\S]*TRIGGER_TEXT:/);
+    assert.match(preflightBlock, /steps\.trigger-text-size\.outputs\.safe != 'false'/);
+    assert.match(preflightCommentBlock, /steps\.trigger-text-size\.outputs\.preflight-json \|\| steps\.preflight\.outputs\.preflight-json/);
+  });
+
   it('fails the run when post-agent commit or PR creation fails', () => {
     assert.match(actionYml, /COMMIT_FAILURE=""/);
     assert.match(actionYml, /emit_failure_context "commit" "commit-to-branch-failed"/);
@@ -223,6 +248,27 @@ describe('action.yml wiring', () => {
     assert.match(errorCommentBlock, /always\(\)/);
     assert.match(errorCommentBlock, /FAILURE_CATEGORY:\s+\$\{\{\s*steps\.netlify-agent\.outputs\.failure-category/);
     assert.match(errorCommentBlock, /FAILURE_STAGE:\s+\$\{\{\s*steps\.netlify-agent\.outputs\.failure-stage/);
+  });
+
+  it('has a last-resort failure status update that does not depend on should-continue', () => {
+    const postStatusBlock = extractStepBlocks(actionYml)
+      .find(block => block.includes('- name: Post or update status comment'));
+    const fallbackBlock = extractStepBlocks(actionYml)
+      .find(block => block.includes('- name: Fallback status update'));
+
+    assert.ok(postStatusBlock, 'Post or update status comment step should exist');
+    assert.ok(fallbackBlock, 'Fallback status update step should exist');
+    assert.match(postStatusBlock, /id:\s+post_status_comment/);
+    assert.match(fallbackBlock, /always\(\)/);
+    assert.match(fallbackBlock, /steps\.post_status_comment\.outcome != 'success'/);
+    assert.match(fallbackBlock, /steps\.netlify-agent\.outcome == 'failure'/);
+    assert.match(fallbackBlock, /steps\.trigger-text-size\.outputs\.safe == 'false'/);
+    assert.match(fallbackBlock, /steps\.preflight\.outcome == 'failure'/);
+    assert.match(fallbackBlock, /Netlify Agent Runner GitHub Action failed/);
+    assert.match(fallbackBlock, /GitHub Action logs/);
+    assert.match(fallbackBlock, /<!-- netlify-agent-run-status -->/);
+    assert.doesNotMatch(fallbackBlock, /steps\.should-continue\.outputs\.should-continue/);
+    assert.doesNotMatch(fallbackBlock, /TRIGGER_TEXT:/);
   });
 
   it('creates PR history placeholder before posting immutable result comments', () => {

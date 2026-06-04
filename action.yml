@@ -102,22 +102,22 @@ outputs:
     value: ${{ steps.context-info.outputs.is-dry-run }}
   preflight-ok:
     description: 'Whether preflight checks passed'
-    value: ${{ steps.preflight.outputs.preflight-ok }}
+    value: ${{ steps.trigger-text-size.outputs.preflight-ok || steps.preflight.outputs.preflight-ok }}
   preflight-json:
     description: 'Serialized preflight result payload'
-    value: ${{ steps.preflight.outputs.preflight-json }}
+    value: ${{ steps.trigger-text-size.outputs.preflight-json || steps.preflight.outputs.preflight-json }}
   preflight-summary:
     description: 'Human-readable preflight summary'
-    value: ${{ steps.preflight.outputs.preflight-summary }}
+    value: ${{ steps.trigger-text-size.outputs.preflight-summary || steps.preflight.outputs.preflight-summary }}
   should-continue:
     description: 'Whether workflow should continue into agent execution'
-    value: ${{ steps.should-continue.outputs.should-continue || steps.preflight.outputs.should-continue }}
+    value: ${{ steps.should-continue.outputs.should-continue || steps.trigger-text-size.outputs.should-continue || steps.preflight.outputs.should-continue }}
   failure-category:
     description: 'Failure category from preflight or runtime execution'
-    value: ${{ steps.netlify-agent.outputs.failure-category || steps.preflight.outputs.failure-category }}
+    value: ${{ steps.netlify-agent.outputs.failure-category || steps.trigger-text-size.outputs.failure-category || steps.preflight.outputs.failure-category }}
   failure-stage:
     description: 'Failure stage from preflight or runtime execution'
-    value: ${{ steps.netlify-agent.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
+    value: ${{ steps.netlify-agent.outputs.failure-stage || steps.trigger-text-size.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
   agent-error:
     description: 'Sanitized runtime agent error summary'
     value: ${{ steps.netlify-agent.outputs.agent-error }}
@@ -218,9 +218,91 @@ runs:
     # -----------------------------------------------------------------------
     # 4. Run preflight checks (static + practical runtime checks)
     # -----------------------------------------------------------------------
+    - name: Check trigger text size
+      id: trigger-text-size
+      if: steps.trigger-check.outputs.should-run == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        SAFE_MAX_BYTES=120000
+        WARN_BYTES=98304
+        ENV_PREFIX_BYTES=13
+        TRIGGER_TEXT_FILE="${RUNNER_TEMP:-/tmp}/netlify-agent-trigger-text.txt"
+
+        cat > "$TRIGGER_TEXT_FILE" <<'NETLIFY_AGENT_TRIGGER_TEXT_EOF'
+        ${{ steps.context-info.outputs.trigger-text }}
+        NETLIFY_AGENT_TRIGGER_TEXT_EOF
+
+        BODY_BYTES=$(wc -c < "$TRIGGER_TEXT_FILE" | tr -d '[:space:]')
+        ENV_BYTES=$((BODY_BYTES + ENV_PREFIX_BYTES))
+
+        {
+          echo "trigger-text-bytes=$BODY_BYTES"
+          echo "trigger-text-env-bytes=$ENV_BYTES"
+          echo "safe-max-bytes=$SAFE_MAX_BYTES"
+          echo "warning-bytes=$WARN_BYTES"
+        } >> "$GITHUB_OUTPUT"
+
+        if [ "$ENV_BYTES" -gt "$SAFE_MAX_BYTES" ]; then
+          SUMMARY="Prompt too large for Netlify Agent Runner GitHub Actions transport: ${BODY_BYTES} bytes (${ENV_BYTES} bytes as TRIGGER_TEXT env string), safe max ${SAFE_MAX_BYTES} bytes."
+          PREFLIGHT_JSON=$(jq -n \
+            --arg summary "$SUMMARY" \
+            --arg bodyBytes "$BODY_BYTES" \
+            --arg envBytes "$ENV_BYTES" \
+            --arg safeMaxBytes "$SAFE_MAX_BYTES" \
+            '{
+              ok: false,
+              checks: [{
+                id: "trigger-text-size",
+                status: "fail",
+                message: $summary
+              }],
+              warnings: [],
+              failures: ["prompt-too-large"],
+              failureDetails: [{
+                category: "prompt-too-large",
+                title: "Prompt is too large for the runner launch path",
+                summary: $summary,
+                remediation: [
+                  "Retry with a shorter prompt or link to supporting context instead of embedding it inline.",
+                  "For chained workflows, compact prior agent outputs before posting follow-up prompts."
+                ],
+                severity: "error",
+                retryable: false,
+                userActionRequired: true,
+                stage: "validate-env",
+                details: {
+                  bodyBytes: ($bodyBytes | tonumber),
+                  triggerTextEnvBytes: ($envBytes | tonumber),
+                  safeMaxBytes: ($safeMaxBytes | tonumber)
+                }
+              }]
+            }')
+          {
+            echo "safe=false"
+            echo "preflight-ok=false"
+            echo "should-continue=false"
+            echo "failure-category=prompt-too-large"
+            echo "failure-stage=validate-env"
+            echo "preflight-summary<<NETLIFY_AGENT_PREFLIGHT_SUMMARY"
+            echo "$SUMMARY"
+            echo "NETLIFY_AGENT_PREFLIGHT_SUMMARY"
+            echo "preflight-json<<NETLIFY_AGENT_PREFLIGHT_JSON"
+            echo "$PREFLIGHT_JSON"
+            echo "NETLIFY_AGENT_PREFLIGHT_JSON"
+          } >> "$GITHUB_OUTPUT"
+          echo "::error title=Prompt too large::$SUMMARY"
+        else
+          echo "safe=true" >> "$GITHUB_OUTPUT"
+          if [ "$ENV_BYTES" -gt "$WARN_BYTES" ]; then
+            echo "::warning title=Prompt close to runner limit::Prompt is ${ENV_BYTES} bytes as TRIGGER_TEXT env string; safe max is ${SAFE_MAX_BYTES} bytes."
+          fi
+        fi
+
     - name: Run preflight checks
       id: preflight
-      if: steps.trigger-check.outputs.should-run == 'true'
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.trigger-text-size.outputs.safe != 'false'
       uses: actions/github-script@v8
       env:
         ACTION_DIR: ${{ github.action_path }}
@@ -416,19 +498,19 @@ runs:
     - name: Post preflight status comment
       if: >-
         steps.trigger-check.outputs.should-run == 'true'
-        && steps.preflight.outputs.should-continue != 'true'
+        && (steps.trigger-text-size.outputs.safe == 'false' || steps.preflight.outputs.should-continue != 'true')
         && github.event_name != 'workflow_dispatch'
         && steps.context-info.outputs.issue-number != ''
       uses: actions/github-script@v8
       id: preflight-comment
       env:
-        PREFLIGHT_JSON: ${{ steps.preflight.outputs.preflight-json }}
-        PREFLIGHT_SUMMARY: ${{ steps.preflight.outputs.preflight-summary }}
+        PREFLIGHT_JSON: ${{ steps.trigger-text-size.outputs.preflight-json || steps.preflight.outputs.preflight-json }}
+        PREFLIGHT_SUMMARY: ${{ steps.trigger-text-size.outputs.preflight-summary || steps.preflight.outputs.preflight-summary }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
           const preflightOnly = '${{ inputs.preflight-only }}' === 'true';
-          const preflightOk = '${{ steps.preflight.outputs.preflight-ok }}' === 'true';
+          const preflightOk = '${{ steps.trigger-text-size.outputs.preflight-ok || steps.preflight.outputs.preflight-ok }}' === 'true';
           const summary = process.env.PREFLIGHT_SUMMARY || '';
           const existingCommentId = '${{ steps.find_comment.outputs.comment-id }}';
           const issueNumber = parseInt('${{ steps.context-info.outputs.issue-number }}', 10);
@@ -507,10 +589,10 @@ runs:
     # 7. Stop run on preflight failure
     # -----------------------------------------------------------------------
     - name: Fail on preflight failure
-      if: steps.trigger-check.outputs.should-run == 'true' && steps.preflight.outputs.preflight-ok != 'true'
+      if: steps.trigger-check.outputs.should-run == 'true' && (steps.trigger-text-size.outputs.safe == 'false' || steps.preflight.outputs.preflight-ok != 'true')
       shell: bash
       run: |
-        echo "::error title=Preflight failed::${{ steps.preflight.outputs.preflight-summary }}"
+        echo "::error title=Preflight failed::${{ steps.trigger-text-size.outputs.preflight-summary || steps.preflight.outputs.preflight-summary }}"
         exit 1
 
     # -----------------------------------------------------------------------
@@ -521,7 +603,7 @@ runs:
       if: steps.trigger-check.outputs.should-run == 'true'
       shell: bash
       run: |
-        PREFLIGHT_CONTINUE="${{ steps.preflight.outputs.should-continue }}"
+        PREFLIGHT_CONTINUE="${{ steps.trigger-text-size.outputs.safe == 'false' && 'false' || steps.preflight.outputs.should-continue }}"
         if [[ "$PREFLIGHT_CONTINUE" != "true" ]]; then
           echo "should-continue=false" >> $GITHUB_OUTPUT
           exit 0
@@ -1242,8 +1324,8 @@ runs:
       env:
         ACTION_DIR: ${{ github.action_path }}
         AGENT_ERROR: ${{ steps.netlify-agent.outputs.agent-error }}
-        FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.preflight.outputs.failure-category }}
-        FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
+        FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.trigger-text-size.outputs.failure-category || steps.preflight.outputs.failure-category }}
+        FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.trigger-text-size.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
         AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
         AGENT_SCREENSHOT_URL: ${{ steps.netlify-agent.outputs.agent-screenshot-url }}
@@ -1303,8 +1385,8 @@ runs:
         AGENT_COMMIT_SHA: ${{ steps.netlify-agent.outputs.agent-commit-sha }}
         AGENT_TITLE: ${{ steps.netlify-agent.outputs.agent-title }}
         AGENT_ERROR: ${{ steps.netlify-agent.outputs.agent-error }}
-        FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.preflight.outputs.failure-category }}
-        FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
+        FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.trigger-text-size.outputs.failure-category || steps.preflight.outputs.failure-category }}
+        FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.trigger-text-size.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
         SESSION_DATA_MAP: ${{ steps.generate_success_comment.outputs.session-data-map || steps.generate_error_comment.outputs.session-data-map || steps.extract-agent-id.outputs.session-data-map }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
@@ -1321,6 +1403,7 @@ runs:
           await run({ context, core });
 
     - name: Post or update status comment
+      id: post_status_comment
       if: >-
         always()
         && steps.trigger-check.outputs.should-run == 'true'
@@ -1410,19 +1493,37 @@ runs:
       if: >-
         always()
         && steps.trigger-check.outputs.should-run == 'true'
-        && steps.should-continue.outputs.should-continue == 'true'
-        && (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) != ''
-        && steps.generate_success_comment.outcome != 'success'
-        && steps.generate_error_comment.outcome != 'success'
+        && github.event_name != 'workflow_dispatch'
+        && steps.context-info.outputs.issue-number != ''
+        && steps.preflight-comment.outcome != 'success'
+        && steps.post_status_comment.outcome != 'success'
+        && (
+          steps.trigger-text-size.outputs.safe == 'false'
+          || steps.preflight.outcome == 'failure'
+          || steps.preflight.outputs.preflight-ok == 'false'
+          || steps.resolve-netlify-filter.outcome == 'failure'
+          || steps.netlify-agent.outcome == 'failure'
+          || steps.generate_success_comment.outcome == 'failure'
+          || steps.generate_error_comment.outcome == 'failure'
+          || steps.generate_status_comment.outcome == 'failure'
+          || steps.post_result_comment.outcome == 'failure'
+        )
       continue-on-error: true
       uses: peter-evans/create-or-update-comment@v5
       with:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.context-info.outputs.issue-number }}
-        comment-id: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
+        comment-id: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id || steps.preflight-comment.outputs.comment-id }}
         body: |
-          Agent run completed (status reporting encountered an error).
+          ### Netlify Agent Runner GitHub Action failed
+
+          The GitHub Action failed before the normal Netlify Agent Runner status comment could be published.
+
+          **Failure category:** `${{ steps.netlify-agent.outputs.failure-category || steps.trigger-text-size.outputs.failure-category || steps.preflight.outputs.failure-category || 'github-action-failed' }}`
+          **Failure stage:** `${{ steps.netlify-agent.outputs.failure-stage || steps.trigger-text-size.outputs.failure-stage || steps.preflight.outputs.failure-stage || 'unknown' }}`
+
           [GitHub Action logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
           <!-- netlify-agent-run-status -->
         edit-mode: replace
 
@@ -1471,9 +1572,9 @@ runs:
       env:
         ACTION_DIR: ${{ github.action_path }}
         OUTCOME: ${{ steps.netlify-agent.outputs.outcome }}
-        PREFLIGHT_OK: ${{ steps.preflight.outputs.preflight-ok }}
-        PREFLIGHT_JSON: ${{ steps.preflight.outputs.preflight-json }}
-        SHOULD_CONTINUE: ${{ steps.should-continue.outputs.should-continue || steps.preflight.outputs.should-continue }}
+        PREFLIGHT_OK: ${{ steps.trigger-text-size.outputs.preflight-ok || steps.preflight.outputs.preflight-ok }}
+        PREFLIGHT_JSON: ${{ steps.trigger-text-size.outputs.preflight-json || steps.preflight.outputs.preflight-json }}
+        SHOULD_CONTINUE: ${{ steps.should-continue.outputs.should-continue || steps.trigger-text-size.outputs.should-continue || steps.preflight.outputs.should-continue }}
         PREFLIGHT_ONLY: ${{ inputs.preflight-only }}
         EVENT_NAME: ${{ github.event_name }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
@@ -1491,8 +1592,8 @@ runs:
         RESULT_COMMENT_URL: ${{ steps.post_result_comment.outputs.result-comment-url }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
         TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
-        FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.preflight.outputs.failure-category }}
-        FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
+        FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.trigger-text-size.outputs.failure-category || steps.preflight.outputs.failure-category }}
+        FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.trigger-text-size.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
         AGENT_ERROR: ${{ steps.netlify-agent.outputs.agent-error }}
       with:
         github-token: ${{ inputs.github-token }}
@@ -1568,10 +1669,10 @@ runs:
       shell: bash
       env:
         OUTCOME: ${{ steps.netlify-agent.outputs.outcome }}
-        PREFLIGHT_OK: ${{ steps.preflight.outputs.preflight-ok }}
-        PREFLIGHT_SUMMARY: ${{ steps.preflight.outputs.preflight-summary }}
+        PREFLIGHT_OK: ${{ steps.trigger-text-size.outputs.preflight-ok || steps.preflight.outputs.preflight-ok }}
+        PREFLIGHT_SUMMARY: ${{ steps.trigger-text-size.outputs.preflight-summary || steps.preflight.outputs.preflight-summary }}
         PREFLIGHT_ONLY: ${{ inputs.preflight-only }}
-        SHOULD_CONTINUE: ${{ steps.should-continue.outputs.should-continue || steps.preflight.outputs.should-continue }}
+        SHOULD_CONTINUE: ${{ steps.should-continue.outputs.should-continue || steps.trigger-text-size.outputs.should-continue || steps.preflight.outputs.should-continue }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         ISSUE_NUM: ${{ steps.context-info.outputs.issue-number }}
         AGENT: ${{ steps.context-info.outputs.agent || steps.context-info.outputs.model }}

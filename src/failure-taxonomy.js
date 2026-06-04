@@ -167,6 +167,18 @@ const FAILURE_TAXONOMY = Object.freeze({
     userActionRequired: false,
     stage: 'create-session',
   }),
+  'prompt-too-large': freezeProfile({
+    title: 'Prompt is too large for the runner launch path',
+    summary: 'The trigger prompt is too large to pass safely through the GitHub Actions runner environment.',
+    remediation: [
+      'Retry with a shorter prompt or link to supporting context instead of embedding it inline.',
+      'For chained workflows, compact prior agent outputs before posting follow-up prompts.',
+    ],
+    severity: 'error',
+    retryable: false,
+    userActionRequired: true,
+    stage: 'validate-env',
+  }),
   'agent-timeout': freezeProfile({
     title: 'Agent timed out before completion',
     summary: 'The agent run did not reach a terminal state within timeout-minutes.',
@@ -358,6 +370,15 @@ function detectFailureCategory(signal = {}) {
   const statusCode = typeof signal.statusCode === 'number' ? signal.statusCode : NaN;
   const exitCode = typeof signal.exitCode === 'number' ? signal.exitCode : NaN;
   const timeoutSeconds = typeof signal.timeoutSeconds === 'number' ? signal.timeoutSeconds : NaN;
+
+  if (matchesAny(text, [
+    'argument list too long',
+    'prompt too large',
+    'trigger_text env string',
+    'trigger text env string',
+  ])) {
+    return 'prompt-too-large';
+  }
 
   if (matchesAny(text, [
     'missing netlify-auth-token',
