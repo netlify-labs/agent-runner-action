@@ -24,6 +24,8 @@ A GitHub Action that starts [Netlify Agent Runners](https://www.netlify.com/prod
 
 The default agent is `codex`. Specify `claude`, `codex`, or `gemini` after `@netlify` to choose an agent.
 
+Aliases like `@netlify-agent` and `@netlify-ai` work too, and common typos are recognised (`@nelify`, `@netlfy`, `@netify`, `@netlif`, `@netfly`). Mentions inside fenced code blocks or inline code spans are ignored, so you can quote `@netlify` in a comment without triggering a run.
+
 ## Quick start
 
 ### 1. Install prerequisites
@@ -61,9 +63,13 @@ on:
         required: true
         type: string
       agent:
-        description: 'Agent to use (claude, codex, gemini)'
+        description: 'Agent to use'
         required: false
-        type: string
+        type: choice
+        options:
+          - codex
+          - claude
+          - gemini
         default: 'codex'
   pull_request_target:
     types: [opened, synchronize, reopened]
@@ -82,6 +88,14 @@ concurrency:
 
 jobs:
   netlify-agent:
+    # Skip bot senders early to avoid burning Actions minutes
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.sender.login != 'github-actions[bot]' &&
+        github.event.sender.login != 'netlify-coding[bot]' &&
+        github.event.sender.login != 'netlify[bot]'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -195,7 +209,6 @@ steps:
     with:
       netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
-      # preflight-only: 'false' # Validate setup and stop before agent execution
 
   - name: Run tests on agent PR
     if: steps.agent.outputs.outcome == 'success' && steps.agent.outputs.agent-pr-url != ''
@@ -247,10 +260,28 @@ The repo includes `.actrc` plus push and pull request payloads under `.act/`. No
 
 After the first run creates a PR, add follow-up `@netlify` comments on the PR. The agent iterates on existing code. Commenting on the original issue shows a redirect to the PR.
 
+## Troubleshooting
+
+**Missing `NETLIFY_AUTH_TOKEN` or `NETLIFY_SITE_ID`.** Add both as repository secrets under **Settings > Secrets and variables > Actions**. Create a personal access token at <https://app.netlify.com/user/applications#personal-access-tokens>. Find your Site ID in the Netlify dashboard under Site configuration > General.
+
+**Preflight checks failed.** Inspect the `preflight-summary` and `preflight-json` outputs. Common causes: a token/site-ID mismatch, an invalid `default-agent`, a non-positive `timeout-minutes`, or missing workflow permissions (`contents: write`, `pull-requests: write`, `issues: write`).
+
+**"The project can't be found".** `NETLIFY_SITE_ID` points to a site that doesn't exist or that the current token can't access. Verify the site ID in the Netlify dashboard and regenerate the token if needed.
+
+**Agent timed out.** Default timeout is 10 minutes. Increase it with `timeout-minutes: '15'` (or higher) for complex prompts, or split large tasks into smaller follow-up `@netlify` comments on the PR.
+
+**"`dry-run` still contacted Netlify".** Expected. `dry-run: 'true'` skips commit/PR creation but still creates an agent run. Use `preflight-only: 'true'` for a no-op validation with no agent run.
+
+**"Requested agent is not available".** The selected agent is temporarily unavailable. Try a different one: `@netlify claude`, `@netlify codex`, or `@netlify gemini`.
+
+**Workflow runs on bot comments.** Add the job-level `if:` guard shown in the [Quick start workflow](#3-add-the-workflow) to skip `github-actions[bot]`, `netlify-coding[bot]`, and `netlify[bot]` senders.
+
+**Monorepo site builds the wrong app.** Set `netlify-filter` to the app name (matches `netlify --filter <name>`), or rely on auto-detection from a single `netlify.toml` build command. If `netlify.toml` declares more than one filter, the action requires you to pick one explicitly.
+
 ## Security
 
 - Only repository collaborators, members, and owners can trigger agent runs
-- Bot accounts (`github-actions[bot]`, `netlify-coding[bot]`) are excluded
+- Bot accounts (`github-actions[bot]`, `netlify-coding[bot]`, `netlify[bot]`) are excluded to prevent feedback loops
 - Concurrency control ensures one run per issue/PR at a time
 - The `allowed-users` input can further restrict access to specific users
 - Common `@netlify` typos (`@nelify`, `@netlfy`, etc.) are recognised
@@ -266,3 +297,11 @@ This action is safe under that trigger because:
 2. **No PR code is executed on the runner.** After checkout, the workflow only inspects `package.json` for framework detection, runs `git diff` against the base branch, installs a pinned Netlify CLI, and hands the prompt to Netlify's remote agent service. The agent itself runs on Netlify infrastructure, not on your runner.
 
 **If you fork this workflow, do not add steps that execute PR-supplied code** (e.g. `npm install` against the PR's `package.json`, running the project's tests/linter/build, or any tool that loads config files from the workspace). Any such step turns this from "trusted-only trigger that calls a remote API" into a credential exfiltration vector. If you need to run PR code, switch to the two-workflow `pull_request` + `workflow_run` pattern described in the GitHub Security Lab article above.
+
+## Contributing
+
+Issues, bug reports, and pull requests are welcome. Before opening a PR, please:
+
+- Run `bun test` and `bun run docs:check` locally — both should pass.
+- Use the simulator (`bun run simulate --fixture <path>`) when changing trigger or runner decisions, and add a fixture under `fixtures/events/` for new event shapes.
+- Keep the README, `docs/index.html`, `example-workflow.yml`, and `workflow-templates/netlify-agents.yml` in sync when changing inputs, outputs, or the recommended workflow.

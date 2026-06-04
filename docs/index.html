@@ -214,9 +214,13 @@ on:
         required: true
         type: string
       agent:
-        description: 'Agent to use (claude, codex, gemini)'
+        description: 'Agent to use'
         required: false
-        type: string
+        type: choice
+        options:
+          - codex
+          - claude
+          - gemini
         default: 'codex'
   pull_request_target:
     types: [opened, synchronize, reopened]
