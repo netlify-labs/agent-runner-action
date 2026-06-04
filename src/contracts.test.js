@@ -27,6 +27,7 @@ describe('contracts category/stage/severity lists', () => {
       'model-unavailable',
       'agent-create-failed',
       'session-create-failed',
+      'prompt-too-large',
       'agent-timeout',
       'agent-failed',
       'deploy-preview-unavailable',

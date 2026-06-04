@@ -8,7 +8,7 @@
 /** @typedef {'info' | 'warning' | 'error'} FailureSeverity */
 /** @typedef {'validate-env' | 'resolve-site' | 'create-agent' | 'create-session' | 'poll-agent' | 'commit' | 'create-pr' | 'comment-update' | 'unknown'} FailureStage */
 
-/** @typedef {'missing-auth-token' | 'missing-site-id' | 'site-lookup-failed' | 'netlify-cli-missing' | 'netlify-cli-install-failed' | 'agent-unavailable' | 'model-unavailable' | 'agent-create-failed' | 'session-create-failed' | 'agent-timeout' | 'agent-failed' | 'deploy-preview-unavailable' | 'commit-to-branch-failed' | 'pull-request-create-failed' | 'github-permission-denied' | 'github-api-failed' | 'malformed-api-response' | 'unknown'} FailureCategory */
+/** @typedef {'missing-auth-token' | 'missing-site-id' | 'site-lookup-failed' | 'netlify-cli-missing' | 'netlify-cli-install-failed' | 'agent-unavailable' | 'model-unavailable' | 'agent-create-failed' | 'session-create-failed' | 'prompt-too-large' | 'agent-timeout' | 'agent-failed' | 'deploy-preview-unavailable' | 'commit-to-branch-failed' | 'pull-request-create-failed' | 'github-permission-denied' | 'github-api-failed' | 'malformed-api-response' | 'unknown'} FailureCategory */
 
 /**
  * Shared hidden markers embedded in issue/PR comments.
@@ -116,6 +116,7 @@ const FAILURE_CATEGORIES = Object.freeze([
   'model-unavailable',
   'agent-create-failed',
   'session-create-failed',
+  'prompt-too-large',
   'agent-timeout',
   'agent-failed',
   'deploy-preview-unavailable',
