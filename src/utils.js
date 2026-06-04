@@ -124,8 +124,12 @@ function cleanPrompt(text) {
  * @returns {string}
  */
 function escapeAttr(value) {
-  return String(value || '').replace(/[&"<>]/g, c =>
-    ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;' }[c]));
+  return String(value || '').replace(/[&"<>]/g, c => {
+    if (c === '&') return '&amp;';
+    if (c === '"') return '&quot;';
+    if (c === '<') return '&lt;';
+    return '&gt;';
+  });
 }
 
 /**
