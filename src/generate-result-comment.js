@@ -216,7 +216,7 @@ function renderResultComment({ env = process.env, context, outcome }) {
       error: env.AGENT_ERROR || '',
       statusCode: env.FAILURE_STATUS_CODE ? parseInt(env.FAILURE_STATUS_CODE, 10) : undefined,
     });
-    body += title ? `### Result: ${title}\n\n` : '### Result\n\n';
+    body += title ? `### Result: ${utils.escapeMarkdownLinks(title)}\n\n` : '### Result\n\n';
     body += `${failure.summary}\n\n`;
     body += `- **Category:** \`${failure.category}\`\n`;
     body += `- **Stage:** \`${failure.stage}\`\n`;
@@ -232,11 +232,13 @@ function renderResultComment({ env = process.env, context, outcome }) {
     );
     if (errorText) body += `**Error excerpt:**\n\n\`\`\`text\n${errorText}\n\`\`\`\n\n`;
   } else {
-    body += title ? `### Result: ${title}\n\n` : '### Result\n\n';
-    if (screenshotUrl && deployUrl) {
-      body += `<a href="${deployUrl}"><img src="${screenshotUrl}" alt="Preview" width="250" align="right"></a>\n\n`;
+    body += title ? `### Result: ${utils.escapeMarkdownLinks(title)}\n\n` : '### Result\n\n';
+    const safeDeployUrl = utils.safeHttpUrl(deployUrl);
+    const safeScreenshotUrl = utils.safeHttpUrl(screenshotUrl);
+    if (safeScreenshotUrl && safeDeployUrl) {
+      body += `<a href="${utils.escapeAttr(safeDeployUrl)}"><img src="${utils.escapeAttr(safeScreenshotUrl)}" alt="Preview" width="250" align="right"></a>\n\n`;
     }
-    if (resultSummary) body += `${resultSummary}\n\n`;
+    if (resultSummary) body += `${utils.escapeMarkdownLinks(resultSummary)}\n\n`;
   }
 
   if (links.length > 0) body += `${links.join(' | ')}\n\n`;

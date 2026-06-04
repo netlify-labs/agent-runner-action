@@ -118,6 +118,42 @@ function cleanPrompt(text) {
 }
 
 /**
+ * Escape HTML attribute values to prevent attribute injection when splicing
+ * untrusted strings into raw `<a>` / `<img>` tags inside comment bodies.
+ * @param {string | null | undefined} value
+ * @returns {string}
+ */
+function escapeAttr(value) {
+  return String(value || '').replace(/[&"<>]/g, c => {
+    if (c === '&') return '&amp;';
+    if (c === '"') return '&quot;';
+    if (c === '<') return '&lt;';
+    return '&gt;';
+  });
+}
+
+/**
+ * Return `value` only if it parses as a plain http(s) URL with no embedded
+ * whitespace or quote characters, otherwise return empty string.
+ * @param {string | null | undefined} value
+ * @returns {string}
+ */
+function safeHttpUrl(value) {
+  const s = String(value || '').trim();
+  return /^https?:\/\/[^\s"'<>]+$/.test(s) ? s : '';
+}
+
+/**
+ * Escape `[` so attacker-controlled prose interpolated into markdown can't
+ * form a `[label](url)` link.
+ * @param {string | null | undefined} value
+ * @returns {string}
+ */
+function escapeMarkdownLinks(value) {
+  return String(value || '').replace(/\[/g, '\\[');
+}
+
+/**
  * Pick a random [flavorText, emoji] pair.
  * @returns {[string, string]}
  */
@@ -249,4 +285,7 @@ module.exports = {
   formatPromptBlock,
   formatRunDate,
   buildInProgressComment,
+  escapeAttr,
+  safeHttpUrl,
+  escapeMarkdownLinks,
 };

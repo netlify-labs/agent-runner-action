@@ -80,13 +80,15 @@ module.exports = async function generateSuccessComment({ context, core }) {
   }
 
   if (cleanPrompt) message += utils.formatPromptBlock(cleanPrompt, sourceUrl);
-  message += agentTitle ? `### Result: ${agentTitle}\n\n` : `### Result\n\n`;
+  message += agentTitle ? `### Result: ${utils.escapeMarkdownLinks(agentTitle)}\n\n` : `### Result\n\n`;
 
-  if (agentScreenshotUrl && agentDeployUrl) {
-    message += `<a href="${agentDeployUrl}"><img src="${agentScreenshotUrl}" alt="Preview" width="250" align="right"></a>\n\n`;
+  const safeDeployUrl = utils.safeHttpUrl(agentDeployUrl);
+  const safeScreenshotUrl = utils.safeHttpUrl(agentScreenshotUrl);
+  if (safeScreenshotUrl && safeDeployUrl) {
+    message += `<a href="${utils.escapeAttr(safeDeployUrl)}"><img src="${utils.escapeAttr(safeScreenshotUrl)}" alt="Preview" width="250" align="right"></a>\n\n`;
   }
 
-  if (agentResultSummary.trim()) message += `${agentResultSummary.trim()}\n\n`;
+  if (agentResultSummary.trim()) message += `${utils.escapeMarkdownLinks(agentResultSummary.trim())}\n\n`;
 
   /** @type {string[]} */
   const links = [];

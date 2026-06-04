@@ -292,3 +292,56 @@ describe('TRIGGER_PATTERN', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// escapeAttr / safeHttpUrl / escapeMarkdownLinks
+// ---------------------------------------------------------------------------
+describe('escapeAttr', () => {
+  it('escapes the four attribute-breaking characters', () => {
+    assert.equal(utils.escapeAttr('a"b<c>d&e'), 'a&quot;b&lt;c&gt;d&amp;e');
+  });
+
+  it('blocks the issue #16 attribute-injection payload', () => {
+    const payload = 'https://evil.tld" onmouseover="alert(1)" data-x="';
+    assert.ok(!utils.escapeAttr(payload).includes('"'));
+  });
+
+  it('handles null/undefined', () => {
+    assert.equal(utils.escapeAttr(null), '');
+    assert.equal(utils.escapeAttr(undefined), '');
+  });
+});
+
+describe('safeHttpUrl', () => {
+  it('accepts plain http(s) URLs', () => {
+    assert.equal(utils.safeHttpUrl('https://netlify.com/x'), 'https://netlify.com/x');
+    assert.equal(utils.safeHttpUrl('http://example.com'), 'http://example.com');
+  });
+
+  it('rejects URLs with quotes, whitespace, or angle brackets', () => {
+    assert.equal(utils.safeHttpUrl('https://evil.tld" onmouseover="alert(1)'), '');
+    assert.equal(utils.safeHttpUrl('https://a b.com'), '');
+    assert.equal(utils.safeHttpUrl('https://a<b>.com'), '');
+  });
+
+  it('rejects non-http(s) schemes', () => {
+    assert.equal(utils.safeHttpUrl('javascript:alert(1)'), '');
+    assert.equal(utils.safeHttpUrl('data:text/html,foo'), '');
+    assert.equal(utils.safeHttpUrl('file:///etc/passwd'), '');
+  });
+
+  it('handles empty input', () => {
+    assert.equal(utils.safeHttpUrl(''), '');
+    assert.equal(utils.safeHttpUrl(null), '');
+  });
+});
+
+describe('escapeMarkdownLinks', () => {
+  it('escapes [ so [label](url) cannot form', () => {
+    assert.equal(utils.escapeMarkdownLinks('[click](https://evil.tld)'), '\\[click](https://evil.tld)');
+  });
+
+  it('leaves prose without brackets unchanged', () => {
+    assert.equal(utils.escapeMarkdownLinks('Result complete.'), 'Result complete.');
+  });
+});
