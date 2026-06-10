@@ -935,6 +935,75 @@ runs:
           echo "agent-error=$clean_message" >> $GITHUB_OUTPUT
         }
 
+        normalize_error_text() {
+          sanitize_error "${1:-}" | tr '[:upper:]' '[:lower:]'
+        }
+
+        is_hard_pr_failure() {
+          local text
+          text=$(normalize_error_text "${1:-}")
+          [ -n "$text" ] || return 1
+          case "$text" in
+            *"cannot push changes to github workflow files"*|\
+            *"workflows permission"*|\
+            *"workflow-file permission"*|\
+            *"resource not accessible by integration"*|\
+            *"permission denied"*|\
+            *"bad credentials"*|\
+            *"403"*|\
+            *"422"*|\
+            *"validation failed"*|\
+            *"branch protection"*|\
+            *"protected branch"*|\
+            *"repository not found"*|\
+            *"agent runner not found"*|\
+            *"agent_runner not found"*|\
+            *"runner not found"*|\
+            *"invalid agent_runner_id"*)
+              return 0
+              ;;
+          esac
+          return 1
+        }
+
+        is_retryable_pr_failure() {
+          local raw="${1:-}"
+          local text
+          text=$(normalize_error_text "$raw")
+          if is_hard_pr_failure "$raw"; then
+            return 1
+          fi
+          if [ -z "$text" ]; then
+            return 0
+          fi
+          case "$text" in
+            *"timeout"*|\
+            *"timed out"*|\
+            *"temporarily unavailable"*|\
+            *"temporary"*|\
+            *"try again"*|\
+            *"rate limit"*|\
+            *"too many requests"*|\
+            *"internal server error"*|\
+            *"bad gateway"*|\
+            *"service unavailable"*|\
+            *"gateway timeout"*|\
+            *"connection reset"*|\
+            *"econnreset"*|\
+            *"network"*|\
+            *"malformed"*|\
+            *"invalid json"*|\
+            *"parse error"*|\
+            *"500"*|\
+            *"502"*|\
+            *"503"*|\
+            *"504"*)
+              return 0
+              ;;
+          esac
+          return 1
+        }
+
         # Ensure netlify CLI is on PATH
         export PATH="$HOME/.bun/bin:$PATH"
 
@@ -1175,59 +1244,91 @@ runs:
                 fi
 
               elif [ "$HAS_DIFF" = "true" ] && [ -z "$EXISTING_PR" ]; then
-                echo "🔀 Creating pull request..."
-                PR_API_RESULT=$(netlify api agentRunnerPullRequest --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
-                debug_log "agentRunnerPullRequest" "$PR_API_RESULT"
-
+                PR_MAX_ATTEMPTS=3
+                PR_ATTEMPT=1
                 PR_WAIT=0
                 PR_URL=""
-                PR_FAILURE=$(echo "$PR_API_RESULT" | jq -r '.pr_error // .error_message // .error // .message // empty' 2>/dev/null || true)
-                while [ $PR_WAIT -lt 60 ]; do
-                  sleep 5
-                  PR_WAIT=$((PR_WAIT + 5))
-                  PR_CHECK=$(netlify api getAgentRunner --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
-                  PR_URL=$(echo "$PR_CHECK" | jq -r '.pr_url // empty')
-                  PR_CREATING=$(echo "$PR_CHECK" | jq -r '.pr_is_being_created // false')
-                  PR_ERROR=$(echo "$PR_CHECK" | jq -r '.pr_error // .error_message // .error // .message // empty' 2>/dev/null || true)
-                  if [ -n "$PR_ERROR" ]; then
-                    PR_FAILURE="$PR_ERROR"
-                  fi
-                  if [ -n "$PR_URL" ]; then
-                    echo "✅ PR created: $PR_URL"
-                    echo "agent-pr-url=$PR_URL" >> $GITHUB_OUTPUT
-                    echo "agent-pr-branch=$(echo "$PR_CHECK" | jq -r '.pr_branch // empty')" >> $GITHUB_OUTPUT
-                    echo "agent-commit-sha=$(echo "$PR_CHECK" | jq -r '.merge_commit_sha // empty')" >> $GITHUB_OUTPUT
+                PR_FAILURE=""
+                PR_HARD_FAILURE=false
+                while [ $PR_ATTEMPT -le $PR_MAX_ATTEMPTS ]; do
+                  echo "🔀 Creating pull request (attempt ${PR_ATTEMPT}/${PR_MAX_ATTEMPTS})..."
+                  PR_API_RESULT=$(netlify api agentRunnerPullRequest --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
+                  debug_log "agentRunnerPullRequest (attempt $PR_ATTEMPT)" "$PR_API_RESULT"
 
-                    PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
-                    if [ -n "$PR_NUM" ]; then
-                      EXISTING_TITLE=$(GH_TOKEN="${GITHUB_TOKEN}" gh pr view "$PR_NUM" --json title --jq '.title' 2>/dev/null || true)
-                      CLEAN_TITLE=$(echo "$EXISTING_TITLE" | sed -E 's/@(netlify|nelify|netlfy|netify|netlif|netfly)([_-](agents?([_-]runs?)?|ai))?\s+((with|using|use|via)\s+)?(claude|codex|gemini)?\s*//; s/^\s+//')
-                      if [ -n "$CLEAN_TITLE" ] && [ "$CLEAN_TITLE" != "$EXISTING_TITLE" ]; then
-                        GH_TOKEN="${GITHUB_TOKEN}" gh pr edit "$PR_NUM" --title "$CLEAN_TITLE" 2>/dev/null || true
-                      fi
-                      if [ -n "${ISSUE_NUMBER:-}" ]; then
-                        EXISTING_BODY=$(GH_TOKEN="${GITHUB_TOKEN}" gh pr view "$PR_NUM" --json body --jq '.body' 2>/dev/null || true)
-                        NEW_BODY=$(printf '%s\n\n---\nResolves #%s\n<!-- netlify-agent-runner-id:%s -->' "$EXISTING_BODY" "$ISSUE_NUMBER" "$AGENT_ID")
-                        GH_TOKEN="${GITHUB_TOKEN}" gh pr edit "$PR_NUM" --body "$NEW_BODY" 2>/dev/null || true
+                  PR_FAILURE=$(echo "$PR_API_RESULT" | jq -r '.pr_error // .error_message // .error // .message // empty' 2>/dev/null || true)
+                  if is_hard_pr_failure "$PR_FAILURE"; then
+                    PR_HARD_FAILURE=true
+                  else
+                    PR_HARD_FAILURE=false
+                  fi
+
+                  PR_WAIT=0
+                  while [ "$PR_HARD_FAILURE" = "false" ] && [ $PR_WAIT -lt 60 ]; do
+                    sleep 5
+                    PR_WAIT=$((PR_WAIT + 5))
+                    PR_CHECK=$(netlify api getAgentRunner --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
+                    PR_URL=$(echo "$PR_CHECK" | jq -r '.pr_url // empty')
+                    PR_CREATING=$(echo "$PR_CHECK" | jq -r '.pr_is_being_created // false')
+                    PR_ERROR=$(echo "$PR_CHECK" | jq -r '.pr_error // .error_message // .error // .message // empty' 2>/dev/null || true)
+                    if [ -n "$PR_ERROR" ]; then
+                      PR_FAILURE="$PR_ERROR"
+                      if is_hard_pr_failure "$PR_FAILURE"; then
+                        PR_HARD_FAILURE=true
                       fi
                     fi
-                    break
-                  fi
-                  if [ "$PR_CREATING" = "false" ]; then
-                    if [ -n "$PR_FAILURE" ]; then
-                      echo "⚠️ PR creation failed: $PR_FAILURE"
-                    else
-                      echo "⚠️ PR creation finished but no URL returned"
+                    if [ -n "$PR_URL" ]; then
+                      echo "✅ PR created: $PR_URL"
+                      echo "agent-pr-url=$PR_URL" >> $GITHUB_OUTPUT
+                      echo "agent-pr-branch=$(echo "$PR_CHECK" | jq -r '.pr_branch // empty')" >> $GITHUB_OUTPUT
+                      echo "agent-commit-sha=$(echo "$PR_CHECK" | jq -r '.merge_commit_sha // empty')" >> $GITHUB_OUTPUT
+
+                      PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+                      if [ -n "$PR_NUM" ]; then
+                        EXISTING_TITLE=$(GH_TOKEN="${GITHUB_TOKEN}" gh pr view "$PR_NUM" --json title --jq '.title' 2>/dev/null || true)
+                        CLEAN_TITLE=$(echo "$EXISTING_TITLE" | sed -E 's/@(netlify|nelify|netlfy|netify|netlif|netfly)([_-](agents?([_-]runs?)?|ai))?\s+((with|using|use|via)\s+)?(claude|codex|gemini)?\s*//; s/^\s+//')
+                        if [ -n "$CLEAN_TITLE" ] && [ "$CLEAN_TITLE" != "$EXISTING_TITLE" ]; then
+                          GH_TOKEN="${GITHUB_TOKEN}" gh pr edit "$PR_NUM" --title "$CLEAN_TITLE" 2>/dev/null || true
+                        fi
+                        if [ -n "${ISSUE_NUMBER:-}" ]; then
+                          EXISTING_BODY=$(GH_TOKEN="${GITHUB_TOKEN}" gh pr view "$PR_NUM" --json body --jq '.body' 2>/dev/null || true)
+                          NEW_BODY=$(printf '%s\n\n---\nResolves #%s\n<!-- netlify-agent-runner-id:%s -->' "$EXISTING_BODY" "$ISSUE_NUMBER" "$AGENT_ID")
+                          GH_TOKEN="${GITHUB_TOKEN}" gh pr edit "$PR_NUM" --body "$NEW_BODY" 2>/dev/null || true
+                        fi
+                      fi
+                      break
                     fi
+                    if [ "$PR_CREATING" = "false" ]; then
+                      if [ -n "$PR_FAILURE" ]; then
+                        echo "⚠️ PR creation failed: $PR_FAILURE"
+                      else
+                        echo "⚠️ PR creation finished but no URL returned"
+                      fi
+                      break
+                    fi
+                    echo "  [${PR_WAIT}/60s] Waiting for PR..."
+                  done
+
+                  if [ -n "$PR_URL" ]; then
                     break
                   fi
-                  echo "  [${PR_WAIT}/60s] Waiting for PR..."
+                  if [ "$PR_HARD_FAILURE" = "true" ]; then
+                    echo "⚠️ PR creation failed with a non-retryable error: $PR_FAILURE"
+                    break
+                  fi
+                  if [ $PR_ATTEMPT -lt $PR_MAX_ATTEMPTS ] && is_retryable_pr_failure "$PR_FAILURE"; then
+                    PR_BACKOFF=$((PR_ATTEMPT * 10))
+                    echo "↻ Retrying PR creation in ${PR_BACKOFF}s..."
+                    sleep $PR_BACKOFF
+                    PR_ATTEMPT=$((PR_ATTEMPT + 1))
+                    continue
+                  fi
+                  break
                 done
                 if [ -z "$PR_URL" ]; then
                   echo "agent-pr-url=" >> $GITHUB_OUTPUT
                   echo "agent-pr-branch=" >> $GITHUB_OUTPUT
                   echo "outcome=failure" >> $GITHUB_OUTPUT
-                  emit_failure_context "create-pr" "pull-request-create-failed" "${PR_FAILURE:-PR creation finished without a pull request URL}"
+                  emit_failure_context "create-pr" "pull-request-create-failed" "${PR_FAILURE:-PR creation finished without a pull request URL after ${PR_ATTEMPT} attempts}"
                   exit 1
                 fi
               else
