@@ -137,6 +137,32 @@ describe('renderResultComment', () => {
     assert.ok(rendered.resultBody.includes(`<!-- ${RESULT_COMMENT_MARKER_NAME} `));
   });
 
+  it('surfaces Netlify PR errors in failure result comments', () => {
+    writeSessions('runner_pr_error', [{
+      id: 'session_pr_error',
+      prompt: '@netlify update workflow',
+      title: 'Update workflow',
+      agent_config: { agent: 'codex' },
+    }]);
+
+    const rendered = renderResultComment({
+      context: context(),
+      outcome: 'failure',
+      env: {
+        RUNNER_TEMP: tempDir,
+        AGENT_ID: 'runner_pr_error',
+        SITE_NAME: 'site',
+        AGENT_ERROR: 'Cannot push changes to GitHub workflow files (.github/workflows/). The GitHub App does not have the workflows permission required to modify these files.',
+        FAILURE_CATEGORY: 'pull-request-create-failed',
+        FAILURE_STAGE: 'create-pr',
+        SESSION_DATA_MAP: '{}',
+      },
+    });
+
+    assert.ok(rendered.resultBody.includes('Cannot push changes to GitHub workflow files'));
+    assert.ok(rendered.resultBody.includes('grant the Netlify GitHub App workflow-file permission'));
+  });
+
   it('treats latest error sessions as failure results even without AGENT_ERROR', () => {
     writeSessions('runner_5', [{
       id: 'session_5',

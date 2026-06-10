@@ -224,8 +224,10 @@ describe('action.yml wiring', () => {
 
   it('fails the run when post-agent commit or PR creation fails', () => {
     assert.match(actionYml, /COMMIT_FAILURE=""/);
+    assert.match(actionYml, /PR_FAILURE=\$\(echo "\$PR_API_RESULT" \| jq -r '.pr_error \/\/ .error_message \/\/ .error \/\/ .message \/\/ empty'/);
+    assert.match(actionYml, /PR_ERROR=\$\(echo "\$PR_CHECK" \| jq -r '.pr_error \/\/ .error_message \/\/ .error \/\/ .message \/\/ empty'/);
     assert.match(actionYml, /emit_failure_context "commit" "commit-to-branch-failed"/);
-    assert.match(actionYml, /emit_failure_context "create-pr" "pull-request-create-failed"/);
+    assert.match(actionYml, /emit_failure_context "create-pr" "pull-request-create-failed" "\$\{PR_FAILURE:-PR creation finished without a pull request URL\}"/);
     assert.match(actionYml, /echo "outcome=failure" >> \$GITHUB_OUTPUT/);
   });
 
