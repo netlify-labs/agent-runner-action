@@ -224,10 +224,18 @@ describe('action.yml wiring', () => {
 
   it('fails the run when post-agent commit or PR creation fails', () => {
     assert.match(actionYml, /COMMIT_FAILURE=""/);
+    assert.match(actionYml, /is_hard_pr_failure\(\)/);
+    assert.match(actionYml, /is_retryable_pr_failure\(\)/);
+    assert.match(actionYml, /cannot push changes to github workflow files/);
+    assert.match(actionYml, /resource not accessible by integration/);
+    assert.match(actionYml, /PR_MAX_ATTEMPTS=3/);
+    assert.match(actionYml, /Creating pull request \(attempt \$\{PR_ATTEMPT\}\/\$\{PR_MAX_ATTEMPTS\}\)/);
     assert.match(actionYml, /PR_FAILURE=\$\(echo "\$PR_API_RESULT" \| jq -r '.pr_error \/\/ .error_message \/\/ .error \/\/ .message \/\/ empty'/);
     assert.match(actionYml, /PR_ERROR=\$\(echo "\$PR_CHECK" \| jq -r '.pr_error \/\/ .error_message \/\/ .error \/\/ .message \/\/ empty'/);
+    assert.match(actionYml, /Retrying PR creation in \$\{PR_BACKOFF\}s/);
+    assert.match(actionYml, /non-retryable error/);
     assert.match(actionYml, /emit_failure_context "commit" "commit-to-branch-failed"/);
-    assert.match(actionYml, /emit_failure_context "create-pr" "pull-request-create-failed" "\$\{PR_FAILURE:-PR creation finished without a pull request URL\}"/);
+    assert.match(actionYml, /emit_failure_context "create-pr" "pull-request-create-failed" "\$\{PR_FAILURE:-PR creation finished without a pull request URL after \$\{PR_ATTEMPT\} attempts\}"/);
     assert.match(actionYml, /echo "outcome=failure" >> \$GITHUB_OUTPUT/);
   });
 
