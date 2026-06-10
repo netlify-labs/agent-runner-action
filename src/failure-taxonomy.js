@@ -231,8 +231,9 @@ const FAILURE_TAXONOMY = Object.freeze({
     title: 'Failed to create pull request',
     summary: 'The agent produced diffs but a pull request URL was not created.',
     remediation: [
-      'Confirm repository `pull-requests: write` permission is granted.',
-      'Retry and inspect PR creation API responses in workflow logs.',
+      'Inspect the Netlify PR error in the result comment or workflow logs.',
+      'If the diff touches `.github/workflows`, grant the Netlify GitHub App workflow-file permission or land that workflow change manually.',
+      'Retry after resolving repository permission or branch protection constraints.',
     ],
     severity: 'error',
     retryable: true,

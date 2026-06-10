@@ -1181,12 +1181,17 @@ runs:
 
                 PR_WAIT=0
                 PR_URL=""
+                PR_FAILURE=$(echo "$PR_API_RESULT" | jq -r '.pr_error // .error_message // .error // .message // empty' 2>/dev/null || true)
                 while [ $PR_WAIT -lt 60 ]; do
                   sleep 5
                   PR_WAIT=$((PR_WAIT + 5))
                   PR_CHECK=$(netlify api getAgentRunner --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
                   PR_URL=$(echo "$PR_CHECK" | jq -r '.pr_url // empty')
                   PR_CREATING=$(echo "$PR_CHECK" | jq -r '.pr_is_being_created // false')
+                  PR_ERROR=$(echo "$PR_CHECK" | jq -r '.pr_error // .error_message // .error // .message // empty' 2>/dev/null || true)
+                  if [ -n "$PR_ERROR" ]; then
+                    PR_FAILURE="$PR_ERROR"
+                  fi
                   if [ -n "$PR_URL" ]; then
                     echo "✅ PR created: $PR_URL"
                     echo "agent-pr-url=$PR_URL" >> $GITHUB_OUTPUT
@@ -1209,7 +1214,11 @@ runs:
                     break
                   fi
                   if [ "$PR_CREATING" = "false" ]; then
-                    echo "⚠️ PR creation finished but no URL returned"
+                    if [ -n "$PR_FAILURE" ]; then
+                      echo "⚠️ PR creation failed: $PR_FAILURE"
+                    else
+                      echo "⚠️ PR creation finished but no URL returned"
+                    fi
                     break
                   fi
                   echo "  [${PR_WAIT}/60s] Waiting for PR..."
@@ -1218,7 +1227,7 @@ runs:
                   echo "agent-pr-url=" >> $GITHUB_OUTPUT
                   echo "agent-pr-branch=" >> $GITHUB_OUTPUT
                   echo "outcome=failure" >> $GITHUB_OUTPUT
-                  emit_failure_context "create-pr" "pull-request-create-failed" "PR creation finished without a pull request URL"
+                  emit_failure_context "create-pr" "pull-request-create-failed" "${PR_FAILURE:-PR creation finished without a pull request URL}"
                   exit 1
                 fi
               else
