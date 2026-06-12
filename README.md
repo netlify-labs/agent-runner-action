@@ -72,7 +72,7 @@ on:
           - gemini
         default: 'codex'
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, reopened]
   pull_request_review_comment:
     types: [created]
   pull_request_review:

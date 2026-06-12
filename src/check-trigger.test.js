@@ -197,6 +197,7 @@ describe('checkTrigger', () => {
 
   it('allows same-repo PRs regardless of association', async () => {
     const context = makeContext('pull_request_target', {
+      action: 'opened',
       pull_request: {
         body: '@netlify build',
         author_association: 'NONE',
@@ -206,6 +207,20 @@ describe('checkTrigger', () => {
     });
     await checkTrigger({ github: mockGithub(), context, core });
     assert.equal(core.outputs['should-run'], 'true');
+  });
+
+  it('does NOT trigger pull_request_target synchronize from stale PR body text', async () => {
+    const context = makeContext('pull_request_target', {
+      action: 'synchronize',
+      pull_request: {
+        body: '@netlify build',
+        author_association: 'OWNER',
+        head: { repo: { full_name: 'owner/repo' } },
+      },
+      sender: { login: 'owner' },
+    });
+    await checkTrigger({ github: mockGithub(), context, core });
+    assert.equal(core.outputs['should-run'], 'false');
   });
 
   it('respects ALLOWED_USERS for workflow_dispatch', async () => {

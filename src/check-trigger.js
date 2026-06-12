@@ -37,7 +37,13 @@ module.exports = async function checkTrigger({ github, context, core }) {
   if (event === 'workflow_dispatch') {
     shouldRun = true;
   } else if (event === 'pull_request_target') {
-    triggerBody = (context.payload.pull_request || {}).body || '';
+    const payload = /** @type {Record<string, unknown>} */ (context.payload || {});
+    if (payload.action === 'synchronize') {
+      console.log('Skipping pull_request_target synchronize; use an explicit @netlify comment for follow-up runs');
+      triggerBody = '';
+    } else {
+      triggerBody = (context.payload.pull_request || {}).body || '';
+    }
   } else if (event === 'issue_comment') {
     triggerBody = (context.payload.comment || {}).body || '';
   } else if (event === 'pull_request_review_comment') {
