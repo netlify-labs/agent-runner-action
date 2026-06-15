@@ -1245,6 +1245,7 @@ runs:
 
               elif [ "$HAS_DIFF" = "true" ] && [ -z "$EXISTING_PR" ]; then
                 PR_MAX_ATTEMPTS=3
+                PR_WAIT_SECONDS=20
                 PR_ATTEMPT=1
                 PR_WAIT=0
                 PR_URL=""
@@ -1263,7 +1264,8 @@ runs:
                   fi
 
                   PR_WAIT=0
-                  while [ "$PR_HARD_FAILURE" = "false" ] && [ $PR_WAIT -lt 60 ]; do
+                  PR_CREATING=""
+                  while [ "$PR_HARD_FAILURE" = "false" ] && [ $PR_WAIT -lt $PR_WAIT_SECONDS ]; do
                     sleep 5
                     PR_WAIT=$((PR_WAIT + 5))
                     PR_CHECK=$(netlify api getAgentRunner --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
@@ -1305,8 +1307,12 @@ runs:
                       fi
                       break
                     fi
-                    echo "  [${PR_WAIT}/60s] Waiting for PR..."
+                    echo "  [${PR_WAIT}/${PR_WAIT_SECONDS}s] Waiting for PR..."
                   done
+                  if [ -z "$PR_URL" ] && [ "$PR_HARD_FAILURE" = "false" ] && [ "$PR_CREATING" != "false" ] && [ $PR_WAIT -ge $PR_WAIT_SECONDS ]; then
+                    PR_FAILURE="Timed out waiting ${PR_WAIT_SECONDS}s for pull request URL on attempt ${PR_ATTEMPT}"
+                    echo "⚠️ $PR_FAILURE"
+                  fi
 
                   if [ -n "$PR_URL" ]; then
                     break
