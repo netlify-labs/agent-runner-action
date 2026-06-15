@@ -229,9 +229,11 @@ describe('action.yml wiring', () => {
     assert.match(actionYml, /cannot push changes to github workflow files/);
     assert.match(actionYml, /resource not accessible by integration/);
     assert.match(actionYml, /PR_MAX_ATTEMPTS=3/);
+    assert.match(actionYml, /PR_WAIT_SECONDS=20/);
     assert.match(actionYml, /Creating pull request \(attempt \$\{PR_ATTEMPT\}\/\$\{PR_MAX_ATTEMPTS\}\)/);
     assert.match(actionYml, /PR_FAILURE=\$\(echo "\$PR_API_RESULT" \| jq -r '.pr_error \/\/ .error_message \/\/ .error \/\/ .message \/\/ empty'/);
     assert.match(actionYml, /PR_ERROR=\$\(echo "\$PR_CHECK" \| jq -r '.pr_error \/\/ .error_message \/\/ .error \/\/ .message \/\/ empty'/);
+    assert.match(actionYml, /Timed out waiting \$\{PR_WAIT_SECONDS\}s for pull request URL on attempt \$\{PR_ATTEMPT\}/);
     assert.match(actionYml, /Retrying PR creation in \$\{PR_BACKOFF\}s/);
     assert.match(actionYml, /non-retryable error/);
     assert.match(actionYml, /emit_failure_context "commit" "commit-to-branch-failed"/);
