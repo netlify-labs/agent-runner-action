@@ -393,8 +393,13 @@ function classifySdkError(error, sdk) {
   return {
     category: 'validation',
     code: 'validation-error',
+    title: 'Action input is invalid',
     message: error instanceof Error ? error.message : String(error),
+    remediation: ['Correct the action inputs and run the workflow again.'],
+    severity: 'error',
     retryable: false,
+    userActionRequired: true,
+    stage: 'validate',
   };
 }
 
@@ -425,15 +430,25 @@ function terminalFailure(result) {
     return {
       category: 'timeout',
       code: 'agent-timeout',
+      title: 'Agent Runner timed out',
       message: 'The Agent Runner did not finish before the action deadline.',
+      remediation: ['Run the action again or increase the configured timeout.'],
+      severity: 'error',
       retryable: true,
+      userActionRequired: false,
+      stage: 'runner',
     };
   }
   return {
     category: 'cancelled',
     code: 'agent-cancelled',
+    title: 'Agent Runner was cancelled',
     message: 'The Agent Runner session was cancelled.',
+    remediation: ['Start a new run if the work is still required.'],
+    severity: 'info',
     retryable: false,
+    userActionRequired: false,
+    stage: 'session',
   };
 }
 
@@ -453,8 +468,13 @@ function landingFailure(landing) {
       failure: {
         category: 'platform',
         code: 'landing-unsupported',
+        title: 'PR landing is unsupported',
         message: landing.reason,
+        remediation: ['Use a GitHub-backed Agent Runner target that supports PR landing.'],
+        severity: 'error',
         retryable: false,
+        userActionRequired: true,
+        stage: 'landing',
       },
       stage: 'create-pr',
     };
@@ -651,8 +671,13 @@ async function runAgentAction(options = {}) {
         const failure = {
           category: 'platform',
           code: 'pr-landing-required',
+          title: 'PR landing was not completed',
           message: `Expected PR-only landing but received ${landed.landing.kind}.`,
+          remediation: ['Inspect the runner landing state and retry without enabling automatic merge.'],
+          severity: 'error',
           retryable: false,
+          userActionRequired: true,
+          stage: 'landing',
         };
         setOutput('failure-category', 'pull-request-create-failed');
         setOutput('failure-stage', 'create-pr');

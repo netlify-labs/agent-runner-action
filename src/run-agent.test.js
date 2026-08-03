@@ -67,8 +67,8 @@ describe('published SDK package integration', () => {
       path.join(root, 'package.json'),
       'utf8',
     ));
-    assert.equal(AGENT_RUNNER_SDK_VERSION, '0.1.0');
-    assert.equal(packageJson.version, '0.1.0');
+    assert.equal(AGENT_RUNNER_SDK_VERSION, '0.2.0-next.1');
+    assert.equal(packageJson.version, '0.2.0-next.1');
     assert.match(fs.realpathSync(root), /node_modules\/nax-agent-runner-sdk$/);
     assert.equal(fs.lstatSync(root).isSymbolicLink(), false);
   });
@@ -108,6 +108,14 @@ describe('published SDK package integration', () => {
         async cancelSession() {},
         async member(_runnerId, action) {
           memberActions.push(action);
+          if (action === 'diff') {
+            return {
+              diff: {
+                kind: 'inline',
+                text: 'diff --git a/fixture.txt b/fixture.txt',
+              },
+            };
+          }
           if (action !== 'pull_request') {
             throw new Error(`Unexpected member action: ${action}`);
           }
@@ -141,7 +149,7 @@ describe('published SDK package integration', () => {
         prUrl: fixture.pullRequest.prUrl,
         merged: false,
       });
-      assert.deepEqual(memberActions, ['pull_request']);
+      assert.deepEqual(memberActions, ['diff', 'pull_request']);
       assert.equal(collected.outputs.outcome, 'success');
       assert.equal(collected.outputs['agent-id'], fixture.runner.runnerId);
       assert.equal(
@@ -244,6 +252,14 @@ describe('follow-up compatibility and session-aware landing', () => {
         async cancelSession() {},
         async member(_runnerId, action) {
           memberActions.push(action);
+          if (action === 'diff') {
+            return {
+              diff: {
+                kind: 'inline',
+                text: 'diff --git a/fixture.txt b/fixture.txt',
+              },
+            };
+          }
           if (action !== 'commit') {
             throw new Error(`Unexpected member action: ${action}`);
           }
@@ -271,7 +287,7 @@ describe('follow-up compatibility and session-aware landing', () => {
       });
 
       assert.equal(outcome.handle.currentSessionId, 'current-follow-up');
-      assert.deepEqual(memberActions, ['commit']);
+      assert.deepEqual(memberActions, ['diff', 'commit']);
       assert.equal(
         collected.outputs['agent-commit-sha'],
         fixture.pullRequest.commitSha,
@@ -322,7 +338,15 @@ describe('action policy and failures', () => {
         async cancelSession() {},
         async member(_runnerId, action) {
           memberActions.push(action);
-          return runner;
+          if (action === 'diff') {
+            return {
+              diff: {
+                kind: 'inline',
+                text: 'diff --git a/fixture.txt b/fixture.txt',
+              },
+            };
+          }
+          throw new Error(`Unexpected member action: ${action}`);
         },
       };
       const sdk = createAgentRunnerSdk({
@@ -339,7 +363,7 @@ describe('action policy and failures', () => {
       });
 
       assert.equal(outcome.landing, undefined);
-      assert.deepEqual(memberActions, []);
+      assert.deepEqual(memberActions, ['diff']);
       assert.equal(collected.outputs['agent-pr-url'], '');
       assert.equal(outcome.handle.policy.landing, 'none');
     } finally {
