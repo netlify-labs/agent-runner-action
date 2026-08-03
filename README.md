@@ -9,9 +9,12 @@ A GitHub Action that starts [Netlify Agent Runners](https://www.netlify.com/prod
 
 1. Create an issue or comment on a PR with `@netlify` followed by your prompt
 2. The action picks up the trigger, adds a 👀 reaction, and creates an in-progress status comment
-3. Netlify Agent Runners creates an agent run to build or modify your site based on the prompt
-4. On completion, the action posts a full result comment, then updates the status comment with a short summary and a link to that result
-5. If triggered from an issue, a PR is automatically created with the changes
+3. The action uses the published `nax-agent-runner-sdk` package to start a new run or create a follow-up session
+4. The SDK waits for the exact session, cancels it on timeout, and lands changed results as an open pull request
+5. The action posts a full result comment, then updates the status comment with a short summary and a link to that result
+
+The action is deliberately PR-only. It can create a PR or commit a follow-up
+session to an existing agent PR, but it never merges the PR automatically.
 
 ### Trigger examples
 
@@ -107,7 +110,6 @@ jobs:
         with:
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
-          # netlify-filter: ${{ vars.NETLIFY_FILTER }} # for Netlify monorepo sites
 ```
 
 ### 4. Trigger a run
@@ -127,7 +129,7 @@ Or comment `@netlify make it blue` on an existing PR.
 |---|---|---|---|
 | `netlify-auth-token` | Yes | — | Netlify personal access token |
 | `netlify-site-id` | Yes | — | Netlify site ID |
-| `netlify-filter` | No | auto-detect | Netlify CLI monorepo app filter (`--filter`). Overrides auto-detection from a single `netlify.toml` build command filter. |
+| `netlify-filter` | No | `''` | Deprecated compatibility input. SDK dispatch uses the exact `netlify-site-id`. |
 | `github-token` | No | `github.token` | GitHub token for API calls |
 | `allowed-users` | No | `''` | Comma-separated usernames allowed to trigger (empty = repo collaborators) |
 | `default-agent` | No | `codex` | Default agent (`claude`, `codex`, or `gemini`) |
@@ -169,7 +171,6 @@ If `preflight-only` fails, inspect `preflight-summary` and `preflight-json` outp
 
 - `netlify-auth-token` is present and valid
 - `netlify-site-id` matches a site your token can access
-- `netlify-filter` is set in the workflow when auto-detection cannot infer one unambiguous filter from `netlify.toml`
 - `default-agent` selects one of the supported agents: `claude`, `codex`, or `gemini`
 - `default-model` remains supported as a backward-compatible alias
 - `timeout-minutes` is a positive integer
@@ -276,7 +277,9 @@ After the first run creates a PR, add follow-up `@netlify` comments on the PR. T
 
 **Workflow runs on bot comments.** Add the job-level `if:` guard shown in the [Quick start workflow](#3-add-the-workflow) to skip `github-actions[bot]`, `netlify-coding[bot]`, and `netlify[bot]` senders.
 
-**Monorepo site builds the wrong app.** Set `netlify-filter` to the app name (matches `netlify --filter <name>`), or rely on auto-detection from a single `netlify.toml` build command. If `netlify.toml` declares more than one filter, the action requires you to pick one explicitly.
+**Monorepo site builds the wrong app.** Set `netlify-site-id` to the specific
+Netlify site for the app. `netlify-filter` is retained only so existing
+workflows do not break; SDK dispatch does not use CLI filter selection.
 
 ## Security
 
@@ -294,9 +297,26 @@ The example workflow uses the `pull_request_target` trigger so that PRs opened f
 This action is safe under that trigger because:
 
 1. **Author-association gate.** Before checkout, the action checks `author_association` on the event and drops anything that isn't `COLLABORATOR`, `MEMBER`, `OWNER`, or a user with write permission on the repo. Fork PRs from outside contributors are skipped.
-2. **No PR code is executed on the runner.** After checkout, the workflow only inspects `package.json` for framework detection, runs `git diff` against the base branch, installs a pinned Netlify CLI, and hands the prompt to Netlify's remote agent service. The agent itself runs on Netlify infrastructure, not on your runner.
+2. **No PR code is executed on the runner.** After checkout, the workflow only inspects `package.json` for framework detection, runs `git diff` against the base branch, installs action-owned dependencies from `github.action_path`, installs a pinned Netlify CLI for site metadata, and hands the prompt to Netlify's remote agent service. The agent itself runs on Netlify infrastructure, not on your runner.
 
 **If you fork this workflow, do not add steps that execute PR-supplied code** (e.g. `npm install` against the PR's `package.json`, running the project's tests/linter/build, or any tool that loads config files from the workspace). Any such step turns this from "trusted-only trigger that calls a remote API" into a credential exfiltration vector. If you need to run PR code, switch to the two-workflow `pull_request` + `workflow_run` pattern described in the GitHub Security Lab article above.
+
+## SDK dependency policy
+
+Runner lifecycle behavior comes from the exact published dependency
+`nax-agent-runner-sdk@0.1.0`. The action does not use a workspace link or a
+floating semver range. Maintainers should upgrade that pin intentionally,
+review the SDK changelog, regenerate `package-lock.json`, and run:
+
+```bash
+npm ci --ignore-scripts
+npm run typecheck
+npm test
+npm run docs:check
+```
+
+The integration suite exercises the installed npm package through create,
+wait, timeout, follow-up, checkpoint, and PR-only landing boundaries.
 
 ## Contributing
 

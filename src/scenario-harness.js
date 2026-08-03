@@ -253,6 +253,7 @@ function createMockGithub(fixtures, callLog, fallbackPull) {
       },
       pulls: {
         get: async () => ({ data: /** @type {any} */ (unwrapDataEnvelope(readFixture('pulls.get', fallbackPull))) }),
+        update: async () => ({ data: /** @type {any} */ (unwrapDataEnvelope(readFixture('pulls.update', { number: fallbackPull.number || 1 }))) }),
       },
       repos: {
         getCollaboratorPermissionLevel: async () => ({

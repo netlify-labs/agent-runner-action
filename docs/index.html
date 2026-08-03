@@ -147,6 +147,7 @@
 <div class="hero">
   <h1>Netlify <span>Agent Runners</span></h1>
   <p>Start Netlify Agent Runners agent runs from GitHub issues and pull requests. Just mention <code>@netlify</code> and the selected agent builds your site.</p>
+  <p>Runner execution uses the published <code>nax-agent-runner-sdk</code> and lands changes as an open pull request; this action never merges automatically.</p>
   <div class="hero-code">
     <span class="key">- uses:</span> <span class="val">netlify-labs/agent-runner-action@v1</span><br>
     <span class="key">&nbsp; with:</span><br>
@@ -258,7 +259,6 @@ jobs:
         with:
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
-          # netlify-filter: ${{ vars.NETLIFY_FILTER }} # for Netlify monorepo sites
           # preflight-only: 'false' # Validate setup and skip agent execution</code></pre>
   </div>
 </section>
@@ -308,7 +308,7 @@ jobs:
     <tr><th>Input</th><th>Required</th><th>Default</th><th>Description</th></tr>
     <tr><td><code>netlify-auth-token</code></td><td>Yes</td><td>&mdash;</td><td>Netlify personal access token</td></tr>
     <tr><td><code>netlify-site-id</code></td><td>Yes</td><td>&mdash;</td><td>Netlify site ID</td></tr>
-    <tr><td><code>netlify-filter</code></td><td>No</td><td>auto-detect</td><td>Netlify CLI monorepo app filter (<code>--filter</code>). Overrides auto-detection from a single <code>netlify.toml</code> build command filter.</td></tr>
+    <tr><td><code>netlify-filter</code></td><td>No</td><td><code>''</code></td><td>Deprecated compatibility input. SDK dispatch uses the exact <code>netlify-site-id</code>.</td></tr>
     <tr><td><code>github-token</code></td><td>No</td><td><code>github.token</code></td><td>GitHub token for API calls</td></tr>
     <tr><td><code>allowed-users</code></td><td>No</td><td><code>''</code></td><td>Comma-separated usernames allowed to trigger</td></tr>
     <tr><td><code>default-agent</code></td><td>No</td><td><code>codex</code></td><td>Default agent (<code>claude</code>, <code>codex</code>, <code>gemini</code>)</td></tr>
