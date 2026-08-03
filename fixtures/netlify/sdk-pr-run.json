@@ -1,0 +1,31 @@
+{
+  "runner": {
+    "runnerId": "runner-sdk-1",
+    "state": "completed",
+    "siteId": "site-123",
+    "siteName": "example-site",
+    "branch": "main",
+    "codeOrigin": "github",
+    "hasResultDiff": true
+  },
+  "session": {
+    "sessionId": "session-sdk-1",
+    "runnerId": "runner-sdk-1",
+    "state": "completed",
+    "resultText": "Implemented the requested change.",
+    "title": "Implement requested change",
+    "agent": "codex",
+    "deployId": "deploy-sdk-1",
+    "deployUrl": "https://deploy-sdk-1.netlify.app",
+    "hasResultDiff": true,
+    "usage": {
+      "totalTokens": 42
+    }
+  },
+  "pullRequest": {
+    "prUrl": "https://github.com/netlify-labs/example/pull/42",
+    "prNumber": 42,
+    "prBranch": "agent/runner-sdk-1",
+    "commitSha": "0123456789abcdef0123456789abcdef01234567"
+  }
+}

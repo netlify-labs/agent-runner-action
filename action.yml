@@ -15,7 +15,7 @@ inputs:
     description: 'Netlify site ID (NETLIFY_SITE_ID)'
     required: true
   netlify-filter:
-    description: 'Netlify CLI monorepo app filter (--filter), for sites with multiple apps'
+    description: 'Deprecated compatibility input; netlify-site-id selects the SDK target'
     required: false
     default: ''
   github-token:
@@ -861,25 +861,8 @@ runs:
           });
 
     # -----------------------------------------------------------------------
-    # 13. Resolve Netlify monorepo app filter.
-    #     Explicit netlify-filter input wins; otherwise infer one unambiguous
-    #     filter from netlify.toml build commands.
-    # -----------------------------------------------------------------------
-    - name: Resolve Netlify app filter
-      id: resolve-netlify-filter
-      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
-      shell: bash
-      env:
-        ACTION_DIR: ${{ github.action_path }}
-        NETLIFY_FILTER: ${{ inputs.netlify-filter }}
-      run: |
-        node "$ACTION_DIR/src/netlify-filter.js" \
-          --project-root "$GITHUB_WORKSPACE" \
-          --filter "${NETLIFY_FILTER:-}"
-
-    # -----------------------------------------------------------------------
-    # 14. Run Netlify Agent Runners (create an agent run, poll for completion)
-    #     Dry-run mode skips PR creation and commits.
+    # 13. Run Netlify Agent Runners through nax-agent-runner-sdk.
+    #     Landing is PR-only; dry-run mode skips landing.
     # -----------------------------------------------------------------------
     - name: Run Netlify Agent Runners
       id: netlify-agent
@@ -888,483 +871,37 @@ runs:
       env:
         NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
         NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
-        RESOLVED_NETLIFY_FILTER: ${{ steps.resolve-netlify-filter.outputs.filter }}
-        RESOLVED_NETLIFY_FILTER_SOURCE: ${{ steps.resolve-netlify-filter.outputs.source }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
         NETLIFY_AGENT: ${{ steps.context-info.outputs.agent || steps.context-info.outputs.model }}
         AGENT_MODEL: ${{ steps.context-info.outputs.model || steps.context-info.outputs.agent }}
         EXISTING_RUNNER_ID: ${{ steps.extract-agent-id.outputs.agent-runner-id }}
+        SESSION_DATA_MAP: ${{ steps.extract-agent-id.outputs.session-data-map }}
         HEAD_BRANCH: ${{ steps.context-info.outputs.head-ref }}
         REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        REPOSITORY_NAME: ${{ github.repository }}
-        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
-        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
-        WORKFLOW_RUN_ID: ${{ github.run_id }}
-        STATUS_COMMENT_ID: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
-        DEBUG_AGENT: ${{ inputs.debug }}
         MAX_WAIT_MINUTES: ${{ inputs.timeout-minutes }}
         IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
         ACTION_DIR: ${{ github.action_path }}
-      run: |
-        set -euo pipefail
+      run: node "$ACTION_DIR/src/run-agent.js"
 
-        debug_log() {
-          if [ "${DEBUG_AGENT:-}" = "true" ]; then
-            echo "::group::DEBUG: $1"
-            echo "$2" | jq . 2>/dev/null || echo "$2"
-            echo "::endgroup::"
-          fi
-        }
-
-        sanitize_error() {
-          printf '%s' "${1:-}" \
-            | sed 's/\x1b\[[0-9;]*m//g' \
-            | tr '\r\n' '  ' \
-            | sed 's/[[:cntrl:]]//g; s/[[:space:]]\+/ /g; s/^ //; s/ $//'
-        }
-
-        emit_failure_context() {
-          local stage="$1"
-          local category="$2"
-          local message="${3:-}"
-          local clean_message
-          clean_message=$(sanitize_error "$message" | cut -c1-500)
-          echo "failure-stage=$stage" >> $GITHUB_OUTPUT
-          echo "failure-category=$category" >> $GITHUB_OUTPUT
-          echo "agent-error=$clean_message" >> $GITHUB_OUTPUT
-        }
-
-        normalize_error_text() {
-          sanitize_error "${1:-}" | tr '[:upper:]' '[:lower:]'
-        }
-
-        is_hard_pr_failure() {
-          local text
-          text=$(normalize_error_text "${1:-}")
-          [ -n "$text" ] || return 1
-          case "$text" in
-            *"cannot push changes to github workflow files"*|\
-            *"workflows permission"*|\
-            *"workflow-file permission"*|\
-            *"resource not accessible by integration"*|\
-            *"permission denied"*|\
-            *"bad credentials"*|\
-            *"403"*|\
-            *"422"*|\
-            *"validation failed"*|\
-            *"branch protection"*|\
-            *"protected branch"*|\
-            *"repository not found"*|\
-            *"agent runner not found"*|\
-            *"agent_runner not found"*|\
-            *"runner not found"*|\
-            *"invalid agent_runner_id"*)
-              return 0
-              ;;
-          esac
-          return 1
-        }
-
-        is_retryable_pr_failure() {
-          local raw="${1:-}"
-          local text
-          text=$(normalize_error_text "$raw")
-          if is_hard_pr_failure "$raw"; then
-            return 1
-          fi
-          if [ -z "$text" ]; then
-            return 0
-          fi
-          case "$text" in
-            *"timeout"*|\
-            *"timed out"*|\
-            *"temporarily unavailable"*|\
-            *"temporary"*|\
-            *"try again"*|\
-            *"rate limit"*|\
-            *"too many requests"*|\
-            *"internal server error"*|\
-            *"bad gateway"*|\
-            *"service unavailable"*|\
-            *"gateway timeout"*|\
-            *"connection reset"*|\
-            *"econnreset"*|\
-            *"network"*|\
-            *"malformed"*|\
-            *"invalid json"*|\
-            *"parse error"*|\
-            *"500"*|\
-            *"502"*|\
-            *"503"*|\
-            *"504"*)
-              return 0
-              ;;
-          esac
-          return 1
-        }
-
-        # Ensure netlify CLI is on PATH
-        export PATH="$HOME/.bun/bin:$PATH"
-
-        # Default empty failure context for successful runs.
-        echo "failure-stage=" >> $GITHUB_OUTPUT
-        echo "failure-category=" >> $GITHUB_OUTPUT
-        echo "agent-error=" >> $GITHUB_OUTPUT
-
-        echo "🚀 Starting Netlify Agent Runners..."
-        SELECTED_AGENT="${NETLIFY_AGENT:-${AGENT_MODEL:-codex}}"
-        echo "Agent: $SELECTED_AGENT | Site: ${SITE_NAME:-unknown} | Dry-run: ${IS_DRY_RUN:-false}"
-
-        NETLIFY_FILTER_ARGS=()
-        if [ -n "${RESOLVED_NETLIFY_FILTER:-}" ]; then
-          NETLIFY_FILTER_ARGS=(--filter "$RESOLVED_NETLIFY_FILTER")
-          if [ "$RESOLVED_NETLIFY_FILTER_SOURCE" = "input" ]; then
-            echo "Netlify app filter: $RESOLVED_NETLIFY_FILTER"
-          else
-            echo "Netlify app filter: $RESOLVED_NETLIFY_FILTER (auto-detected from $RESOLVED_NETLIFY_FILTER_SOURCE)"
-          fi
-        fi
-
-        # Build agent args
-        AGENT_ARGS=(--json --agent "$SELECTED_AGENT")
-        if [ -n "${HEAD_BRANCH:-}" ]; then
-          AGENT_ARGS+=(--branch "$HEAD_BRANCH")
-        elif [ -n "${REPOSITORY_DEFAULT_BRANCH:-}" ]; then
-          AGENT_ARGS+=(--branch "$REPOSITORY_DEFAULT_BRANCH")
-        fi
-
-        # Create or reuse agent run
-        if [ -n "${EXISTING_RUNNER_ID:-}" ]; then
-          echo "🔄 Follow-up session on runner: $EXISTING_RUNNER_ID"
-          # Build the JSON payload with jq so every value is properly escaped.
-          # Direct bash interpolation here would let any special character in
-          # EXISTING_RUNNER_ID smuggle additional JSON keys.
-          SESSION_PAYLOAD=$(jq -n \
-            --arg id "$EXISTING_RUNNER_ID" \
-            --arg agent "$SELECTED_AGENT" \
-            --arg prompt "$TRIGGER_TEXT" \
-            '{agent_runner_id: $id, body: {prompt: $prompt, agent: $agent}}')
-          SESSION_CREATED=false
-          for ATTEMPT in 1 2 3; do
-            echo "  Attempt $ATTEMPT/3..."
-            SESSION_RESULT=$(netlify api createAgentRunnerSession \
-              --data "$SESSION_PAYLOAD" 2>/dev/null || true)
-            debug_log "createAgentRunnerSession (attempt $ATTEMPT)" "$SESSION_RESULT"
-            SESSION_STATE=$(echo "$SESSION_RESULT" | jq -r '.state // empty')
-            if [ "$SESSION_STATE" = "running" ]; then
-              SESSION_CREATED=true
-              AGENT_ID="$EXISTING_RUNNER_ID"
-              echo "✅ Follow-up session created"
-              break
-            fi
-            echo "  ⚠️ Attempt $ATTEMPT failed (state: ${SESSION_STATE:-empty})"
-            [ $ATTEMPT -lt 3 ] && sleep 5
-          done
-          if [ "$SESSION_CREATED" = "false" ]; then
-            echo "❌ Failed to create follow-up session after 3 attempts"
-            echo "outcome=failure" >> $GITHUB_OUTPUT
-            echo "agent-id=$EXISTING_RUNNER_ID" >> $GITHUB_OUTPUT
-            emit_failure_context "create-session" "session-create-failed" "Failed to create follow-up session after 3 attempts"
-            exit 1
-          fi
-        else
-          echo "📡 Creating new agent run..."
-          AGENT_STDERR=$(mktemp)
-          AGENT_OUTPUT=$(netlify agents:create "$TRIGGER_TEXT" "${AGENT_ARGS[@]}" "${NETLIFY_FILTER_ARGS[@]}" 2>"$AGENT_STDERR" || true)
-          debug_log "agents:create" "$AGENT_OUTPUT"
-          AGENT_ID=$(echo "$AGENT_OUTPUT" | jq -r '.id // empty' 2>/dev/null || true)
-          if [ -z "$AGENT_ID" ]; then
-            echo "❌ Failed to create agent task"
-            echo "--- stderr ---"
-            cat "$AGENT_STDERR" | sed 's/\x1b\[[0-9;]*m//g' || true
-            echo "--- stdout ---"
-            echo "$AGENT_OUTPUT"
-            echo "---"
-            AGENT_ERR_MSG=$(cat "$AGENT_STDERR" | sed 's/\x1b\[[0-9;]*m//g' | grep -i "error" | head -1 | sed 's/^[[:space:]]*›[[:space:]]*//')
-            echo "${AGENT_ERR_MSG:-$AGENT_OUTPUT}"
-            echo "outcome=failure" >> $GITHUB_OUTPUT
-            emit_failure_context "create-agent" "agent-create-failed" "${AGENT_ERR_MSG:-Failed to create agent task}"
-            rm -f "$AGENT_STDERR"
-            exit 1
-          fi
-          echo "✅ Agent created: $AGENT_ID"
-        fi
-
-        echo "agent-id=$AGENT_ID" >> $GITHUB_OUTPUT
-
-        # Update status comment with agent run link (uses Node.js to avoid bash/JS duplication)
-        if [ -n "$STATUS_COMMENT_ID" ]; then
-          export AGENT_LINK="https://app.netlify.com/projects/${SITE_NAME:-unknown}/agent-runs/$AGENT_ID"
-          export ACTION_LINK="https://github.com/$REPOSITORY_NAME/actions/runs/$WORKFLOW_RUN_ID"
-          export AGENT_ID
-          UPDATE_BODY=$(bun "$ACTION_DIR/src/format-comment.js" in-progress)
-          GH_TOKEN="${GITHUB_TOKEN}" gh api "repos/$REPOSITORY_NAME/issues/comments/$STATUS_COMMENT_ID" \
-            --method PATCH --field body="$UPDATE_BODY" > /dev/null 2>&1 || true
-        fi
-
-        # Poll for completion
-        # Wait 50s before first poll (agent always takes >1min), then 15s→20s→25s→30s cap
-        MAX_WAIT=$((${MAX_WAIT_MINUTES:-10} * 60))
-        INITIAL_WAIT=50
-        ELAPSED=0
-        POLL_INTERVAL=15
-        AGENT_LINK="https://app.netlify.com/projects/${SITE_NAME:-unknown}/agent-runs/$AGENT_ID"
-        echo "⏳ Waiting for completion (timeout: ${MAX_WAIT}s, first check in ${INITIAL_WAIT}s)..."
-        sleep $INITIAL_WAIT
-        ELAPSED=$INITIAL_WAIT
-
-        while [ $ELAPSED -lt $MAX_WAIT ]; do
-          AGENT_RESULT=$(netlify agents:show "$AGENT_ID" --json "${NETLIFY_FILTER_ARGS[@]}" 2>/dev/null || true)
-          STATE=$(echo "$AGENT_RESULT" | jq -r '.state // empty' 2>/dev/null)
-          echo "  [$ELAPSED/${MAX_WAIT}s] Status: ${STATE:-unknown}"
-          debug_log "agents:show (poll $ELAPSED)" "$AGENT_RESULT"
-
-          case "$STATE" in
-            completed|done)
-              echo "✅ Agent completed"
-
-              # Fetch session details
-              SESSION_OUTPUT=$(netlify api listAgentRunnerSessions --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
-              AGENT_DEPLOY_URL=""
-              debug_log "listAgentRunnerSessions" "$SESSION_OUTPUT"
-              if [ -n "$SESSION_OUTPUT" ]; then
-                LATEST_SESSION=$(echo "$SESSION_OUTPUT" | jq -c 'if type=="array" then .[-1] // {} elif type=="object" and (.sessions | type == "array") then .sessions[-1] // {} else {} end')
-                echo "agent-result<<AGENT_RESULT_EOF" >> $GITHUB_OUTPUT
-                echo "$LATEST_SESSION" | jq -r '.result // empty' >> $GITHUB_OUTPUT
-                echo "AGENT_RESULT_EOF" >> $GITHUB_OUTPUT
-                AGENT_DEPLOY_URL=$(echo "$LATEST_SESSION" | jq -r '.deploy_url // empty')
-                echo "agent-title=$(echo "$LATEST_SESSION" | jq -r '.title // empty')" >> $GITHUB_OUTPUT
-                echo "agent-sessions<<AGENT_SESSIONS_EOF" >> $GITHUB_OUTPUT
-                echo "$SESSION_OUTPUT" >> $GITHUB_OUTPUT
-                echo "AGENT_SESSIONS_EOF" >> $GITHUB_OUTPUT
-                echo "$SESSION_OUTPUT" > "$RUNNER_TEMP/agent-sessions-${AGENT_ID}.json"
-              else
-                LATEST_SESSION='{}'
-              fi
-
-              LATEST_SESSION_STATE=$(echo "$LATEST_SESSION" | jq -r '.state // empty' | tr '[:upper:]' '[:lower:]')
-              case "$LATEST_SESSION_STATE" in
-                failed|error|cancelled|canceled)
-                  echo "❌ Latest agent session finished with state: $LATEST_SESSION_STATE"
-                  LATEST_SESSION_ERROR=$(echo "$LATEST_SESSION" | jq -r '.error_message // .error // .result // empty')
-                  echo "outcome=failure" >> $GITHUB_OUTPUT
-                  emit_failure_context "poll-session" "agent-failed" "${LATEST_SESSION_ERROR:-Latest agent session finished with state: $LATEST_SESSION_STATE}"
-                  exit 1
-                  ;;
-              esac
-
-              echo "outcome=success" >> $GITHUB_OUTPUT
-
-              # Re-fetch runner
-              AGENT_RESULT=$(netlify agents:show "$AGENT_ID" --json "${NETLIFY_FILTER_ARGS[@]}" 2>/dev/null || true)
-              debug_log "agents:show (post-completion)" "$AGENT_RESULT"
-
-              # Validate deploy URL
-              if [ -n "$AGENT_DEPLOY_URL" ]; then
-                DEPLOY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$AGENT_DEPLOY_URL" || echo "000")
-                if [ "$DEPLOY_STATUS" != "200" ]; then
-                  AGENT_DEPLOY_URL=""
-                fi
-              fi
-              echo "agent-deploy-url=$AGENT_DEPLOY_URL" >> $GITHUB_OUTPUT
-
-              # Screenshot
-              DEPLOY_ID=$(echo "$LATEST_SESSION" | jq -r '.deploy_id // empty')
-              if [ -n "$DEPLOY_ID" ] && [ -n "$AGENT_DEPLOY_URL" ]; then
-                DEPLOY_RESULT=$(netlify api getDeploy --data "{\"deploy_id\": \"$DEPLOY_ID\"}" 2>/dev/null || true)
-                debug_log "getDeploy" "$DEPLOY_RESULT"
-                echo "agent-screenshot-url=$(echo "$DEPLOY_RESULT" | jq -r '.screenshot_url // empty')" >> $GITHUB_OUTPUT
-              else
-                echo "agent-screenshot-url=" >> $GITHUB_OUTPUT
-              fi
-
-              # --- Dry-run mode: skip PR creation and commits ---
-              if [ "$IS_DRY_RUN" = "true" ]; then
-                echo "🔍 Preview mode — skipping PR creation and commits"
-                echo "agent-pr-url=" >> $GITHUB_OUTPUT
-                echo "agent-pr-branch=" >> $GITHUB_OUTPUT
-                exit 0
-              fi
-
-              # Handle diffs — commit to existing PR or create new PR
-              RUNNER_HAS_DIFF=$(echo "$AGENT_RESULT" | jq -r '.has_result_diff // false')
-              SESSION_HAS_DIFF=$(echo "$LATEST_SESSION" | jq -r '.has_result_diff // .has_diff // empty')
-              EXISTING_PR=$(echo "$LATEST_SESSION" | jq -r '.pull_request_url // empty')
-              PR_BRANCH=$(echo "$LATEST_SESSION" | jq -r '.pull_request_branch // empty')
-              [ -n "$EXISTING_PR" ] || EXISTING_PR=$(echo "$AGENT_RESULT" | jq -r '.pr_url // empty')
-              [ -n "$PR_BRANCH" ] || PR_BRANCH=$(echo "$AGENT_RESULT" | jq -r '.pr_branch // empty')
-              HAS_DIFF="$RUNNER_HAS_DIFF"
-              if [ -n "$SESSION_HAS_DIFF" ]; then
-                HAS_DIFF="$SESSION_HAS_DIFF"
-              elif [ -n "${EXISTING_RUNNER_ID:-}" ] && [ "$RUNNER_HAS_DIFF" = "true" ] && [ -n "$EXISTING_PR" ] && [ -n "$PR_BRANCH" ] && [ -z "$DEPLOY_ID" ] && [ -z "$AGENT_DEPLOY_URL" ]; then
-                HAS_DIFF="false"
-                echo "ℹ️ Latest follow-up session produced no deploy/code artifacts; reusing existing PR without a new commit"
-              fi
-              echo "agent-has-diff=$HAS_DIFF" >> $GITHUB_OUTPUT
-
-              if [ "$HAS_DIFF" = "true" ] && [ -n "$EXISTING_PR" ] && [ -n "$PR_BRANCH" ]; then
-                echo "📦 Committing to branch: $PR_BRANCH"
-                COMMIT_API_RESULT=$(netlify api agentRunnerCommitToBranch \
-                  --data "{\"agent_runner_id\": \"$AGENT_ID\", \"target_branch\": \"$PR_BRANCH\", \"body\": {\"target_branch\": \"$PR_BRANCH\"}}" 2>/dev/null || true)
-                debug_log "agentRunnerCommitToBranch" "$COMMIT_API_RESULT"
-
-                COMMIT_WAIT=0
-                COMMIT_FAILURE=""
-                while [ $COMMIT_WAIT -lt 30 ]; do
-                  sleep 5
-                  COMMIT_WAIT=$((COMMIT_WAIT + 5))
-                  COMMIT_CHECK=$(netlify api getAgentRunner --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
-                  MERGE_SHA=$(echo "$COMMIT_CHECK" | jq -r '.merge_commit_sha // empty')
-                  if [ -n "$MERGE_SHA" ]; then
-                    echo "✅ Committed: $MERGE_SHA"
-                    break
-                  fi
-                  MERGE_CREATING=$(echo "$COMMIT_CHECK" | jq -r '.merge_commit_is_being_created // false')
-                  if [ "$MERGE_CREATING" = "false" ]; then
-                    MERGE_ERROR=$(echo "$COMMIT_CHECK" | jq -r '.merge_commit_error // empty')
-                    if [ -n "$MERGE_ERROR" ]; then
-                      echo "⚠️ Commit error: $MERGE_ERROR"
-                      COMMIT_FAILURE="$MERGE_ERROR"
-                    fi
-                    break
-                  fi
-                  echo "  [${COMMIT_WAIT}/30s] Waiting for commit..."
-                done
-                echo "agent-pr-url=$EXISTING_PR" >> $GITHUB_OUTPUT
-                echo "agent-pr-branch=$PR_BRANCH" >> $GITHUB_OUTPUT
-                echo "agent-commit-sha=${MERGE_SHA:-}" >> $GITHUB_OUTPUT
-                if [ -z "${MERGE_SHA:-}" ]; then
-                  COMMIT_FAILURE="${COMMIT_FAILURE:-Timed out waiting for branch commit to finish}"
-                fi
-                if [ -n "$COMMIT_FAILURE" ]; then
-                  echo "outcome=failure" >> $GITHUB_OUTPUT
-                  emit_failure_context "commit" "commit-to-branch-failed" "$COMMIT_FAILURE"
-                  exit 1
-                fi
-
-              elif [ "$HAS_DIFF" = "true" ] && [ -z "$EXISTING_PR" ]; then
-                PR_MAX_ATTEMPTS=3
-                PR_WAIT_SECONDS=20
-                PR_ATTEMPT=1
-                PR_WAIT=0
-                PR_URL=""
-                PR_FAILURE=""
-                PR_HARD_FAILURE=false
-                while [ $PR_ATTEMPT -le $PR_MAX_ATTEMPTS ]; do
-                  echo "🔀 Creating pull request (attempt ${PR_ATTEMPT}/${PR_MAX_ATTEMPTS})..."
-                  PR_API_RESULT=$(netlify api agentRunnerPullRequest --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
-                  debug_log "agentRunnerPullRequest (attempt $PR_ATTEMPT)" "$PR_API_RESULT"
-
-                  PR_FAILURE=$(echo "$PR_API_RESULT" | jq -r '.pr_error // .error_message // .error // .message // empty' 2>/dev/null || true)
-                  if is_hard_pr_failure "$PR_FAILURE"; then
-                    PR_HARD_FAILURE=true
-                  else
-                    PR_HARD_FAILURE=false
-                  fi
-
-                  PR_WAIT=0
-                  PR_CREATING=""
-                  while [ "$PR_HARD_FAILURE" = "false" ] && [ $PR_WAIT -lt $PR_WAIT_SECONDS ]; do
-                    sleep 5
-                    PR_WAIT=$((PR_WAIT + 5))
-                    PR_CHECK=$(netlify api getAgentRunner --data "{\"agent_runner_id\": \"$AGENT_ID\"}" 2>/dev/null || true)
-                    PR_URL=$(echo "$PR_CHECK" | jq -r '.pr_url // empty')
-                    PR_CREATING=$(echo "$PR_CHECK" | jq -r '.pr_is_being_created // false')
-                    PR_ERROR=$(echo "$PR_CHECK" | jq -r '.pr_error // .error_message // .error // .message // empty' 2>/dev/null || true)
-                    if [ -n "$PR_ERROR" ]; then
-                      PR_FAILURE="$PR_ERROR"
-                      if is_hard_pr_failure "$PR_FAILURE"; then
-                        PR_HARD_FAILURE=true
-                      fi
-                    fi
-                    if [ -n "$PR_URL" ]; then
-                      echo "✅ PR created: $PR_URL"
-                      echo "agent-pr-url=$PR_URL" >> $GITHUB_OUTPUT
-                      echo "agent-pr-branch=$(echo "$PR_CHECK" | jq -r '.pr_branch // empty')" >> $GITHUB_OUTPUT
-                      echo "agent-commit-sha=$(echo "$PR_CHECK" | jq -r '.merge_commit_sha // empty')" >> $GITHUB_OUTPUT
-
-                      PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
-                      if [ -n "$PR_NUM" ]; then
-                        EXISTING_TITLE=$(GH_TOKEN="${GITHUB_TOKEN}" gh pr view "$PR_NUM" --json title --jq '.title' 2>/dev/null || true)
-                        CLEAN_TITLE=$(echo "$EXISTING_TITLE" | sed -E 's/@(netlify|nelify|netlfy|netify|netlif|netfly)([_-](agents?([_-]runs?)?|ai))?\s+((with|using|use|via)\s+)?(claude|codex|gemini)?\s*//; s/^\s+//')
-                        if [ -n "$CLEAN_TITLE" ] && [ "$CLEAN_TITLE" != "$EXISTING_TITLE" ]; then
-                          GH_TOKEN="${GITHUB_TOKEN}" gh pr edit "$PR_NUM" --title "$CLEAN_TITLE" 2>/dev/null || true
-                        fi
-                        if [ -n "${ISSUE_NUMBER:-}" ]; then
-                          EXISTING_BODY=$(GH_TOKEN="${GITHUB_TOKEN}" gh pr view "$PR_NUM" --json body --jq '.body' 2>/dev/null || true)
-                          NEW_BODY=$(printf '%s\n\n---\nResolves #%s\n<!-- netlify-agent-runner-id:%s -->' "$EXISTING_BODY" "$ISSUE_NUMBER" "$AGENT_ID")
-                          GH_TOKEN="${GITHUB_TOKEN}" gh pr edit "$PR_NUM" --body "$NEW_BODY" 2>/dev/null || true
-                        fi
-                      fi
-                      break
-                    fi
-                    if [ "$PR_CREATING" = "false" ]; then
-                      if [ -n "$PR_FAILURE" ]; then
-                        echo "⚠️ PR creation failed: $PR_FAILURE"
-                      else
-                        echo "⚠️ PR creation finished but no URL returned"
-                      fi
-                      break
-                    fi
-                    echo "  [${PR_WAIT}/${PR_WAIT_SECONDS}s] Waiting for PR..."
-                  done
-                  if [ -z "$PR_URL" ] && [ "$PR_HARD_FAILURE" = "false" ] && [ "$PR_CREATING" != "false" ] && [ $PR_WAIT -ge $PR_WAIT_SECONDS ]; then
-                    PR_FAILURE="Timed out waiting ${PR_WAIT_SECONDS}s for pull request URL on attempt ${PR_ATTEMPT}"
-                    echo "⚠️ $PR_FAILURE"
-                  fi
-
-                  if [ -n "$PR_URL" ]; then
-                    break
-                  fi
-                  if [ "$PR_HARD_FAILURE" = "true" ]; then
-                    echo "⚠️ PR creation failed with a non-retryable error: $PR_FAILURE"
-                    break
-                  fi
-                  if [ $PR_ATTEMPT -lt $PR_MAX_ATTEMPTS ] && is_retryable_pr_failure "$PR_FAILURE"; then
-                    PR_BACKOFF=$((PR_ATTEMPT * 10))
-                    echo "↻ Retrying PR creation in ${PR_BACKOFF}s..."
-                    sleep $PR_BACKOFF
-                    PR_ATTEMPT=$((PR_ATTEMPT + 1))
-                    continue
-                  fi
-                  break
-                done
-                if [ -z "$PR_URL" ]; then
-                  echo "agent-pr-url=" >> $GITHUB_OUTPUT
-                  echo "agent-pr-branch=" >> $GITHUB_OUTPUT
-                  echo "outcome=failure" >> $GITHUB_OUTPUT
-                  emit_failure_context "create-pr" "pull-request-create-failed" "${PR_FAILURE:-PR creation finished without a pull request URL after ${PR_ATTEMPT} attempts}"
-                  exit 1
-                fi
-              else
-                echo "agent-pr-url=$(echo "$AGENT_RESULT" | jq -r '.pr_url // empty')" >> $GITHUB_OUTPUT
-                echo "agent-pr-branch=$(echo "$AGENT_RESULT" | jq -r '.pr_branch // empty')" >> $GITHUB_OUTPUT
-              fi
-              exit 0
-              ;;
-            failed|error|cancelled)
-              echo "❌ Agent finished with state: $STATE"
-              AGENT_ERROR_MSG=$(echo "$AGENT_RESULT" | jq -r '.error_message // empty' 2>/dev/null)
-              echo "outcome=failure" >> $GITHUB_OUTPUT
-              emit_failure_context "poll-agent" "agent-failed" "${AGENT_ERROR_MSG:-Agent finished with state: $STATE}"
-              exit 1
-              ;;
-          esac
-
-          sleep $POLL_INTERVAL
-          ELAPSED=$((ELAPSED + POLL_INTERVAL))
-
-          # Gradual backoff: 15s → 20s → 25s → 30s cap
-          if [ $POLL_INTERVAL -lt 30 ]; then
-            POLL_INTERVAL=$((POLL_INTERVAL + 5))
-          fi
-        done
-
-        echo "❌ Agent timed out after ${MAX_WAIT}s (last state: ${STATE:-unknown})"
-        echo "outcome=timeout" >> $GITHUB_OUTPUT
-        emit_failure_context "poll-agent" "agent-timeout" "Agent timed out after ${MAX_WAIT}s (last state: ${STATE:-unknown})"
-        exit 1
+    - name: Finalize Agent Runner pull request metadata
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.netlify-agent.outputs.outcome == 'success'
+        && steps.netlify-agent.outputs.agent-pr-url != ''
+        && steps.extract-agent-id.outputs.agent-runner-id == ''
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
+        AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/finalize-agent-pr.js`);
+          await run({ github, context, core });
 
     # -----------------------------------------------------------------------
     # 14. Label management (opt-in)
@@ -1617,7 +1154,6 @@ runs:
           steps.trigger-text-size.outputs.safe == 'false'
           || steps.preflight.outcome == 'failure'
           || steps.preflight.outputs.preflight-ok == 'false'
-          || steps.resolve-netlify-filter.outcome == 'failure'
           || steps.netlify-agent.outcome == 'failure'
           || steps.generate_success_comment.outcome == 'failure'
           || steps.generate_error_comment.outcome == 'failure'

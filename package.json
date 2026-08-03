@@ -17,6 +17,7 @@
     "typescript": "^6.0.2"
   },
   "dependencies": {
-    "comment-block-parser": "^1.5.4"
+    "comment-block-parser": "^1.5.4",
+    "nax-agent-runner-sdk": "0.1.0"
   }
 }

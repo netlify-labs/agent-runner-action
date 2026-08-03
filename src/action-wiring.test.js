@@ -222,35 +222,28 @@ describe('action.yml wiring', () => {
     assert.match(preflightCommentBlock, /steps\.trigger-text-size\.outputs\.preflight-json \|\| steps\.preflight\.outputs\.preflight-json/);
   });
 
-  it('fails the run when post-agent commit or PR creation fails', () => {
-    assert.match(actionYml, /COMMIT_FAILURE=""/);
-    assert.match(actionYml, /is_hard_pr_failure\(\)/);
-    assert.match(actionYml, /is_retryable_pr_failure\(\)/);
-    assert.match(actionYml, /cannot push changes to github workflow files/);
-    assert.match(actionYml, /resource not accessible by integration/);
-    assert.match(actionYml, /PR_MAX_ATTEMPTS=3/);
-    assert.match(actionYml, /PR_WAIT_SECONDS=20/);
-    assert.match(actionYml, /Creating pull request \(attempt \$\{PR_ATTEMPT\}\/\$\{PR_MAX_ATTEMPTS\}\)/);
-    assert.match(actionYml, /PR_FAILURE=\$\(echo "\$PR_API_RESULT" \| jq -r '.pr_error \/\/ .error_message \/\/ .error \/\/ .message \/\/ empty'/);
-    assert.match(actionYml, /PR_ERROR=\$\(echo "\$PR_CHECK" \| jq -r '.pr_error \/\/ .error_message \/\/ .error \/\/ .message \/\/ empty'/);
-    assert.match(actionYml, /Timed out waiting \$\{PR_WAIT_SECONDS\}s for pull request URL on attempt \$\{PR_ATTEMPT\}/);
-    assert.match(actionYml, /Retrying PR creation in \$\{PR_BACKOFF\}s/);
-    assert.match(actionYml, /non-retryable error/);
-    assert.match(actionYml, /emit_failure_context "commit" "commit-to-branch-failed"/);
-    assert.match(actionYml, /emit_failure_context "create-pr" "pull-request-create-failed" "\$\{PR_FAILURE:-PR creation finished without a pull request URL after \$\{PR_ATTEMPT\} attempts\}"/);
-    assert.match(actionYml, /echo "outcome=failure" >> \$GITHUB_OUTPUT/);
-  });
+  it('delegates the full runner lifecycle and PR-only landing to the packaged SDK adapter', () => {
+    const runBlock = extractStepBlocks(actionYml)
+      .find(block => block.includes('- name: Run Netlify Agent Runners'));
+    assert.ok(runBlock, 'Run Netlify Agent Runners step should exist');
+    assert.match(runBlock, /NETLIFY_AUTH_TOKEN:\s+\$\{\{\s*inputs\.netlify-auth-token\s*\}\}/);
+    assert.match(runBlock, /NETLIFY_SITE_ID:\s+\$\{\{\s*inputs\.netlify-site-id\s*\}\}/);
+    assert.match(runBlock, /SESSION_DATA_MAP:\s+\$\{\{\s*steps\.extract-agent-id\.outputs\.session-data-map\s*\}\}/);
+    assert.match(runBlock, /node "\$ACTION_DIR\/src\/run-agent\.js"/);
 
-  it('uses latest session metadata before committing follow-up branch changes', () => {
-    assert.match(actionYml, /LATEST_SESSION=\$\(echo "\$SESSION_OUTPUT" \| jq -c/);
-    assert.match(actionYml, /SESSION_HAS_DIFF=\$\(echo "\$LATEST_SESSION" \| jq -r '.has_result_diff \/\/ .has_diff \/\/ empty'\)/);
-    assert.match(actionYml, /Latest follow-up session produced no deploy\/code artifacts; reusing existing PR without a new commit/);
-  });
-
-  it('fails completed runners when the latest session failed', () => {
-    assert.match(actionYml, /LATEST_SESSION_STATE=\$\(echo "\$LATEST_SESSION" \| jq -r '.state \/\/ empty'/);
-    assert.match(actionYml, /failed\|error\|cancelled\|canceled\)/);
-    assert.match(actionYml, /emit_failure_context "poll-session" "agent-failed"/);
+    for (const duplicateLifecycleCall of [
+      'netlify agents:create',
+      'netlify agents:show',
+      'createAgentRunnerSession',
+      'agentRunnerCommitToBranch',
+      'agentRunnerPullRequest',
+    ]) {
+      assert.equal(
+        actionYml.includes(duplicateLifecycleCall),
+        false,
+        `action.yml must not retain direct lifecycle call: ${duplicateLifecycleCall}`,
+      );
+    }
   });
 
   it('generates rich error comments even after the agent step fails', () => {
@@ -311,30 +304,13 @@ describe('action.yml wiring', () => {
     }
   });
 
-  it('passes the Netlify monorepo filter to CLI agent commands', () => {
+  it('keeps netlify-filter declared for compatibility but uses site ID for SDK dispatch', () => {
     const runBlock = extractStepBlocks(actionYml)
       .find(block => block.includes('- name: Run Netlify Agent Runners'));
     assert.ok(runBlock, 'Run Netlify Agent Runners step should exist');
-    assert.match(runBlock, /RESOLVED_NETLIFY_FILTER:\s+\$\{\{\s*steps\.resolve-netlify-filter\.outputs\.filter\s*\}\}/);
-    assert.match(runBlock, /RESOLVED_NETLIFY_FILTER_SOURCE:\s+\$\{\{\s*steps\.resolve-netlify-filter\.outputs\.source\s*\}\}/);
-    assert.match(runBlock, /NETLIFY_FILTER_ARGS=\(\)/);
-    assert.match(runBlock, /NETLIFY_FILTER_ARGS=\(--filter "\$RESOLVED_NETLIFY_FILTER"\)/);
-    assert.match(runBlock, /netlify agents:create "\$TRIGGER_TEXT" "\$\{AGENT_ARGS\[@\]\}" "\$\{NETLIFY_FILTER_ARGS\[@\]\}"/);
-    assert.match(runBlock, /netlify agents:show "\$AGENT_ID" --json "\$\{NETLIFY_FILTER_ARGS\[@\]\}"/);
-  });
-
-  it('auto-detects a single Netlify monorepo filter from netlify.toml build commands', () => {
-    const resolveBlock = extractStepBlocks(actionYml)
-      .find(block => block.includes('- name: Resolve Netlify app filter'));
-    const runBlock = extractStepBlocks(actionYml)
-      .find(block => block.includes('- name: Run Netlify Agent Runners'));
-    assert.ok(resolveBlock, 'Resolve Netlify app filter step should exist');
-    assert.ok(runBlock, 'Run Netlify Agent Runners step should exist');
-    assert.match(resolveBlock, /NETLIFY_FILTER:\s+\$\{\{\s*inputs\.netlify-filter\s*\}\}/);
-    assert.match(resolveBlock, /node "\$ACTION_DIR\/src\/netlify-filter\.js"/);
-    assert.match(resolveBlock, /--project-root "\$GITHUB_WORKSPACE"/);
-    assert.match(resolveBlock, /--filter "\$\{NETLIFY_FILTER:-\}"/);
-    assert.match(runBlock, /auto-detected from \$RESOLVED_NETLIFY_FILTER_SOURCE/);
+    assert.match(actionYml, /^  netlify-filter:\n/m);
+    assert.doesNotMatch(actionYml, /- name: Resolve Netlify app filter/);
+    assert.doesNotMatch(runBlock, /RESOLVED_NETLIFY_FILTER|NETLIFY_FILTER_ARGS|--filter/);
   });
 
   it('has at least the expected outputs', () => {
