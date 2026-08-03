@@ -67,8 +67,8 @@ describe('published SDK package integration', () => {
       path.join(root, 'package.json'),
       'utf8',
     ));
-    assert.equal(AGENT_RUNNER_SDK_VERSION, '0.2.0-next.1');
-    assert.equal(packageJson.version, '0.2.0-next.1');
+    assert.equal(AGENT_RUNNER_SDK_VERSION, '0.2.0');
+    assert.equal(packageJson.version, '0.2.0');
     assert.match(fs.realpathSync(root), /node_modules\/nax-agent-runner-sdk$/);
     assert.equal(fs.lstatSync(root).isSymbolicLink(), false);
   });
