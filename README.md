@@ -304,7 +304,7 @@ This action is safe under that trigger because:
 ## SDK dependency policy
 
 Runner lifecycle behavior comes from the exact published dependency
-`nax-agent-runner-sdk@0.1.0`. The action does not use a workspace link or a
+`nax-agent-runner-sdk@0.2.0-next.0`. The action does not use a workspace link or a
 floating semver range. Maintainers should upgrade that pin intentionally,
 review the SDK changelog, regenerate `package-lock.json`, and run:
 
