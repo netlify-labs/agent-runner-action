@@ -52,6 +52,28 @@ const MODEL_PATTERN = new RegExp(
 );
 
 // ---------------------------------------------------------------------------
+// Effort selection. Omitted effort means backend-selected Auto.
+// ---------------------------------------------------------------------------
+
+/** @type {string[]} */
+const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/** Effort word must be followed by whitespace, ':' or end of text. */
+const EFFORT_BOUNDARY = '(?=\\s|:|$)';
+
+/** Match "@netlify [with|using|via] <agent> <effort>" */
+const EFFORT_AFTER_AGENT_PATTERN = new RegExp(
+  `${TRIGGER_PATTERN.source}\\s+(?:(?:with|using|use|via)\\s+)?(?:${VALID_MODELS.join('|')})[ \\t]+(${VALID_EFFORTS.join('|')})${EFFORT_BOUNDARY}`,
+  'i'
+);
+
+/** Match an explicit "effort:high" or "effort=high" token. */
+const EXPLICIT_EFFORT_PATTERN = new RegExp(
+  `(?<![\\w-])effort[:=](auto|${VALID_EFFORTS.join('|')})(?![\\w-])`,
+  'i'
+);
+
+// ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
 
@@ -99,7 +121,44 @@ function extractModel(text, defaultModel) {
 }
 
 /**
- * Strip the @netlify mention, optional model prefix, and ◌ markers from prompt text.
+ * Normalize a configured effort value. Empty and `auto` mean backend Auto
+ * (returned as ''); unrecognized values return null.
+ * @param {string | null | undefined} value
+ * @returns {string | null}
+ */
+function normalizeEffort(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === '' || normalized === 'auto') return '';
+  return VALID_EFFORTS.includes(normalized) ? normalized : null;
+}
+
+/**
+ * Extract the effort level from the lines that mention @netlify, in order. On
+ * each line an explicit `effort:<level>` token wins over the word directly
+ * after the agent. Returns '' for backend Auto when nothing matches and no
+ * valid default is given.
+ * @param {string | null | undefined} text
+ * @param {string} [defaultEffort]
+ * @returns {string}
+ */
+function extractEffort(text, defaultEffort) {
+  const fallback = normalizeEffort(defaultEffort) || '';
+  if (!text) return fallback;
+  const lines = stripMarkdownCode(text)
+    .split('\n')
+    .filter((line) => TRIGGER_PATTERN.test(line));
+  for (const line of lines) {
+    const explicit = line.match(EXPLICIT_EFFORT_PATTERN);
+    if (explicit) return normalizeEffort(explicit[1]) || '';
+    const positional = line.match(EFFORT_AFTER_AGENT_PATTERN);
+    if (positional) return positional[1].toLowerCase();
+  }
+  return fallback;
+}
+
+/**
+ * Strip the @netlify mention, optional model/effort prefix, explicit effort
+ * token, and ◌ markers from prompt text.
  * @param {string | null | undefined} text
  * @returns {string}
  */
@@ -108,11 +167,12 @@ function cleanPrompt(text) {
   return text
     .replace(
       new RegExp(
-        `${TRIGGER_PATTERN.source}\\s+(?:(?:with|using|use|via)\\s+)?(?:${VALID_MODELS.join('|')})?\\s*`,
+        `${TRIGGER_PATTERN.source}\\s+(?:(?:with|using|use|via)\\s+)?(?:(?:${VALID_MODELS.join('|')})(?:[ \\t]+(?:${VALID_EFFORTS.join('|')})${EFFORT_BOUNDARY})?)?\\s*`,
         'i'
       ),
       ''
     )
+    .replace(new RegExp(`[ \\t]*${EXPLICIT_EFFORT_PATTERN.source}`, 'i'), '')
     .replace(/◌/g, 'via')
     .trim();
 }
@@ -236,7 +296,7 @@ function formatRunDate(dateStr) {
  * @param {InProgressCommentOptions} options
  * @returns {string}
  */
-function buildInProgressComment({ agentRunUrl, prompt, model, runnerId, ghActionUrl }) {
+function buildInProgressComment({ agentRunUrl, prompt, model, effort, runnerId, ghActionUrl }) {
   const [flavor, emoji] = randomFlavor();
   const clean = cleanPrompt(prompt);
   const sourceUrlMatch = (prompt || '').match(/◌\s+(\S+)/);
@@ -247,7 +307,9 @@ function buildInProgressComment({ agentRunUrl, prompt, model, runnerId, ghAction
     : `### Netlify Agent Run Status\n\n`;
 
   body += `Netlify Agent Runners ${flavor} ${emoji}\n\n`;
-  body += `**Agent:** \`${model}\`\n\n`;
+  body += effort
+    ? `**Agent:** \`${model}\` · **Effort:** \`${effort}\`\n\n`
+    : `**Agent:** \`${model}\`\n\n`;
   if (clean) body += formatPromptBlock(clean, sourceUrl);
 
   /** @type {string[]} */
@@ -276,9 +338,14 @@ module.exports = {
   VALID_MODELS,
   DEFAULT_MODEL,
   MODEL_PATTERN,
+  VALID_EFFORTS,
+  EFFORT_AFTER_AGENT_PATTERN,
+  EXPLICIT_EFFORT_PATTERN,
   FLAVOR_MESSAGES,
   matchesTrigger,
   extractModel,
+  normalizeEffort,
+  extractEffort,
   cleanPrompt,
   randomFlavor,
   ghContainsExpressions,

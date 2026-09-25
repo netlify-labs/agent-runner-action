@@ -26,6 +26,7 @@ const {
 
 const RUNNER_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const AGENT_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+const EFFORT_PATTERN = /^[a-z]{1,32}$/;
 const MAX_TIMEOUT_MINUTES = 24 * 60;
 const POLL_INTERVAL_MS = 15_000;
 const CHECKPOINT_FILE_PREFIX = 'agent-runner-sdk-handle-';
@@ -48,6 +49,7 @@ class ReportedActionError extends Error {
  * @property {string} siteId
  * @property {string} prompt
  * @property {string} agent
+ * @property {string} effort Empty string requests backend Auto.
  * @property {string} branch
  * @property {string} existingRunnerId
  * @property {Record<string, unknown>} sessionDataMap
@@ -110,6 +112,10 @@ function readActionInput(env) {
   if (!AGENT_PATTERN.test(agent)) {
     throw new Error('NETLIFY_AGENT contains unsupported characters.');
   }
+  const effort = String(env.NETLIFY_EFFORT || '').trim().toLowerCase();
+  if (effort && !EFFORT_PATTERN.test(effort)) {
+    throw new Error('NETLIFY_EFFORT contains unsupported characters.');
+  }
 
   const existingRunnerId = String(env.EXISTING_RUNNER_ID || '').trim();
   if (existingRunnerId && !RUNNER_ID_PATTERN.test(existingRunnerId)) {
@@ -139,6 +145,7 @@ function readActionInput(env) {
     siteId,
     prompt,
     agent,
+    effort,
     branch,
     existingRunnerId,
     sessionDataMap: parseJsonMap(env.SESSION_DATA_MAP),
@@ -581,7 +588,11 @@ async function runAgentAction(options = {}) {
       const base = await createLegacyHandle({ sdk, input });
       handle = await sdk.followUp(
         base,
-        { prompt: input.prompt, agent: input.agent },
+        {
+          prompt: input.prompt,
+          agent: input.agent,
+          ...(input.effort ? { effort: input.effort } : {}),
+        },
         requestOptions,
       );
     } else {
@@ -591,6 +602,7 @@ async function runAgentAction(options = {}) {
         siteId: input.siteId,
         prompt: input.prompt,
         agent: input.agent,
+        ...(input.effort ? { effort: input.effort } : {}),
         ...(input.branch ? { branch: input.branch } : {}),
         land: landing,
         deadlineMs: input.deadlineMs,

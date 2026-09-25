@@ -24,6 +24,18 @@ on:
           - claude
           - gemini
         default: 'codex'
+      effort:
+        description: 'Effort level (auto lets the backend choose)'
+        required: false
+        type: choice
+        options:
+          - auto
+          - low
+          - medium
+          - high
+          - xhigh
+          - max
+        default: 'auto'
   pull_request_target:
     types: [opened, reopened]
   pull_request_review_comment:
