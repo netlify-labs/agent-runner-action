@@ -104,3 +104,42 @@ describe('renderStatusComment', () => {
     assert.equal(parseRunnerId(rendered.statusBody), 'runner_3');
   });
 });
+
+describe('renderStatusComment failure inference', () => {
+  /** @param {Record<string, string>} env */
+  function render(env) {
+    return renderStatusComment({
+      env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site', ...env },
+      context: context(),
+    }).statusBody;
+  }
+
+  it('reports a crashed agent step as failed even without error text', () => {
+    const body = render({ AGENT_STEP_OUTCOME: 'failure', AGENT_OUTCOME: '', AGENT_ERROR: '' });
+    assert.match(body, /❌/);
+    assert.match(body, /Netlify Agent Run failed\./);
+    assert.doesNotMatch(body, /completed/);
+  });
+
+  it('reports failure and timeout outcomes as failed', () => {
+    for (const outcome of ['failure', 'timeout']) {
+      assert.match(render({ AGENT_OUTCOME: outcome }), /Netlify Agent Run failed\./, outcome);
+    }
+  });
+
+  it('reports a failure category (e.g. from preflight) as failed', () => {
+    const body = render({ FAILURE_CATEGORY: 'missing-auth-token' });
+    assert.match(body, /Netlify Agent Run failed\./);
+  });
+
+  it('still reports a real success as completed', () => {
+    const body = render({ AGENT_OUTCOME: 'success', AGENT_STEP_OUTCOME: 'success' });
+    assert.match(body, /✅/);
+    assert.match(body, /Netlify Agent Run completed\./);
+  });
+
+  it('does not treat a skipped agent step alone as a failure', () => {
+    const body = render({ AGENT_STEP_OUTCOME: 'skipped', AGENT_OUTCOME: '' });
+    assert.match(body, /Netlify Agent Run completed\./);
+  });
+});
