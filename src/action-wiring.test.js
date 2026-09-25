@@ -228,7 +228,8 @@ describe('action.yml wiring', () => {
     assert.ok(runBlock, 'Run Netlify Agent Runners step should exist');
     assert.match(runBlock, /NETLIFY_AUTH_TOKEN:\s+\$\{\{\s*inputs\.netlify-auth-token\s*\}\}/);
     assert.match(runBlock, /NETLIFY_SITE_ID:\s+\$\{\{\s*inputs\.netlify-site-id\s*\}\}/);
-    assert.match(runBlock, /SESSION_DATA_MAP:\s+\$\{\{\s*steps\.extract-agent-id\.outputs\.session-data-map\s*\}\}/);
+    // A recovered previous run updates the session data map before this step.
+    assert.match(runBlock, /SESSION_DATA_MAP:\s+\$\{\{\s*steps\.recover\.outputs\.session-data-map \|\| steps\.extract-agent-id\.outputs\.session-data-map\s*\}\}/);
     assert.match(runBlock, /node "\$ACTION_DIR\/src\/run-agent\.js"/);
 
     for (const duplicateLifecycleCall of [

@@ -379,6 +379,57 @@ function resolveSelection(selection, defaults = {}) {
 }
 
 /**
+ * @typedef {object} MentionCommand
+ * @property {'run' | 'stop' | 'recover'} command
+ * @property {'normal' | 'ask'} mode
+ * @property {{ agent: string | null, model: string | null, effort: string | null }} selection
+ * @property {string} prompt Cleaned prompt (mention, selector words, and markers removed)
+ * @property {{ model: boolean, effort: boolean }} explicit Whether model:/effort: tokens were used
+ */
+
+/**
+ * Index just past the @netlify mention, its selector words, and an optional
+ * ":" or "," separator on `line`, or -1 when the line has no mention. New
+ * explicit tokens (mode:) are only honored before this point.
+ * @param {string} line
+ * @returns {number}
+ */
+function selectorPrefixEnd(line) {
+  const selection = parseMentionLine(line);
+  if (!selection) return -1;
+  const rest = line.slice(selection.end);
+  const separator = /^(?:[ \t]*(?:[:,]|\.(?=\s|$)))?/.exec(rest);
+  return selection.end + (separator ? separator[0].length : 0);
+}
+
+/**
+ * Parse a trigger into one command object. Parse the raw trigger text
+ * (before get-context appends the source-URL line). Workflow-dispatch inputs
+ * take precedence over mention words; callers apply them.
+ * @param {string | null | undefined} text
+ * @returns {MentionCommand}
+ */
+function parseCommand(text) {
+  const raw = String(text || '');
+  const selection = parseSelection(raw);
+  const mentionLine = stripMarkdownCode(raw).split('\n').find((line) => TRIGGER_PATTERN.test(line)) || '';
+  return {
+    command: 'run',
+    mode: 'normal',
+    selection: {
+      agent: selection ? selection.agent : null,
+      model: selection ? selection.model : null,
+      effort: selection ? selection.effort : null,
+    },
+    prompt: cleanPrompt(raw),
+    explicit: {
+      model: EXPLICIT_MODEL_PATTERN.test(mentionLine),
+      effort: EXPLICIT_EFFORT_PATTERN.test(mentionLine),
+    },
+  };
+}
+
+/**
  * Remove the first @netlify mention and its selector words from `text`,
  * plus explicit model:/effort: tokens on that line.
  * @param {string} text
@@ -640,6 +691,8 @@ module.exports = {
   normalizeEffort,
   extractEffort,
   stripSelection,
+  selectorPrefixEnd,
+  parseCommand,
   describeRunConfig,
   SCOPE_BLOCK_HEADER,
   DEFAULT_SCOPE_GUIDANCE,

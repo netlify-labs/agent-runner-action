@@ -397,3 +397,49 @@ describe('selection rendering', () => {
     assert.equal(cleanPullRequestTitle('Fix @netlify claude the header'), 'Fix the header');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Command object parity: parseCommand must reproduce today's selection and
+// prompt cleaning for every mention in this corpus.
+// ---------------------------------------------------------------------------
+describe('parseCommand parity', () => {
+  const corpus = [
+    '@netlify fable high Fix it', '@Netlify Claude Fable HIGH Fix it', '@netlfy fable high Fix it', '@netlify-agent fable high Fix it',
+    '@netlify with fable high Fix it', '@netlify using codex sol Fix it', '@netlify\tfable\thigh\tFix it', '@netlify fable high',
+    '@netlify fable\nFix it', '@netlify fable high\r\nFix it', '@netlify claude\r\nFix it', '@netlify fable. Fix it', '@netlify fable, fix it',
+    '@netlify fable high: Fix it', '@netlify opus-4.8 Fix it', '@netlify kimi max Refactor', '@netlify-kimi max Refactor', '@netlify glm max Refactor',
+    '@netlify ~deepseek/deepseek-v4-flash-latest low go', '@netlify high contrast mode', '@netlify use flexbox for layout', '@netlify codex low-hanging fixes',
+    '@netlify Add pagination effort:medium', '@netlify Build it model:claude-sonnet-5', 'Thanks!\n@netlify sonnet fix', 'Please @netlify fable high fix this',
+    '@netlify fix it\n\ncc @netlify fable', '`@netlify fable` is the syntax\n@netlify codex sol fix', '',
+  ];
+  for (const text of corpus) {
+    it(JSON.stringify(text), () => {
+      const parsed = utils.parseCommand(text);
+      const selection = utils.parseSelection(text);
+      assert.equal(parsed.command, 'run');
+      assert.equal(parsed.mode, 'normal');
+      assert.deepEqual(parsed.selection, {
+        agent: selection ? selection.agent : null,
+        model: selection ? selection.model : null,
+        effort: selection ? selection.effort : null,
+      });
+      assert.equal(parsed.prompt, utils.cleanPrompt(text));
+    });
+  }
+
+  it('reports explicit tokens on the mention line', () => {
+    assert.deepEqual(utils.parseCommand('@netlify go model:fable effort:low').explicit, { model: true, effort: true });
+    assert.deepEqual(utils.parseCommand('@netlify fable high go').explicit, { model: false, effort: false });
+  });
+});
+
+describe('selectorPrefixEnd', () => {
+  it('ends after the mention, selector words, and an optional separator', () => {
+    const line = '@netlify fable high: fix it';
+    assert.equal(line.slice(utils.selectorPrefixEnd(line)), ' fix it');
+    assert.equal('@netlify fix it'.slice(utils.selectorPrefixEnd('@netlify fix it')), ' fix it');
+    assert.equal(utils.selectorPrefixEnd('no mention here'), -1);
+    const period = '@netlify fable. Fix';
+    assert.equal(period.slice(utils.selectorPrefixEnd(period)), ' Fix');
+  });
+});

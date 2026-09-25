@@ -73,6 +73,11 @@ on:
           - high
           - max
         default: 'auto'
+      recover_thread:
+        description: 'Internal: issue or PR number whose unfinished agent run should be finished (used by the recovery workflow)'
+        required: false
+        type: string
+        default: ''
   pull_request_target:
     types: [opened, reopened]
   pull_request_review_comment:
@@ -85,7 +90,9 @@ on:
     types: [created, edited]
 
 concurrency:
-  group: netlify-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  # recover_thread dispatches share the thread's group, so recovery runs one
+  # at a time with any other agent job on the same issue or PR.
+  group: netlify-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || inputs.recover_thread || github.run_id }}
   cancel-in-progress: false
 
 jobs:

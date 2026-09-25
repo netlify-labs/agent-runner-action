@@ -60,10 +60,16 @@ module.exports = async function checkTrigger({ github, context, core }) {
     shouldRun = utils.matchesTrigger(triggerBody);
   }
 
+  // A recover_thread dispatch (sent by the recovery cron with GITHUB_TOKEN)
+  // starts no new agent work; it only finishes or stops an existing run. It
+  // is exempt from the bot-sender and allowed-users checks below.
+  const isRecoverDispatch = event === 'workflow_dispatch'
+    && String(((context.payload.inputs || {}).recover_thread) || '').trim() !== '';
+
   // Bot-loop prevention
   const sender = (context.payload.sender || {}).login || '';
   const botAccounts = ['github-actions[bot]', 'netlify-coding[bot]', 'netlify[bot]'];
-  if (botAccounts.includes(sender)) {
+  if (botAccounts.includes(sender) && !isRecoverDispatch) {
     console.log(`Skipping bot sender: ${sender}`);
     shouldRun = false;
   }
@@ -106,7 +112,7 @@ module.exports = async function checkTrigger({ github, context, core }) {
   }
 
   // ALLOWED_USERS check for workflow_dispatch
-  if (shouldRun && event === 'workflow_dispatch') {
+  if (shouldRun && event === 'workflow_dispatch' && !isRecoverDispatch) {
     const allowedUsersInput = process.env.ALLOWED_USERS || '';
     if (allowedUsersInput.trim()) {
       const allowedUsers = allowedUsersInput.split(',').map(/** @param {string} u */ u => u.trim()).filter(Boolean);

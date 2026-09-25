@@ -9,7 +9,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const {
-  AGENT_RUNNER_SDK_HANDLE_VERSION,
   AGENT_RUNNER_SDK_VERSION,
   createAgentRunnerSdk,
   createAuthenticatedNetlifyClient,
@@ -18,6 +17,7 @@ const {
 const { MODEL_ID_PATTERN } = require('./agent-catalog');
 const { parseDiffFiles } = require('./scope-files');
 const { writeCheckpoint } = require('./run-checkpoint');
+const { buildResumeHandle } = require('./resume-handle');
 
 /** @typedef {import('nax-agent-runner-sdk').AgentRunnerSdk} AgentRunnerSdk */
 /** @typedef {import('nax-agent-runner-sdk').Handle} Handle */
@@ -318,43 +318,19 @@ async function createLegacyHandle({ sdk, input }) {
   }
 
   const landing = input.dryRun ? 'none' : 'pr';
-  const requestId = randomUUID();
-  /** @type {Handle} */
-  const handle = {
-    v: AGENT_RUNNER_SDK_HANDLE_VERSION,
-    kind: 'run',
-    runnerId: input.existingRunnerId,
+  return buildResumeHandle({
+    sdk,
+    runner: { ...runner, runnerId: input.existingRunnerId },
+    sessions,
     siteId: input.siteId,
+    sessionId: current.sessionId,
+    kind: 'run',
     agent: input.agent || current.agent || 'codex',
-    ...(runner.codeOrigin === undefined
-      ? {}
-      : {
-          origin: {
-            codeOrigin: runner.codeOrigin,
-            ...(runner.branch === undefined
-              ? {}
-              : { branch: runner.branch }),
-          },
-        }),
-    input: {
-      siteId: input.siteId,
-      prompt: 'Resume a pre-SDK agent-runner-action run.',
-      agent: input.agent || current.agent || 'codex',
-      ...(input.branch ? { branch: input.branch } : {}),
-      land: landing,
-      deadlineMs: input.deadlineMs,
-      retryBudget: { capacity: 0 },
-      requestId,
-    },
-    policy: {
-      landing,
-      deadlineAt: Date.now() + input.deadlineMs,
-      retryBudget: { capacity: 0 },
-    },
-    retries: { capacity: 0 },
-    currentSessionId: current.sessionId,
-  };
-  return sdk.parseHandle(handle);
+    landing,
+    deadlineMs: input.deadlineMs,
+    deadlineAt: Date.now() + input.deadlineMs,
+    ...(input.branch ? { branch: input.branch } : {}),
+  });
 }
 
 /**
