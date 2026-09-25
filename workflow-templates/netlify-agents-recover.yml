@@ -1,0 +1,41 @@
+# Optional: finish Netlify agent runs whose GitHub job died (for example a lost
+# runner) without waiting for someone to comment @netlify again.
+#
+# GitHub starts this workflow on a timer. It doesn't react to comments. Each
+# time it looks at recently updated issues and PRs, finds agent runs that
+# started but whose job never finished them, and dispatches your main
+# netlify-agents.yml workflow for that thread with recover_thread. That run
+# waits for the agent if needed, opens the PR (or reports the result), and
+# updates the comments. Runs past their time limit are stopped.
+#
+# Cost: a scan with nothing to do takes about 20-30 seconds of Actions time.
+# GitHub may delay scheduled runs under load, and disables schedules in
+# public repositories after 60 days without activity.
+name: Netlify Agent Runners recovery
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: netlify-agents-recover-scan
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  actions: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: netlify-labs/agent-runner-action@v1
+        with:
+          operation: recover-scan
+          recover-workflow: netlify-agents.yml   # your main Netlify Agent Runners workflow file
+          netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}

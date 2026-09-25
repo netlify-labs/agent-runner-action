@@ -85,3 +85,45 @@ describe('canary-lib checkpoint helpers', () => {
     assert.equal(bash('backend_session_states r1', { env: { NETLIFY_AUTH_TOKEN: '' } }).stdout.trim(), 'unknown');
   });
 });
+
+describe('canary-lib orphan-recovery scenario', () => {
+  // gh is stubbed: the orphaned job leaves a "running" checkpoint, the scan
+  // dispatches run 900, and afterwards the thread shows the recovered result.
+  const stub = String.raw`
+start_issue_case() { CASE_ISSUE_NUMBER=7; CASE_ISSUE_URL=https://github.com/o/r/issues/7; CASE_RUN_ID=100; CASE_RUN_URL=u; }
+wait_run_completed() { return 0; }
+RECOVERED=0
+status_comment_body() {
+  if [ "$RECOVERED" = 1 ]; then echo '<!-- netlify-agent-run-checkpoint:{"v":1,"state":"finalized","runnerId":"r1"} -->'
+  else echo '<!-- netlify-agent-run-checkpoint:{"v":1,"state":"running","runnerId":"r1"} -->'; fi
+}
+gh() {
+  case "$1 $2" in
+    "workflow run") echo "dispatch $*" >&2; RECOVERED=1 ;;
+    "run list") echo 900 ;;
+    "run view") echo "$RESULT_CONCLUSION" ;;
+    "issue view")
+      if [ "$RECOVERED" = 1 ]; then printf '### Netlify Agent Run Completed · recovered\n\n@me, your earlier request finished.\n[Pull Request](https://github.com/o/r/pull/9)\n'
+      else echo 'status only'; fi ;;
+    "pr diff") echo "+Canary marker: $RUN_MARKER" ;;
+  esac
+}
+sleep() { :; }
+`;
+
+  it('passes when the scan dispatches a recovery that lands the PR', () => {
+    const result = bash(`${stub}\nscenario_orphan_recovery; echo "status=$? failed=$CANARY_FAILED"`, { env: { RUN_MARKER: 'm1', RESULT_CONCLUSION: 'success', CANARY_REPO: 'o/r', CANARY_WORKFLOW_NAME: 'w' } });
+    assert.match(result.stdout, /failed=0/, result.checks);
+    assert.match(result.stderr, /dispatch workflow run netlify-agents-recover\.yml/);
+    assert.match(result.checks, /checkpoint left by the orphaned job is `running`/);
+    assert.match(result.checks, /\| orphan-recovery \| recovery lands a PR \| #9 \| ✅ \|/);
+    assert.match(result.output, /recover-run-url=https:\/\/github.com\/o\/r\/actions\/runs\/900/);
+  });
+
+  it('fails when the recover run fails', () => {
+    const result = bash(`${stub}\nscenario_orphan_recovery; echo "failed=$CANARY_FAILED"`, { env: { RUN_MARKER: 'm1', RESULT_CONCLUSION: 'failure', CANARY_REPO: 'o/r', CANARY_WORKFLOW_NAME: 'w' } });
+    assert.match(result.stdout, /failed=1/);
+    assert.match(result.checks, /recover run conclusion is `success` \| `failure` \| ❌/);
+  });
+});
+

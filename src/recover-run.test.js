@@ -226,3 +226,22 @@ describe('waitWithinBudget', () => {
     await assert.rejects(waitWithinBudget({ sdk, handle: {}, token: 't', budgetMs: 1000, pollIntervalMs: 1 }), /boom/);
   });
 });
+
+describe('ownerState', () => {
+  const { ownerState } = require('./recover-run');
+  const checkpoint = /** @type {any} */ ({ ghRunId: 55, ghRunAttempt: 1 });
+  /** @param {number} status */
+  const failing = (status) => ({ rest: { actions: { getWorkflowRun: async () => { throw Object.assign(new Error('x'), { status }); } } } });
+
+  it('treats a deleted owner run as gone', async () => {
+    assert.deepEqual(await ownerState({ github: failing(404), repo: { owner: 'o', repo: 'r' }, checkpoint, env: {} }), { alive: false, conclusion: 'missing' });
+  });
+
+  it('treats an owner it cannot inspect (no actions: read) as gone, with unknown conclusion', async () => {
+    assert.deepEqual(await ownerState({ github: failing(403), repo: { owner: 'o', repo: 'r' }, checkpoint, env: {} }), { alive: false, conclusion: 'unknown' });
+  });
+
+  it('rethrows other lookup errors', async () => {
+    await assert.rejects(ownerState({ github: failing(500), repo: { owner: 'o', repo: 'r' }, checkpoint, env: {} }));
+  });
+});

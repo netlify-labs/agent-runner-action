@@ -78,6 +78,22 @@ inputs:
     description: 'Test-only (canary): exit right after the run checkpoint is written, leaving the run as a lost runner would. Never set this in real workflows.'
     required: false
     default: 'false'
+  operation:
+    description: 'trigger (default): react to @netlify mentions. recover-scan: find agent runs whose job died and dispatch recover_thread runs of the main workflow (used by the scheduled recovery workflow).'
+    required: false
+    default: 'trigger'
+  recover-workflow:
+    description: 'For operation recover-scan: the main workflow file to dispatch for recovery'
+    required: false
+    default: 'netlify-agents.yml'
+  recover-lookback-hours:
+    description: 'For operation recover-scan: only check issues and PRs updated within this many hours'
+    required: false
+    default: '48'
+  recover-max-items:
+    description: 'For operation recover-scan: maximum number of recently updated issues and PRs to check'
+    required: false
+    default: '50'
   dry-run:
     description: 'Preview mode — start an agent run but skip PR creation and commits'
     required: false
@@ -177,6 +193,7 @@ runs:
     # -----------------------------------------------------------------------
     - name: Check trigger
       id: trigger-check
+      if: inputs.operation != 'recover-scan'
       uses: actions/github-script@v8
       env:
         ACTION_DIR: ${{ github.action_path }}
@@ -194,7 +211,7 @@ runs:
     # step after this one loads code from the staged copy.
     - name: Install action dependencies
       id: install-deps
-      if: steps.trigger-check.outputs.should-run == 'true'
+      if: steps.trigger-check.outputs.should-run == 'true' || inputs.operation == 'recover-scan'
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
@@ -210,6 +227,23 @@ runs:
     # -----------------------------------------------------------------------
     # 2. React with 👀 to acknowledge
     # -----------------------------------------------------------------------
+    # Scheduled recovery scan (operation: recover-scan). Everything else in
+    # this action is skipped for scans: no @netlify trigger matches.
+    - name: Find unfinished runs
+      id: recover-scan
+      if: inputs.operation == 'recover-scan'
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
+        RECOVER_WORKFLOW: ${{ inputs.recover-workflow }}
+        RECOVER_LOOKBACK_HOURS: ${{ inputs.recover-lookback-hours }}
+        RECOVER_MAX_ITEMS: ${{ inputs.recover-max-items }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const { scanUnfinishedRuns } = require(`${process.env.ACTION_DIR}/src/scan-unfinished-runs.js`);
+          await scanUnfinishedRuns({ github, context, core });
+
     - name: Acknowledge trigger
       id: acknowledge
       if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch'

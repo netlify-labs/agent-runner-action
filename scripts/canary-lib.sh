@@ -83,17 +83,22 @@ pin_canary_workflow() {
       echo "::error::Canary workflow file not found: ${CANARY_WORKFLOW_PATH}"
       exit 1
     fi
-    ACTION_REF="$ACTION_REF" perl -0pi -e \
-      's#netlify-labs/agent-runner-action@[A-Za-z0-9._/-]+#"netlify-labs/agent-runner-action@".$ENV{ACTION_REF}#ge' \
-      "$CANARY_WORKFLOW_PATH"
-    if git diff --quiet -- "$CANARY_WORKFLOW_PATH"; then
-      log "Canary workflow already pinned to ${ACTION_REF}."
+    # Pin every canary workflow that uses the action (main + recovery).
+    local files
+    files=$(grep -l 'netlify-labs/agent-runner-action@' .github/workflows/*.yml)
+    for file in $files; do
+      ACTION_REF="$ACTION_REF" perl -0pi -e \
+        's#netlify-labs/agent-runner-action@[A-Za-z0-9._/-]+#"netlify-labs/agent-runner-action@".$ENV{ACTION_REF}#ge' \
+        "$file"
+    done
+    if git diff --quiet -- .github/workflows; then
+      log "Canary workflows already pinned to ${ACTION_REF}."
     else
-      git add "$CANARY_WORKFLOW_PATH"
+      git add .github/workflows
       git commit -m "chore: pin Agent Runners canary to ${ACTION_REF}"
       git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${CANARY_REPO}.git"
       git push origin HEAD:main
-      log "Pinned canary workflow to ${ACTION_REF}."
+      log "Pinned canary workflows to ${ACTION_REF}."
     fi
   )
 }
@@ -311,7 +316,68 @@ scenario_cancel_stops() {
     record_check cancel-stops "no PR was opened" "a PR is linked" fail
   fi
 }
-scenario_orphan_recovery() { not_implemented orphan-recovery; }
+scenario_orphan_recovery() {
+  # The "[simulate-orphan]" title marker makes the canary workflow pass
+  # simulate-orphan: the job starts the agent, writes the checkpoint, and exits
+  # as if its runner died. The recovery scan must then find the thread and
+  # dispatch recover_thread, which lands the PR and finalizes the checkpoint.
+  local recover_workflow="${CANARY_RECOVER_WORKFLOW:-netlify-agents-recover.yml}"
+  start_issue_case "orphan-recovery [simulate-orphan]" "@netlify codex mini low in README.md, replace or add one line exactly: Canary marker: ${RUN_MARKER}. Do not edit other files." || return 1
+  output issue-url "$CASE_ISSUE_URL"
+  output run-url "$CASE_RUN_URL"
+  if ! wait_run_completed "$CASE_RUN_ID" 600; then
+    record_check orphan-recovery "orphaned run completes" "timed out" fail
+    return 1
+  fi
+  local body runner
+  body=$(status_comment_body "$CASE_ISSUE_NUMBER")
+  runner=$(printf '%s' "$body" | checkpoint_runner_from_body)
+  expect_equal orphan-recovery "checkpoint left by the orphaned job" "$(printf '%s' "$body" | checkpoint_state_from_body)" running
+  local comments
+  comments=$(gh issue view "$CASE_ISSUE_NUMBER" --repo "$CANARY_REPO" --json comments --jq '[.comments[].body] | join("\n")')
+  expect_not_contains orphan-recovery "issue before recovery" "$comments" "your earlier request finished"
+
+  local scan_started
+  scan_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  log "[orphan-recovery] dispatching ${recover_workflow} (runner ${runner})"
+  gh workflow run "$recover_workflow" --repo "$CANARY_REPO" --ref main
+  local start=$SECONDS recover_run=""
+  while [ -z "$recover_run" ]; do
+    if [ $((SECONDS - start)) -gt 600 ]; then
+      record_check orphan-recovery "scan dispatches a recover_thread run" "none seen" fail
+      return 1
+    fi
+    sleep 15
+    recover_run=$(gh run list --repo "$CANARY_REPO" --workflow "$CANARY_WORKFLOW_NAME" --event workflow_dispatch --limit 10 \
+      --json databaseId,createdAt --jq "[.[] | select(.createdAt >= \"${scan_started}\")] | last | .databaseId // empty")
+  done
+  record_check orphan-recovery "scan dispatches a recover_thread run" "run ${recover_run}" pass
+  output recover-run-url "https://github.com/${CANARY_REPO}/actions/runs/${recover_run}"
+  if ! wait_run_completed "$recover_run" "$(( ${TIMEOUT_MINUTES:-30} * 60 ))"; then
+    record_check orphan-recovery "recover run completes" "timed out" fail
+    return 1
+  fi
+  expect_equal orphan-recovery "recover run conclusion" "$(gh run view "$recover_run" --repo "$CANARY_REPO" --json conclusion --jq .conclusion)" success
+  output run-conclusion success
+
+  body=$(status_comment_body "$CASE_ISSUE_NUMBER")
+  expect_equal orphan-recovery "checkpoint state" "$(printf '%s' "$body" | checkpoint_state_from_body)" finalized
+  comments=$(gh issue view "$CASE_ISSUE_NUMBER" --repo "$CANARY_REPO" --json comments --jq '[.comments[].body] | join("\n")')
+  expect_contains orphan-recovery "result comment" "$comments" "· recovered"
+  expect_contains orphan-recovery "result comment" "$comments" "your earlier request finished"
+  CASE_PR_NUMBER=$(printf '%s\n' "$comments" | pr_number_from_comments || true)
+  if [ -z "$CASE_PR_NUMBER" ]; then
+    record_check orphan-recovery "recovery lands a PR" "none" fail
+    return 1
+  fi
+  output pr-url "https://github.com/${CANARY_REPO}/pull/${CASE_PR_NUMBER}"
+  record_check orphan-recovery "recovery lands a PR" "#${CASE_PR_NUMBER}" pass
+  if gh pr diff "$CASE_PR_NUMBER" --repo "$CANARY_REPO" | grep -F "$RUN_MARKER" >/dev/null; then
+    record_check orphan-recovery "PR diff contains the marker" "found" pass
+  else
+    record_check orphan-recovery "PR diff contains the marker" "missing" fail
+  fi
+}
 scenario_stop_command() { not_implemented stop-command; }
 scenario_ask() { not_implemented ask; }
 

@@ -96,6 +96,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      actions: read   # recovery checks whether an earlier run's job is still alive
     steps:
       - uses: netlify-labs/agent-runner-action@v1
         with:

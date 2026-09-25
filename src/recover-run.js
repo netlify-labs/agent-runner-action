@@ -88,7 +88,12 @@ async function ownerState({ github, repo, checkpoint, env }) {
     const { data } = await github.rest.actions.getWorkflowRun({ ...repo, run_id: checkpoint.ghRunId });
     return { alive: LIVE_RUN_STATES.has(String(data.status)), conclusion: String(data.conclusion || '') };
   } catch (error) {
-    if (/** @type {any} */ (error).status === 404) return { alive: false, conclusion: 'missing' };
+    const status = /** @type {any} */ (error).status;
+    if (status === 404) return { alive: false, conclusion: 'missing' };
+    // Without actions: read the owner can't be inspected. Recovery only runs
+    // inside the thread's concurrency group, so no other job on this thread
+    // is running; treat the owner as gone (its cancel intent is unknown).
+    if (status === 403) return { alive: false, conclusion: 'unknown' };
     throw error;
   }
 }
