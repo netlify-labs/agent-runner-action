@@ -151,11 +151,12 @@ function renderStatusComment({ env = process.env, context, outcome, checkpoint =
 
   // A run stopped on purpose (workflow cancelled, or @netlify stop) is not a
   // failure; show why it stopped instead.
-  const stopped = Boolean(checkpoint && checkpoint.state === 'stopped' && env.AGENT_OUTCOME !== 'success');
+  const stopped = Boolean(checkpoint && (checkpoint.state === 'stopped' || checkpoint.state === 'stop-pending') && env.AGENT_OUTCOME !== 'success');
   const stoppedBy = String(env.STOP_REQUESTED_BY || '').replace(/[^A-Za-z0-9-]/g, '');
+  const stopReason = String(env.STOP_REASON || '').replace(/[\r\n<>]/g, ' ').slice(0, 300);
   const statusIcon = stopped ? '⏹' : isFailure ? '❌' : '✅';
   const statusLine = stopped
-    ? (stoppedBy ? `Stopped by @${stoppedBy}.` : 'The workflow was cancelled, so the agent run was stopped.')
+    ? (stopReason || (stoppedBy ? `Stopped by @${stoppedBy}.` : 'The workflow was cancelled, so the agent run was stopped.'))
     : isFailure
       ? 'Netlify Agent Run failed.'
       : isDryRun
