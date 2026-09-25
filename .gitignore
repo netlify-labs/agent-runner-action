@@ -51,3 +51,6 @@ next-env.d.ts
 
 # ntm (multi-agent tmux orchestration) local state
 .ntm/
+
+# Added by nax
+.nax/
