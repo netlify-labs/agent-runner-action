@@ -247,3 +247,59 @@ describe('action.yml cancelled jobs', () => {
     assert.match(step?.text || '', /!cancelled\(\)/);
   });
 });
+
+describe('action.yml trigger-path recovery', () => {
+  it('recovers an unfinished run before the agent step, only when the checkpoint is running or stop-pending', () => {
+    const all = steps();
+    const recover = all.find((entry) => entry.name === 'Recover unfinished run');
+    assert.ok(recover);
+    assert.ok(all.indexOf(recover) < all.findIndex((entry) => entry.name === 'Run Netlify Agent Runners'));
+    assert.match(recover.text, /checkpoint-state == 'running' \|\| steps\.extract-agent-id\.outputs\.checkpoint-state == 'stop-pending'/);
+    assert.match(recover.text, /continue-on-error: true/);
+    assert.match(recover.text, /SESSION_DATA_MAP: \$\{\{ steps\.extract-agent-id\.outputs\.session-data-map \}\}/);
+  });
+
+  it('skips the agent step when recovery blocks the request or the command is recover', () => {
+    const agent = steps().find((entry) => entry.name === 'Run Netlify Agent Runners');
+    assert.match(agent?.text || '', /steps\.recover\.outputs\.blocked != 'true' && steps\.context-info\.outputs\.command != 'recover'/);
+  });
+
+  it('keeps post-run comment writers from overwriting what recovery wrote', () => {
+    for (const name of ['Generate error comment', 'Generate status comment', 'Post or update status comment', 'Fallback status update']) {
+      const step = steps().find((entry) => entry.name === name);
+      assert.match(step?.text || '', /steps\.recover\.outputs\.blocked != 'true' && steps\.context-info\.outputs\.command != 'recover'/, name);
+    }
+  });
+
+  it('prefers the recovered session data map downstream', () => {
+    const agent = steps().find((entry) => entry.name === 'Run Netlify Agent Runners');
+    assert.match(agent?.text || '', /SESSION_DATA_MAP: \$\{\{ steps\.recover\.outputs\.session-data-map \|\| steps\.extract-agent-id\.outputs\.session-data-map \}\}/);
+  });
+});
+
+describe('action.yml recover_thread dispatch path', () => {
+  it('finds the existing status comment and checkpoint for recover dispatches', () => {
+    for (const name of ['Find existing status comment', 'Find existing history comment', 'Extract existing agent run ID']) {
+      const step = steps().find((entry) => entry.name === name);
+      assert.match(step?.text || '', /\(github\.event_name != 'workflow_dispatch' \|\| steps\.context-info\.outputs\.command == 'recover'\)/, name);
+    }
+  });
+
+  it('never creates a new status comment for a recover dispatch', () => {
+    const step = steps().find((entry) => entry.name === 'Create initial status comment');
+    assert.match(step?.text || '', /github\.event_name != 'workflow_dispatch'/);
+  });
+
+  it('bypasses the linked-PR redirect for recovery', () => {
+    const step = steps().find((entry) => entry.name === 'Check linked PR');
+    assert.match(step?.text || '', /if \[\[ "\$COMMAND" == "recover" \]\]; then/);
+  });
+
+  it('puts recover dispatches in the thread concurrency group in every template', () => {
+    for (const file of ['workflow-templates/netlify-agents.yml', 'example-workflow.yml', '.github/workflows/netlify-agents.yml']) {
+      const text = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+      assert.match(text, /github\.event\.issue\.number \|\| inputs\.recover_thread \|\| github\.run_id/, file);
+      assert.match(text, /recover_thread:\n\s+description:/, file);
+    }
+  });
+});

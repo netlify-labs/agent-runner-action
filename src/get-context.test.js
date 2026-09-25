@@ -529,3 +529,30 @@ describe('getContext', () => {
     });
   });
 });
+
+describe('getContext recover_thread dispatch', () => {
+  it('targets an issue thread and sets command=recover', async () => {
+    const core = mockCore();
+    const github = { rest: { pulls: { get: async () => { const e = new Error('Not Found'); e.status = 404; throw e; } } } };
+    const context = { eventName: 'workflow_dispatch', payload: { inputs: { recover_thread: '53', actor: 'recovery' } }, repo: { owner: 'o', repo: 'r' } };
+    await getContext({ github, context, core });
+    assert.equal(core.outputs['issue-number'], 53);
+    assert.equal(core.outputs['is-pr'], 'false');
+    assert.equal(core.outputs.command, 'recover');
+  });
+
+  it('targets a PR thread with its branches', async () => {
+    const core = mockCore();
+    const github = { rest: { pulls: { get: async () => ({ data: { head: { ref: 'agent-branch', sha: 'abc' }, base: { ref: 'main' } } }) } } };
+    const context = { eventName: 'workflow_dispatch', payload: { inputs: { recover_thread: '56', actor: 'recovery' } }, repo: { owner: 'o', repo: 'r' } };
+    await getContext({ github, context, core });
+    assert.deepEqual([core.outputs['issue-number'], core.outputs['is-pr'], core.outputs['head-ref'], core.outputs.command], [56, 'true', 'agent-branch', 'recover']);
+  });
+
+  it('ignores a non-numeric recover_thread', async () => {
+    const core = mockCore();
+    const context = { eventName: 'workflow_dispatch', payload: { inputs: { recover_thread: '53; rm', trigger_text: 'hi' } }, repo: { owner: 'o', repo: 'r' } };
+    await getContext({ github: mockGithub(), context, core });
+    assert.equal(core.outputs.command, 'run');
+  });
+});

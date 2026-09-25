@@ -248,3 +248,31 @@ describe('checkTrigger', () => {
     assert.equal(core.outputs['should-run'], 'true');
   });
 });
+
+describe('checkTrigger recover dispatches', () => {
+  it('lets the recovery cron (github-actions[bot]) dispatch recover_thread runs', async () => {
+    const core = mockCore();
+    const context = makeContext('workflow_dispatch', { sender: { login: 'github-actions[bot]' }, inputs: { recover_thread: '53', actor: 'recovery' } });
+    await checkTrigger({ github: mockGithub('none'), context, core });
+    assert.equal(core.outputs['should-run'], 'true');
+  });
+
+  it('exempts recover dispatches from allowed-users (they start no new agent work)', async () => {
+    process.env.ALLOWED_USERS = 'someone-else';
+    try {
+      const core = mockCore();
+      const context = makeContext('workflow_dispatch', { sender: { login: 'github-actions[bot]' }, inputs: { recover_thread: '53', actor: 'recovery' } });
+      await checkTrigger({ github: mockGithub('none'), context, core });
+      assert.equal(core.outputs['should-run'], 'true');
+    } finally {
+      delete process.env.ALLOWED_USERS;
+    }
+  });
+
+  it('still skips bot senders for ordinary dispatches', async () => {
+    const core = mockCore();
+    const context = makeContext('workflow_dispatch', { sender: { login: 'github-actions[bot]' }, inputs: { trigger_text: 'do something' } });
+    await checkTrigger({ github: mockGithub(), context, core });
+    assert.equal(core.outputs['should-run'], 'false');
+  });
+});

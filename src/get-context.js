@@ -38,7 +38,25 @@ module.exports = async function getContext({ github, context, core }) {
 
   const { payload } = context;
 
-  if (context.eventName === 'workflow_dispatch') {
+  const recoverThread = context.eventName === 'workflow_dispatch'
+    ? String(payload.inputs?.recover_thread || '').trim()
+    : '';
+  if (recoverThread && /^\d+$/.test(recoverThread)) {
+    // Recovery dispatch (from the recovery cron or a dead-owner stop): target
+    // an existing thread and finish its unfinished run; start nothing new.
+    issueNumber = Number(recoverThread);
+    triggerText = '@netlify (recovering an unfinished run)';
+    try {
+      const pr = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: issueNumber });
+      isPR = true;
+      prNumber = issueNumber;
+      headRef = pr.data.head.ref;
+      baseRef = pr.data.base.ref;
+      headSha = pr.data.head.sha;
+    } catch (_) {
+      isPR = false;
+    }
+  } else if (context.eventName === 'workflow_dispatch') {
     triggerText = payload.inputs?.trigger_text || '';
     if (!utils.matchesTrigger(triggerText)) {
       triggerText = '@netlify ' + triggerText;
@@ -104,6 +122,10 @@ module.exports = async function getContext({ github, context, core }) {
   }
 
   selectionText = selectionText || triggerText;
+  // One parsed command object for the trigger (before the source-URL line is
+  // appended below). Stop and ask mode build on this.
+  const parsedCommand = utils.parseCommand(selectionText);
+  if (recoverThread && issueNumber) parsedCommand.command = 'recover';
 
   // Detect preview/dry-run mode from trigger text
   const isDryRun = process.env.DRY_RUN === 'true' ||
@@ -175,6 +197,8 @@ module.exports = async function getContext({ github, context, core }) {
   core.setOutput('effort-label', effortLabel);
   core.setOutput('config-warnings', warnings.join('\n'));
   core.setOutput('scope-block', utils.buildScopeBlock(process.env.SCOPE_INSTRUCTIONS));
+  core.setOutput('command', parsedCommand.command);
+  core.setOutput('runner-mode', parsedCommand.mode);
   core.setOutput('is-dry-run', isDryRun.toString());
 
   console.log(`Context: event=${context.eventName} issue=#${issueNumber} isPR=${isPR} agent=${agent} model=${modelId || 'auto'} effort=${effort || 'auto'} dryRun=${isDryRun}`);

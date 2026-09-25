@@ -529,7 +529,7 @@ runs:
           }
 
     - name: Find existing status comment
-      if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch' && steps.context-info.outputs.issue-number != ''
+      if: steps.trigger-check.outputs.should-run == 'true' && (github.event_name != 'workflow_dispatch' || steps.context-info.outputs.command == 'recover') && steps.context-info.outputs.issue-number != ''
       uses: peter-evans/find-comment@v4
       id: find_comment
       with:
@@ -540,7 +540,7 @@ runs:
         direction: last
 
     - name: Find existing history comment
-      if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch' && steps.context-info.outputs.is-pr == 'true'
+      if: steps.trigger-check.outputs.should-run == 'true' && (github.event_name != 'workflow_dispatch' || steps.context-info.outputs.command == 'recover') && steps.context-info.outputs.is-pr == 'true'
       uses: peter-evans/find-comment@v4
       id: find_history_comment
       with:
@@ -552,7 +552,7 @@ runs:
 
     - name: Extract existing agent run ID
       id: extract-agent-id
-      if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch'
+      if: steps.trigger-check.outputs.should-run == 'true' && (github.event_name != 'workflow_dispatch' || steps.context-info.outputs.command == 'recover')
       uses: actions/github-script@v8
       env:
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
@@ -687,7 +687,11 @@ runs:
         fi
         IS_PR="${{ steps.context-info.outputs.is-pr }}"
         HAS_LINKED_PR="${{ steps.extract-agent-id.outputs.has-linked-pr == 'true' && 'true' || 'false' }}"
-        if [[ "$IS_PR" == "false" && "$HAS_LINKED_PR" == "true" ]]; then
+        COMMAND="${{ steps.context-info.outputs.command }}"
+        if [[ "$COMMAND" == "recover" ]]; then
+          # Recovery finishes this thread's own run; never redirect it.
+          echo "should-continue=true" >> $GITHUB_OUTPUT
+        elif [[ "$IS_PR" == "false" && "$HAS_LINKED_PR" == "true" ]]; then
           echo "⚠️ Issue already has a linked PR"
           echo "should-continue=false" >> $GITHUB_OUTPUT
         else
@@ -913,13 +917,43 @@ runs:
     # -----------------------------------------------------------------------
     # 12. Update status comment for follow-up runs
     # -----------------------------------------------------------------------
+    # Finish a previous run whose job died (the thread checkpoint never reached
+    # finalized/stopped) before starting a new one. This job holds the thread's
+    # concurrency group, so it is the only writer for the thread's state.
+    - name: Recover unfinished run
+      id: recover
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.should-continue.outputs.should-continue == 'true'
+        && (steps.extract-agent-id.outputs.checkpoint-state == 'running' || steps.extract-agent-id.outputs.checkpoint-state == 'stop-pending')
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
+        NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
+        NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
+        CHECKPOINT: ${{ steps.extract-agent-id.outputs.checkpoint }}
+        COMMAND: ${{ steps.context-info.outputs.command }}
+        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+        IS_PR: ${{ steps.context-info.outputs.is-pr }}
+        STATUS_COMMENT_ID: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
+        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
+        SESSION_DATA_MAP: ${{ steps.extract-agent-id.outputs.session-data-map }}
+        EFFECTIVE_TIMEOUT_MINUTES: ${{ steps.preflight.outputs.effective-timeout-minutes || inputs.timeout-minutes }}
+        GH_ACTION_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const recoverStep = require(`${process.env.ACTION_DIR}/src/recover-step.js`);
+          await recoverStep({ github, context, core });
+
     # -----------------------------------------------------------------------
     # 13. Run Netlify Agent Runners through nax-agent-runner-sdk.
     #     Landing is PR-only; dry-run mode skips landing.
     # -----------------------------------------------------------------------
     - name: Run Netlify Agent Runners
       id: netlify-agent
-      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
       shell: bash
       env:
         NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
@@ -942,7 +976,7 @@ runs:
         PR_HEAD_SHA: ${{ steps.context-info.outputs.is-pr == 'true' && steps.context-info.outputs.head-sha || '' }}
         SIMULATE_ORPHAN: ${{ inputs.simulate-orphan }}
         EXISTING_RUNNER_ID: ${{ steps.extract-agent-id.outputs.agent-runner-id }}
-        SESSION_DATA_MAP: ${{ steps.extract-agent-id.outputs.session-data-map }}
+        SESSION_DATA_MAP: ${{ steps.recover.outputs.session-data-map || steps.extract-agent-id.outputs.session-data-map }}
         HEAD_BRANCH: ${{ steps.context-info.outputs.head-ref }}
         REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         MAX_WAIT_MINUTES: ${{ steps.preflight.outputs.effective-timeout-minutes || inputs.timeout-minutes }}
@@ -1085,7 +1119,7 @@ runs:
         AGENT_TITLE: ${{ steps.netlify-agent.outputs.agent-title }}
         AGENT_RESULT: ${{ steps.netlify-agent.outputs.agent-result }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
-        SESSION_DATA_MAP: ${{ steps.extract-agent-id.outputs.session-data-map }}
+        SESSION_DATA_MAP: ${{ steps.recover.outputs.session-data-map || steps.extract-agent-id.outputs.session-data-map }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
         SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
@@ -1101,7 +1135,7 @@ runs:
       if: >-
         always()
         && !cancelled()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
         && steps.should-continue.outputs.should-continue == 'true'
         && steps.netlify-agent.outputs.outcome != 'success'
         && steps.context-info.outputs.issue-number != ''
@@ -1124,7 +1158,7 @@ runs:
         AGENT_COMMIT_SHA: ${{ steps.netlify-agent.outputs.agent-commit-sha }}
         AGENT_TITLE: ${{ steps.netlify-agent.outputs.agent-title }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
-        SESSION_DATA_MAP: ${{ steps.extract-agent-id.outputs.session-data-map }}
+        SESSION_DATA_MAP: ${{ steps.recover.outputs.session-data-map || steps.extract-agent-id.outputs.session-data-map }}
         SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
@@ -1142,7 +1176,7 @@ runs:
     - name: Post result comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
         && (steps.generate_success_comment.outputs.result-body || steps.generate_error_comment.outputs.result-body)
         && steps.context-info.outputs.issue-number != ''
       id: post_result_comment
@@ -1161,7 +1195,7 @@ runs:
     - name: Generate status comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
         && steps.context-info.outputs.issue-number != ''
         && (steps.generate_success_comment.outputs.result-body || steps.generate_error_comment.outputs.result-body || steps.netlify-agent.outputs.outcome != 'success')
       id: generate_status_comment
@@ -1185,7 +1219,7 @@ runs:
         AGENT_ERROR: ${{ steps.netlify-agent.outputs.agent-error }}
         FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.trigger-text-size.outputs.failure-category || steps.preflight.outputs.failure-category }}
         FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.trigger-text-size.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
-        SESSION_DATA_MAP: ${{ steps.generate_success_comment.outputs.session-data-map || steps.generate_error_comment.outputs.session-data-map || steps.extract-agent-id.outputs.session-data-map }}
+        SESSION_DATA_MAP: ${{ steps.generate_success_comment.outputs.session-data-map || steps.generate_error_comment.outputs.session-data-map || steps.recover.outputs.session-data-map || steps.extract-agent-id.outputs.session-data-map }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
         SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
@@ -1204,7 +1238,7 @@ runs:
       id: post_status_comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
         && steps.generate_status_comment.outputs.comment-body
         && (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) != ''
       continue-on-error: true
@@ -1220,7 +1254,7 @@ runs:
     - name: Generate history comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
         && steps.context-info.outputs.is-pr == 'true'
         && steps.context-info.outputs.issue-number != ''
         && steps.post_result_comment.outputs.result-comment-id != ''
@@ -1240,7 +1274,7 @@ runs:
     - name: Post or update history comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
         && steps.context-info.outputs.is-pr == 'true'
         && steps.generate_history_comment.outputs.comment-body != ''
         && steps.context-info.outputs.issue-number != ''
@@ -1257,7 +1291,7 @@ runs:
     - name: Cross-post to PR and update issue
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
         && steps.context-info.outputs.is-pr != 'true'
         && steps.netlify-agent.outputs.agent-pr-url != ''
         && steps.generate_status_comment.outputs.comment-body
@@ -1290,7 +1324,7 @@ runs:
     - name: Fallback status update
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
         && github.event_name != 'workflow_dispatch'
         && steps.context-info.outputs.issue-number != ''
         && steps.preflight-comment.outcome != 'success'
@@ -1327,7 +1361,7 @@ runs:
     - name: Update reaction on completion
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
         && steps.acknowledge.outputs.reaction-id != ''
         && steps.netlify-agent.outputs.outcome == 'success'
       continue-on-error: true
