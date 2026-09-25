@@ -138,10 +138,12 @@ function renderStatusComment({ env = process.env, context, outcome, checkpoint =
   const isDryRun = env.IS_DRY_RUN === 'true';
   const config = (latestSession && latestSession.agent_config) || {};
   const requested = /** @type {Record<string, string | undefined>} */ ((latestSession && sessionDataMap[latestSession.id]) || {});
+  // A run that failed before finishing (a timeout, say) has no session file;
+  // show what was requested instead of the default agent.
   const model = utils.describeRunConfig({
-    agent: config.agent || requested.agent || env.AGENT_MODEL || 'codex',
-    model: config.model || requested.model,
-    effort: config.effort || requested.effort,
+    agent: config.agent || requested.agent || env.REQUESTED_AGENT || env.AGENT_MODEL || 'codex',
+    model: config.model || requested.model || env.REQUESTED_MODEL_ID,
+    effort: config.effort || requested.effort || env.REQUESTED_EFFORT,
   });
   const runNumber = sessions.length || 1;
   const timestamp = new Date().toISOString();
