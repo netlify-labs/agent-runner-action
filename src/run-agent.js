@@ -16,6 +16,7 @@ const {
   redactSensitiveText,
 } = require('nax-agent-runner-sdk');
 const { MODEL_ID_PATTERN } = require('./agent-catalog');
+const { parseDiffFiles } = require('./scope-files');
 
 /** @typedef {import('nax-agent-runner-sdk').AgentRunnerSdk} AgentRunnerSdk */
 /** @typedef {import('nax-agent-runner-sdk').Handle} Handle */
@@ -106,7 +107,7 @@ function booleanInput(value) {
 function readActionInput(env) {
   const token = requiredText(env.NETLIFY_AUTH_TOKEN, 'NETLIFY_AUTH_TOKEN');
   const siteId = requiredText(env.NETLIFY_SITE_ID, 'NETLIFY_SITE_ID');
-  const prompt = requiredText(env.TRIGGER_TEXT, 'TRIGGER_TEXT');
+  const prompt = `${requiredText(env.TRIGGER_TEXT, 'TRIGGER_TEXT')}${String(env.SCOPE_BLOCK || '')}`;
   const agent = requiredText(
     env.NETLIFY_AGENT || env.AGENT_MODEL || 'codex',
     'NETLIFY_AGENT',
@@ -557,6 +558,7 @@ async function runAgentAction(options = {}) {
     'agent-has-diff': 'false',
     'agent-pr-branch': '',
     'agent-commit-sha': '',
+    'agent-landing-kind': 'none',
   })) {
     setOutput(name, value);
   }
@@ -660,6 +662,18 @@ async function runAgentAction(options = {}) {
       ),
     ]);
     const hasChanges = result.changes === 'changed';
+    const landingKind = !input.dryRun && hasChanges
+      ? (preLandingRunner.prUrl ? 'commit' : 'pr-created')
+      : 'none';
+    if (input.dryRun && result.diff && result.diff.kind === 'inline') {
+      // Nothing lands in a dry run; keep the session diff so the scope guard
+      // can still report which files the run would have changed.
+      fs.writeFileSync(
+        path.join(input.runnerTemp, `agent-scope-files-${handle.runnerId}.json`),
+        JSON.stringify(parseDiffFiles(result.diff.text)),
+        { encoding: 'utf8', mode: 0o600 },
+      );
+    }
     if (!input.dryRun && hasChanges) {
       stage = preLandingRunner.prUrl && handle.kind === 'session'
         ? 'commit'
@@ -752,6 +766,7 @@ async function runAgentAction(options = {}) {
     setOutput('agent-title', currentSession.title || '');
     setOutput('agent-sessions', sessionsJson);
     setOutput('agent-has-diff', hasChanges ? 'true' : 'false');
+    setOutput('agent-landing-kind', landingKind);
     log(`Agent Runner ${handle.runnerId} completed successfully.`);
 
     return {

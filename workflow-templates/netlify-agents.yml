@@ -98,6 +98,9 @@ jobs:
           # default-agent: 'codex'        # Default agent (claude, codex, gemini, opencode)
           # default-model-id: ''          # Default model (e.g. claude-fable-5 or fable); empty = Auto
           # default-effort: ''            # Default effort (low, medium, high, max*); empty = Auto
+          # protected-paths: default      # Flag risky file changes; e.g. "default, infra/**" or "none"
+          # protected-paths-action: comment # Add ",label" and/or ",draft" to escalate
+          # scope-instructions: default   # Prompt guidance; "none" turns it off
           # manage-labels: 'false'        # Auto-create and apply labels
           # dry-run: 'false'              # Still starts an agent run; skips commit/PR creation
           # preflight-only: 'false'       # Validate setup only; starts no agent run

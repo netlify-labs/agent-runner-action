@@ -176,6 +176,10 @@ Or comment `@netlify make it blue` on an existing PR.
 | `default-model-id` | No | `''` | Default model ID or alias (e.g. `claude-fable-5`, `fable`). Empty or `auto` lets the backend choose. Ignored when a mention names a different agent |
 | `default-effort` | No | `''` | Default effort level (`low`, `medium`, `high`; some OpenCode models take `max`). Empty or `auto` lets the backend choose |
 | `manage-labels` | No | `false` | Auto-create and apply labels on agent runs |
+| `protected-paths` | No | `default` | Files to flag for review when a run changes them (globs; `default` = built-in list, `none` disables, `!pattern` excludes). See [Scope guard](#scope-guard) |
+| `flag-new-top-level` | No | `true` | Also flag files added at the repository root and new top-level folders |
+| `protected-paths-action` | No | `comment` | `comment` (always on), plus optionally `label` and/or `draft` |
+| `scope-instructions` | No | `default` | Guidance appended to every agent prompt; `default` = report unrelated build/deploy failures instead of working around them, `none` disables |
 | `dry-run` | No | `false` | Start an agent run but skip commit/PR creation |
 | `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent run |
 | `timeout-minutes` | No | `10` | Max minutes to wait for agent completion |
@@ -242,6 +246,8 @@ Use these outputs in subsequent workflow steps for custom automation:
 | `should-continue` | Whether workflow execution should continue into agent runtime |
 | `failure-category` | Preflight/runtime failure taxonomy category when available |
 | `failure-stage` | Preflight/runtime failure stage when available |
+| `scope-flags` | JSON array of files the scope check flagged (`path`, `display`, `reason`, `rule`) |
+| `scope-flag-count` | Number of files the scope check flagged |
 | `agent-error` | Sanitized runtime error summary emitted by agent orchestration |
 
 ### Using outputs
@@ -258,6 +264,42 @@ steps:
     if: steps.agent.outputs.outcome == 'success' && steps.agent.outputs.agent-pr-url != ''
     run: echo "Agent created PR: ${{ steps.agent.outputs.agent-pr-url }}"
 ```
+
+## Scope guard
+
+Agents sometimes change files nobody asked for. In early tests, two of three runs added deploy workarounds (`netlify.toml`, `redwood.toml`, a placeholder page) or edited `AGENTS.md` while doing an unrelated one-line task. The scope guard makes that visible. It never blocks a run.
+
+After a successful run, the action looks at the files **that run** changed: the PR's files for a new PR, the landed commit for a follow-up, or the agent's diff for a dry run. The result comment then gets a **⚠️ Review these changes** table. For runs started from an issue, the same section is also posted on the PR, where review happens. The status comment gets a one-line summary.
+
+What gets flagged:
+
+| Pattern | Why |
+|---|---|
+| `.github/**` | Workflows run with repository secrets |
+| `**/netlify.toml` | Build and deploy configuration |
+| `*.toml` | Root-level tool configuration (root only) |
+| `**/package-lock.json`, `**/pnpm-lock.yaml`, `**/yarn.lock`, `**/bun.lock`, `**/bun.lockb` | Lockfile churn hides dependency changes |
+| `**/pnpm-workspace.yaml` | Changes the workspace graph |
+| `AGENTS.md`, `CLAUDE.md`, `**/AGENTS.md` | Changes how future agents behave in this repo |
+| `**/.env*` | Likely secrets |
+
+With `flag-new-top-level` (on by default), new files at the repository root and new top-level folders are flagged too.
+
+If the request itself names a flagged file ("fix the redirect in `netlify.toml`"), it's listed as **Requested** instead of as a warning. A file counts as named when its full path or its file name (with extension) appears. A folder counts when it's written with a slash, for example `.github/workflows` or `netlify/`. Ordinary words like "netlify" don't count.
+
+Configure it with `protected-paths`:
+
+- Patterns are globs on repo-relative paths: `**` crosses folders, `*` doesn't, and `{a,b}` is alternation.
+- **A pattern without a `/` matches only at the repository root**, so `AGENTS.md` means the root file. This is stricter than `.gitignore`; write `**/AGENTS.md` to match anywhere.
+- `default` expands to the list above, so `default, infra/**` adds to it. `!pattern` excludes (the last matching pattern wins), and `none` turns pattern checks off.
+
+`protected-paths-action` adds escalations: `label` applies `netlify-agent:review-scope`, and `draft` converts a PR this run opened back to a draft. Both are best-effort and never fail the run.
+
+`scope-instructions` (on by default) adds this to every prompt the agent receives:
+
+> Only modify files needed for this task. If a build or deploy fails for reasons unrelated to your task, do not change build, deploy, or workspace configuration to work around it; finish the task and describe the failure in your result.
+
+The block is hidden from the prompt shown in comments. Set your own text to replace it, or `none` to turn it off.
 
 ## Versioning
 

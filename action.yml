@@ -54,6 +54,22 @@ inputs:
     description: 'Netlify CLI version to install (pinned for stability)'
     required: false
     default: '24.8.1'
+  protected-paths:
+    description: 'Files to flag for review when an agent run changes them: newline- or comma-separated globs. "default" is the built-in list (workflows, netlify.toml, root *.toml, lockfiles, AGENTS.md, .env files); "none" disables pattern checks; "!pattern" excludes.'
+    required: false
+    default: 'default'
+  flag-new-top-level:
+    description: 'Also flag files added at the repository root and new top-level folders'
+    required: false
+    default: 'true'
+  protected-paths-action:
+    description: 'What to do when files are flagged: comma list of comment (always on), label (add netlify-agent:review-scope), draft (convert a PR this run opened to draft)'
+    required: false
+    default: 'comment'
+  scope-instructions:
+    description: 'Guidance appended to every agent prompt. "default" asks agents to report unrelated build or deploy failures instead of working around them; any other text replaces it; "none" (or an empty string) turns it off.'
+    required: false
+    default: 'default'
   dry-run:
     description: 'Preview mode — start an agent run but skip PR creation and commits'
     required: false
@@ -132,6 +148,12 @@ outputs:
   failure-stage:
     description: 'Failure stage from preflight or runtime execution'
     value: ${{ steps.netlify-agent.outputs.failure-stage || steps.trigger-text-size.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
+  scope-flags:
+    description: 'JSON array of files the scope check flagged ({ path, display, reason, rule })'
+    value: ${{ steps.check-scope.outputs.scope-flags }}
+  scope-flag-count:
+    description: 'Number of files the scope check flagged'
+    value: ${{ steps.check-scope.outputs.scope-flag-count }}
   agent-error:
     description: 'Sanitized runtime agent error summary'
     value: ${{ steps.netlify-agent.outputs.agent-error }}
@@ -238,6 +260,7 @@ runs:
         DEFAULT_MODEL: ${{ inputs.default-model || inputs.default-agent }}
         DEFAULT_MODEL_ID: ${{ inputs.default-model-id }}
         DEFAULT_EFFORT: ${{ inputs.default-effort }}
+        SCOPE_INSTRUCTIONS: ${{ inputs.scope-instructions }}
         DRY_RUN: ${{ inputs.dry-run }}
       with:
         github-token: ${{ inputs.github-token }}
@@ -252,6 +275,8 @@ runs:
       id: trigger-text-size
       if: steps.trigger-check.outputs.should-run == 'true'
       shell: bash
+      env:
+        SCOPE_BLOCK: ${{ steps.context-info.outputs.scope-block }}
       run: |
         set -euo pipefail
 
@@ -265,6 +290,9 @@ runs:
         NETLIFY_AGENT_TRIGGER_TEXT_EOF
 
         BODY_BYTES=$(wc -c < "$TRIGGER_TEXT_FILE" | tr -d '[:space:]')
+        # The scope-instructions block is appended to the prompt the agent receives.
+        SCOPE_BYTES=$(printf '%s' "${SCOPE_BLOCK:-}" | wc -c | tr -d '[:space:]')
+        BODY_BYTES=$((BODY_BYTES + SCOPE_BYTES))
         ENV_BYTES=$((BODY_BYTES + ENV_PREFIX_BYTES))
 
         {
@@ -915,6 +943,7 @@ runs:
         AGENT_MODEL: ${{ steps.context-info.outputs.model || steps.context-info.outputs.agent }}
         NETLIFY_MODEL: ${{ steps.context-info.outputs.model-id }}
         NETLIFY_EFFORT: ${{ steps.context-info.outputs.effort }}
+        SCOPE_BLOCK: ${{ steps.context-info.outputs.scope-block }}
         EXISTING_RUNNER_ID: ${{ steps.extract-agent-id.outputs.agent-runner-id }}
         SESSION_DATA_MAP: ${{ steps.extract-agent-id.outputs.session-data-map }}
         HEAD_BRANCH: ${{ steps.context-info.outputs.head-ref }}
@@ -943,6 +972,31 @@ runs:
           fi
         fi
         exit "$status"
+
+    - name: Check run scope
+      id: check-scope
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.outcome == 'success'
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
+        AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
+        AGENT_COMMIT_SHA: ${{ steps.netlify-agent.outputs.agent-commit-sha }}
+        LANDING_KIND: ${{ steps.netlify-agent.outputs.agent-landing-kind }}
+        IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
+        IS_PR: ${{ steps.context-info.outputs.is-pr }}
+        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+        BASE_REF: ${{ steps.context-info.outputs.base-ref || github.event.repository.default_branch }}
+        TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
+        PROTECTED_PATHS: ${{ inputs.protected-paths }}
+        FLAG_NEW_TOP_LEVEL: ${{ inputs.flag-new-top-level }}
+        PROTECTED_PATHS_ACTION: ${{ inputs.protected-paths-action }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const run = require(`${process.env.ACTION_DIR}/src/check-run-scope.js`);
+          await run({ github, context, core });
 
     - name: Finalize Agent Runner pull request metadata
       if: >-

@@ -174,6 +174,7 @@ module.exports = async function getContext({ github, context, core }) {
   core.setOutput('effort', effort);
   core.setOutput('effort-label', effortLabel);
   core.setOutput('config-warnings', warnings.join('\n'));
+  core.setOutput('scope-block', utils.buildScopeBlock(process.env.SCOPE_INSTRUCTIONS));
   core.setOutput('is-dry-run', isDryRun.toString());
 
   console.log(`Context: event=${context.eventName} issue=#${issueNumber} isPR=${isPR} agent=${agent} model=${modelId || 'auto'} effort=${effort || 'auto'} dryRun=${isDryRun}`);
