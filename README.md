@@ -290,6 +290,8 @@ Everything else ships in minor releases. That includes new inputs and outputs, n
 
 Maintainers cut releases with the **Release** workflow (`.github/workflows/release.yml`): run it with a version and `dry_run: true` first, then again with `dry_run: false`. It runs the tests, the type check, the docs check, the simulator, and a live canary against the exact commit before it tags anything.
 
+Tag protection (repository settings): the ruleset **Release tags are immutable** blocks creating, moving, or deleting `v*.*.*` tags, and **Major tag v1 moves only via release workflow** does the same for `v1`. Only repository admins and deploy keys can bypass them. The release workflow pushes tags over SSH with the `RELEASE_DEPLOY_KEY` secret, the private half of the write deploy key "release.yml tag pusher". Repository rulesets can't list the GitHub Actions app as a bypass actor, which is why a deploy key is used.
+
 ## Maintainer simulator CLI
 
 Use the local simulator to preview action decisions from fixtures without GitHub Actions or live Netlify calls. The `simulate` package script wraps `src/simulate.js`.
