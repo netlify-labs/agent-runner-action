@@ -61,7 +61,7 @@ describe('canary-lib helpers', () => {
     assert.match(unknown.stdout, /::error::Unknown canary scenario: nope/);
     assert.match(unknown.stdout, /status=1/);
     // Stub out the network-touching pin step for the unimplemented case.
-    const stub = bash('pin_canary_workflow() { log pinned; }\nrun_scenario ask; echo "status=$?"');
+    const stub = bash('pin_canary_workflow() { log pinned; }\nscenario_ask() { not_implemented ask; }\nrun_scenario ask; echo "status=$?"');
     assert.match(stub.stdout, /status=1/);
     assert.match(stub.summary, /### Scenario `ask`/);
     assert.match(stub.summary, /\| ask \| scenario is implemented \| not implemented yet \| ❌ \|/);
@@ -161,5 +161,22 @@ backend_session_states() { echo stopped; }
   it('fails when the stop only ran after the owner finished (stop queued behind it)', () => {
     const result = bash(`${stub}\nscenario_stop_command; echo "failed=$CANARY_FAILED"`, { env: { RUN_MARKER: 'm1', OWNER_STATUS: 'completed', CANARY_REPO: 'o/r', CANARY_WORKFLOW_NAME: 'w' } });
     assert.match(result.stdout, /failed=1/);
+  });
+});
+
+describe('canary-lib ask scenario', () => {
+  const stub = String.raw`
+run_issue_case() { CASE_ISSUE_NUMBER=7; CASE_ISSUE_URL=u; CASE_RUN_URL=u; CASE_CONCLUSION=success; CASE_PR_NUMBER="$PR"; CASE_COMMENTS=$(printf '### [Run #1 | codex | Agent Run answered](x) 💬\n\n### Answer\n\ndocs/index.html is the main page.'); }
+status_comment_body() { printf '💬 Answered.\n<!-- netlify-agent-run-checkpoint:{"v":1,"state":"finalized","runnerId":"r1","mode":"ask"} -->'; }
+backend_session_modes() { echo ask; }
+`;
+  it('passes for an answered question with no PR', () => {
+    const result = bash(`${stub}\nscenario_ask; echo "failed=$CANARY_FAILED"`, { env: { RUN_MARKER: 'm1', PR: '' } });
+    assert.match(result.stdout, /failed=0/, result.checks);
+  });
+  it('fails when a PR was opened', () => {
+    const result = bash(`${stub}\nscenario_ask; echo "failed=$CANARY_FAILED"`, { env: { RUN_MARKER: 'm1', PR: '9' } });
+    assert.match(result.stdout, /failed=1/);
+    assert.match(result.checks, /no PR was opened \| #9 \| ❌/);
   });
 });

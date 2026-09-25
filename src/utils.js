@@ -44,7 +44,7 @@ const VALID_EFFORTS = catalog.EFFORT_WORDS;
  * so alternation never stops at a shorter prefix.
  * @type {string[]}
  */
-const SELECTOR_SUFFIXES = [...VALID_MODELS, ...catalog.STANDALONE_SUFFIXES]
+const SELECTOR_SUFFIXES = [...VALID_MODELS, ...catalog.STANDALONE_SUFFIXES, 'ask']
   .sort((a, b) => b.length - a.length);
 
 const TRIGGER_SUFFIX_PATTERN = `(?:[_-](?:agents?(?:[_-]runs?)?|ai|${SELECTOR_SUFFIXES.join('|')}))?`;
@@ -87,6 +87,10 @@ const EXPLICIT_MODEL_PATTERN = /(?<![\w-])model[:=](~?[A-Za-z0-9][A-Za-z0-9._~\/
  */
 const SELECTOR_WORD_PATTERN = /^[ \t]+(~?[A-Za-z0-9][A-Za-z0-9._~\/-]*?)(?=\s|[:,]|\.(?:\s|$)|$)/;
 const CONNECTOR_PATTERN = /^[ \t]+(?:with|using|use|via)(?=[ \t])/i;
+/** "ask:" as the first word after the mention (the colon is required). */
+const ASK_PREFIX_PATTERN = /^[ \t]+ask:(?=\s|$)/i;
+/** "mode:ask" / "mode=normal", honored only inside the selector prefix. */
+const MODE_WORD_PATTERN = /^[ \t]+mode[:=](ask|normal)(?=\s|[:,]|\.(?:\s|$)|$)/i;
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -128,6 +132,7 @@ function matchesTrigger(text) {
  * @property {string | null} agent Agent word named in the mention.
  * @property {string | null} model Model word or `model:` value, as written.
  * @property {string | null} effort Effort word or `effort:` value.
+ * @property {'ask' | 'normal' | null} mode Runner mode (the -ask suffix, "ask:", or mode:ask).
  * @property {number} start Index of the mention within the line.
  * @property {number} end Index just past the consumed selector words.
  */
@@ -153,6 +158,7 @@ function parseMentionLine(line) {
     agent: null,
     model: null,
     effort: null,
+    mode: null,
     start: trigger.index,
     end: trigger.index + trigger[0].length,
   };
@@ -180,9 +186,16 @@ function parseMentionLine(line) {
     return false;
   };
 
-  if (trigger[1]) accept(trigger[1]);
+  if (trigger[1] && trigger[1].toLowerCase() === 'ask') selection.mode = 'ask';
+  else if (trigger[1]) accept(trigger[1]);
 
   let rest = line.slice(selection.end);
+  const askPrefix = rest.match(ASK_PREFIX_PATTERN);
+  if (askPrefix) {
+    selection.mode = 'ask';
+    selection.end += askPrefix[0].length;
+    rest = rest.slice(askPrefix[0].length);
+  }
   const connector = rest.match(CONNECTOR_PATTERN);
   if (connector && !selection.agent && !selection.model) {
     const afterConnector = rest.slice(connector[0].length).match(SELECTOR_WORD_PATTERN);
@@ -195,6 +208,13 @@ function parseMentionLine(line) {
     }
   }
   for (;;) {
+    const modeWord = rest.match(MODE_WORD_PATTERN);
+    if (modeWord) {
+      selection.mode = /** @type {'ask' | 'normal'} */ (modeWord[1].toLowerCase());
+      selection.end += modeWord[0].length;
+      rest = rest.slice(modeWord[0].length);
+      continue;
+    }
     const word = rest.match(SELECTOR_WORD_PATTERN);
     if (!word || !accept(word[1])) break;
     selection.end += word[0].length;
@@ -226,7 +246,7 @@ function parseSelection(text) {
   for (const line of stripMarkdownCode(text).split('\n')) {
     const selection = parseMentionLine(line);
     if (!selection) continue;
-    if (selection.agent || selection.model || selection.effort) return selection;
+    if (selection.agent || selection.model || selection.effort || selection.mode) return selection;
     first = first || selection;
   }
   return first;
@@ -425,7 +445,7 @@ function parseCommand(text) {
   const mentionLine = stripMarkdownCode(raw).split('\n').find((line) => TRIGGER_PATTERN.test(line)) || '';
   return {
     command: 'run',
-    mode: 'normal',
+    mode: selection && selection.mode === 'ask' ? 'ask' : 'normal',
     selection: {
       agent: selection ? selection.agent : null,
       model: selection ? selection.model : null,

@@ -386,6 +386,11 @@ jobs:
     run: echo "PR created at ${{ steps.agent.outputs.agent-pr-url }}"</code></pre>
 </section>
 
+<section id="ask-mode">
+  <h2>Asking questions</h2>
+  <p>Ask mode answers a question about the code in a comment, without changing files or opening a PR. Use <code>@netlify-ask</code>, <code>@netlify ask:</code> (the colon is required), or <code>mode:ask</code> right after the mention: for example <code>@netlify-ask fable high how are webhooks retried?</code>. A plain "ask" isn't enough, because <code>@netlify ask the user to confirm…</code> is a build request. The answer appears as a result comment marked 💬 Answered. On a PR, the agent reads the PR branch, and a later <code>@netlify</code> request continues with the same context.</p>
+</section>
+
 <section id="scope-guard">
   <h2>Scope guard</h2>
   <p>After a successful run, the action checks which files that run changed and adds a <strong>⚠️ Review these changes</strong> table to the result comment (and to the PR, for runs started from an issue) when it touched workflows, <code>netlify.toml</code>, root <code>*.toml</code> files, lockfiles, <code>AGENTS.md</code>/<code>CLAUDE.md</code>, <code>.env</code> files, new root files, or new top-level folders. Files the request names are listed as requested instead. It never blocks a run.</p>

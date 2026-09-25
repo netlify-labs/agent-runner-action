@@ -446,7 +446,44 @@ scenario_stop_command() {
     record_check stop-command "no PR was opened" "a PR is linked" fail
   fi
 }
-scenario_ask() { not_implemented ask; }
+backend_session_modes() {
+  # backend_session_modes <runner id>: prints each session mode (needs NETLIFY_AUTH_TOKEN).
+  if [ -z "${NETLIFY_AUTH_TOKEN:-}" ]; then
+    echo "unknown"
+    return 0
+  fi
+  curl -fsS -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
+    "https://api.netlify.com/api/v1/agent_runners/$1/sessions" | jq -r '.[].mode // "none"'
+}
+
+scenario_ask() {
+  # An @netlify-ask question: answered in a result comment, no PR, ask session.
+  run_issue_case ask "@netlify-ask codex mini low Which file is this site's main HTML page? Answer with the file path and one sentence. Marker: ${RUN_MARKER}." || return 1
+  output issue-url "$CASE_ISSUE_URL"
+  output run-url "$CASE_RUN_URL"
+  output run-conclusion "$CASE_CONCLUSION"
+  expect_equal ask "downstream run conclusion" "$CASE_CONCLUSION" success
+  expect_contains ask "result comment" "$CASE_COMMENTS" "Agent Run answered"
+  expect_contains ask "result comment" "$CASE_COMMENTS" "### Answer"
+  expect_contains ask "result comment" "$CASE_COMMENTS" "docs/index.html"
+  expect_not_contains ask "result comment" "$CASE_COMMENTS" "Netlify Agent Run failed"
+  if [ -z "$CASE_PR_NUMBER" ]; then
+    record_check ask "no PR was opened" "none" pass
+  else
+    record_check ask "no PR was opened" "#${CASE_PR_NUMBER}" fail
+  fi
+  local body runner modes
+  body=$(status_comment_body "$CASE_ISSUE_NUMBER")
+  expect_contains ask "status comment" "$body" "Answered."
+  expect_contains ask "checkpoint" "$body" '"mode":"ask"'
+  runner=$(printf '%s' "$body" | checkpoint_runner_from_body)
+  modes=$(backend_session_modes "$runner" | tr '\n' ' ')
+  if [ "$modes" = "unknown " ] || printf '%s' "$modes" | grep -q 'ask'; then
+    record_check ask "backend session mode is ask" "${modes}" pass
+  else
+    record_check ask "backend session mode is ask" "${modes:-none}" fail
+  fi
+}
 
 run_scenario() {
   local name="$1"

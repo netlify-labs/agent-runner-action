@@ -278,3 +278,32 @@ describe('renderResultComment stop requests', () => {
     assert.match(resultBody, /Stop requested by @octocat after the run finished\./);
   });
 });
+
+describe('renderResultComment ask mode', () => {
+  const env = (/** @type {Record<string, string>} */ extra = {}) => ({ RUNNER_TEMP: tempDir, AGENT_ID: 'runner_1', SITE_NAME: 'site', SESSION_DATA_MAP: '{}', RUNNER_MODE: 'ask', ...extra });
+  it('renders an answer with the answered header and no Result section', () => {
+    writeSessions('runner_1', [{ id: 'session_1', prompt: '@netlify-ask why?', state: 'done', result: '- It uses Redwood.\n- Main page is web/src/pages/HomePage.', agent_config: { agent: 'claude', model: 'claude-fable-5' } }]);
+    const { resultBody } = renderResultComment({ context: context(), outcome: 'success', env: env() });
+    assert.match(resultBody, /^### \[Run #1 \| claude · Fable 5 \| Agent Run answered\]\(.*\) 💬/);
+    assert.match(resultBody, /### Answer\n\n- It uses Redwood\./);
+    assert.doesNotMatch(resultBody, /### Result/);
+    assert.match(resultBody, /\*Answered at /);
+    assert.doesNotMatch(resultBody, /were not applied/);
+  });
+  it('adds the discarded-changes note', () => {
+    writeSessions('runner_1', [{ id: 'session_1', prompt: 'q', state: 'done', result: 'Answer.', agent_config: { agent: 'codex' } }]);
+    const { resultBody } = renderResultComment({ context: context(), outcome: 'success', env: env({ AGENT_ASK_DISCARDED_CHANGES: 'true' }) });
+    assert.match(resultBody, /those changes were not applied\. Ask again without `ask` to make changes\./);
+  });
+  it('truncates a very long answer but keeps the marker', () => {
+    writeSessions('runner_1', [{ id: 'session_1', prompt: 'q', state: 'done', result: 'word '.repeat(20000), agent_config: { agent: 'codex' } }]);
+    const { resultBody } = renderResultComment({ context: context(), outcome: 'success', env: env() });
+    assert.ok(resultBody.length < 66000, String(resultBody.length));
+    assert.ok(parseResultCommentIdentifiers(resultBody));
+  });
+  it('a failed ask still renders as a failure', () => {
+    writeSessions('runner_1', [{ id: 'session_1', prompt: 'q', state: 'failed', agent_config: { agent: 'codex' } }]);
+    const { resultBody } = renderResultComment({ context: context(), outcome: 'failure', env: env({ AGENT_ERROR: 'boom' }) });
+    assert.match(resultBody, /Agent Run failed\]/);
+  });
+});

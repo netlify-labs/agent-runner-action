@@ -38,10 +38,12 @@ function parseResultSummary(body) {
   const firstLine = value.split('\n').find(line => line.trim()) || '';
   const runMatch = firstLine.match(/Run #(\d+)\s*\|\s*([^|]+)\s*\|\s*Agent Run\s+([^\]]+)\]\(([^)]+)\)/i);
   const failed = /Agent Run failed|FAILED|❌/i.test(firstLine);
+  const answered = !failed && /Agent Run answered|💬/i.test(firstLine);
+  const stopped = !failed && /Agent Run stopped|⏹/.test(firstLine);
   return {
     runNumber: runMatch ? runMatch[1] : '?',
     model: runMatch ? runMatch[2].trim() : 'agent',
-    status: failed ? 'failed' : 'completed',
+    status: failed ? 'failed' : answered ? 'answered' : stopped ? 'stopped' : 'completed',
     agentRunUrl: runMatch ? runMatch[4] : '',
     title: extractResultTitle(value),
     promptBlock: extractPromptBlock(value),
@@ -167,7 +169,7 @@ function renderHistoryTocFromComments({ comments, botLogin, repoUrl }) {
     .map(comment => {
       const summary = parseResultSummary(comment.body || '');
       const when = formatRunDate(comment.created_at);
-      const status = summary.status === 'failed' ? '❌' : '✅';
+      const status = { failed: '❌', answered: '💬', stopped: '⏹' }[summary.status] || '✅';
       const datePart = when ? ` at ${when}` : '';
       const runHeader = `${status} \`Run ${summary.runNumber}${datePart} using ${summary.model}\``;
       const parts = [];

@@ -154,3 +154,18 @@ describe('parseResultSummary run configuration', () => {
     assert.deepEqual([summary.runNumber, summary.model, summary.status], ['3', 'opencode · GLM 5.2 · max', 'failed']);
   });
 });
+
+describe('parseResultSummary statuses', () => {
+  for (const [header, status] of [
+    ['### [Run #2 | claude · Fable 5 | Agent Run answered](https://app.netlify.com/projects/s/agent-runs/r) 💬', 'answered'],
+    ['### [Run #3 | codex | Agent Run stopped](https://app.netlify.com/projects/s/agent-runs/r) ⏹', 'stopped'],
+    ['### [Run #4 | codex | Agent Run failed](https://app.netlify.com/projects/s/agent-runs/r) ❌', 'failed'],
+    ['### [Run #5 | codex | Agent Run completed](https://app.netlify.com/projects/s/agent-runs/r) ✅', 'completed'],
+  ]) {
+    it(status, () => {
+      const summary = parseResultSummary(header);
+      assert.equal(summary.status, status, header);
+      assert.equal(summary.runNumber, header.match(/#(\d+)/)[1]);
+    });
+  }
+});

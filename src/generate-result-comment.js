@@ -217,8 +217,11 @@ function renderResultComment({ env = process.env, context, outcome }) {
   // Stopped with @netlify stop: not a failure; say who stopped it.
   const stoppedBy = String(env.STOP_REQUESTED_BY || '').replace(/[^A-Za-z0-9-]/g, '');
   const stopped = isFailure && Boolean(stoppedBy);
-  const statusIcon = stopped ? '⏹' : isFailure ? '❌' : '✅';
-  const verb = stopped ? 'stopped' : isFailure ? 'failed' : 'completed';
+  // Ask mode: the result is an answer; nothing is landed.
+  const isAsk = (env.RUNNER_MODE || env.REQUESTED_MODE || requested.mode) === 'ask';
+  const answered = isAsk && !isFailure;
+  const statusIcon = stopped ? '⏹' : isFailure ? '❌' : answered ? '💬' : '✅';
+  const verb = stopped ? 'stopped' : isFailure ? 'failed' : answered ? 'answered' : 'completed';
 
   let body = `### [Run #${runNumber} | ${model} | Agent Run ${verb}](${agentRunUrl}) ${statusIcon}\n\n`;
   if (usageSummary) body += `**Usage:** ${usageSummary}\n\n`;
@@ -252,6 +255,12 @@ function renderResultComment({ env = process.env, context, outcome }) {
       cleanProse(env.AGENT_ERROR || latestSession.error_message || latestSession.error || latestSession.result || '').replace(/```/g, "'''")
     );
     if (errorText) body += `**Error excerpt:**\n\n\`\`\`text\n${errorText}\n\`\`\`\n\n`;
+  } else if (answered) {
+    body += '### Answer\n\n';
+    if (resultSummary) body += `${utils.escapeMarkdownLinks(resultSummary)}\n\n`;
+    if (env.AGENT_ASK_DISCARDED_CHANGES === 'true') {
+      body += '> The agent changed files while answering; those changes were not applied. Ask again without `ask` to make changes.\n\n';
+    }
   } else {
     body += title ? `### Result: ${utils.escapeMarkdownLinks(title)}\n\n` : '### Result\n\n';
     const safeDeployUrl = utils.safeHttpUrl(deployUrl);
@@ -266,7 +275,7 @@ function renderResultComment({ env = process.env, context, outcome }) {
   }
 
   if (links.length > 0) body += `${links.join(' | ')}\n\n`;
-  body += `*${stopped ? 'Stopped' : isFailure ? 'Failed' : 'Completed'} at ${timestamp}*\n`;
+  body += `*${stopped ? 'Stopped' : isFailure ? 'Failed' : answered ? 'Answered' : 'Completed'} at ${timestamp}*\n`;
 
   assertNoStateMarkers(body);
   body = truncateResultBody(body, agentRunUrl);

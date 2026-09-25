@@ -63,7 +63,7 @@ function buildCheckpoint({ handle, sdk, token, env, state, startedAt, model, eff
     kind: handle.kind,
     agent: handle.agent,
     mode: env.RUNNER_MODE === 'ask' ? 'ask' : 'normal',
-    landing: handle.policy && handle.policy.landing === 'pr' ? 'pr' : 'none',
+    landing: env.RUNNER_MODE !== 'ask' && handle.policy && handle.policy.landing === 'pr' ? 'pr' : 'none',
     deadlineAt: handle.policy.deadlineAt,
     startedAt,
     ghRunId: Number(env.GITHUB_RUN_ID || 0),

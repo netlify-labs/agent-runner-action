@@ -249,3 +249,14 @@ describe('stopped runs', () => {
     assert.match(body, /Netlify Agent Run completed\./);
   });
 });
+
+describe('ask-mode status', () => {
+  it('shows answered instead of completed', () => {
+    const body = renderStatusComment({ env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site', AGENT_OUTCOME: 'success', RUNNER_MODE: 'ask' }, context: context(), outcome: 'success' }).statusBody;
+    assert.match(body, /💬/);
+    assert.match(body, /Answered\./);
+    assert.match(body, /\| answered at /);
+    assert.doesNotMatch(body, /completed/);
+  });
+});
+

@@ -580,3 +580,18 @@ describe('getContext @netlify stop', () => {
     });
   }
 });
+
+describe('getContext runner-mode', () => {
+  beforeEach(() => { process.env.DEFAULT_MODEL = 'codex'; process.env.DRY_RUN = 'false'; });
+  const repo = { owner: 'o', repo: 'r' };
+  const mode = async (/** @type {any} */ context) => { const core = mockCore(); await getContext({ github: mockGithub(), context, core }); return core.outputs['runner-mode']; };
+  it('reads ask mode from the mention', async () => {
+    assert.equal(await mode({ eventName: 'issue_comment', payload: { issue: { number: 5 }, comment: { body: '@netlify-ask why?' } }, repo }), 'ask');
+    assert.equal(await mode({ eventName: 'issue_comment', payload: { issue: { number: 5 }, comment: { body: '@netlify fix it' } }, repo }), 'normal');
+  });
+  it('lets the dispatch runner_mode input win', async () => {
+    assert.equal(await mode({ eventName: 'workflow_dispatch', payload: { inputs: { trigger_text: 'why?', runner_mode: 'ask' } }, repo }), 'ask');
+    assert.equal(await mode({ eventName: 'workflow_dispatch', payload: { inputs: { trigger_text: '@netlify-ask why?', runner_mode: 'normal' } }, repo }), 'normal');
+    assert.equal(await mode({ eventName: 'workflow_dispatch', payload: { inputs: { trigger_text: '@netlify-ask why?', runner_mode: 'bogus' } }, repo }), 'ask');
+  });
+});

@@ -179,6 +179,14 @@ describe('recoverRun', () => {
     assert.equal(result.outcome, 'finalized');
   });
 
+  it('never lands an ask-mode run during recovery', async () => {
+    const sdk = fakeSdk();
+    const github = fakeGithub();
+    const result = await run(sdk, github, makeCheckpoint({ overrides: { mode: 'ask' } }));
+    assert.equal(result.outcome, 'finalized');
+    assert.ok(!sdk.calls.includes('land'), 'ask runs are answered, never landed');
+  });
+
   it('stops a run that is past its deadline, keeping the original deadline', async () => {
     const handle = makeHandle({ deadlineAt: 1000 });
     const sdk = fakeSdk({ snapshot: { kind: 'running', runnerId: 'runner1', state: 'running', usage: null } });
