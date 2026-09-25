@@ -73,3 +73,15 @@ describe('canary-lib helpers', () => {
     for (const name of names) assert.match(result.stdout, new RegExp(`ok-${name}`), name);
   });
 });
+
+describe('canary-lib checkpoint helpers', () => {
+  it('extracts the checkpoint runner id', () => {
+    const body = '<!-- netlify-agent-run-checkpoint:{"v":1,"state":"running","runnerId":"6ab5de0c2660172e9b17b86f"} -->';
+    assert.equal(bash('checkpoint_runner_from_body', { input: body }).stdout.trim(), '6ab5de0c2660172e9b17b86f');
+    assert.equal(bash('checkpoint_runner_from_body', { input: 'none' }).stdout.trim(), '');
+  });
+
+  it('reports backend state as unknown without a token', () => {
+    assert.equal(bash('backend_session_states r1', { env: { NETLIFY_AUTH_TOKEN: '' } }).stdout.trim(), 'unknown');
+  });
+});

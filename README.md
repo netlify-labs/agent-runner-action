@@ -180,6 +180,7 @@ Or comment `@netlify make it blue` on an existing PR.
 | `flag-new-top-level` | No | `true` | Also flag files added at the repository root and new top-level folders |
 | `protected-paths-action` | No | `comment` | `comment` (always on), plus optionally `label` and/or `draft` |
 | `scope-instructions` | No | `default` | Guidance appended to every agent prompt; `default` = report unrelated build/deploy failures instead of working around them, `none` disables |
+| `simulate-orphan` | No | `false` | Test-only (used by the canary): exit right after the run checkpoint is written, as if the runner were lost. Never set this in real workflows |
 | `dry-run` | No | `false` | Start an agent run but skip commit/PR creation |
 | `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent run |
 | `job-timeout-minutes` | No | `''` | The job's `timeout-minutes`. When set, the agent limit is shortened to leave 5 minutes for setup, so the agent times out cleanly before GitHub cancels the job |

@@ -360,20 +360,23 @@ describe('effort forwarding', () => {
     };
   }
 
-  async function runWith(overrides, calls = { createRunner: [], createSession: [] }) {
+  async function runWith(overrides, calls = { createRunner: [], createSession: [] }, extra = {}) {
     const runnerTemp = tempDirectory();
     try {
       const sdk = createAgentRunnerSdk({
         transport: dryRunTransport(calls),
         sleep: async () => {},
       });
+      const collected = outputCollector();
       await runAgentAction({
         env: actionEnv(runnerTemp, { IS_DRY_RUN: 'true', ...overrides }),
         sdk,
-        setOutput: outputCollector().setOutput,
+        setOutput: collected.setOutput,
         log: () => {},
         getScreenshot: async () => '',
+        ...extra,
       });
+      calls.outputs = collected.outputs;
       return calls;
     } finally {
       fs.rmSync(runnerTemp, { recursive: true, force: true });
@@ -465,6 +468,37 @@ describe('effort forwarding', () => {
     assert.match(calls.createRunner[0].prompt, /^Fix the header\n\n---\nScope guidance from this repository's workflow:\nOnly modify needed files\./);
     const without = await runWith({ TRIGGER_TEXT: 'Fix the header', SCOPE_BLOCK: '' });
     assert.doesNotMatch(without.createRunner[0].prompt, /Scope guidance/);
+  });
+
+  it('writes the checkpoint to the status comment right after start', async () => {
+    const patches = [];
+    const fetchImpl = async (url, init) => { patches.push({ url, body: JSON.parse(init.body).body }); return { ok: true, status: 200 }; };
+    const calls = await runWith(
+      { STATUS_COMMENT_ID: '555', ISSUE_NUMBER: '53', GITHUB_REPOSITORY: 'o/r', SITE_NAME: 'site', REQUESTER: 'DavidWells', GITHUB_RUN_ID: '1' },
+      undefined,
+      { fetchImpl },
+    );
+    assert.ok(patches.length >= 1);
+    assert.equal(patches[0].url, 'https://api.github.com/repos/o/r/issues/comments/555');
+    assert.match(patches[0].body, /<!-- netlify-agent-run-checkpoint:\{"v":1,"state":"running"/);
+    assert.match(patches[0].body, /View the in progress agent run in Netlify/);
+    assert.equal(calls.outputs['checkpoint-written'], 'true');
+    assert.equal(calls.outputs.outcome, 'success');
+  });
+
+  it('keeps running when the checkpoint write fails', async () => {
+    const fetchImpl = async () => ({ ok: false, status: 500 });
+    const calls = await runWith({ STATUS_COMMENT_ID: '555', ISSUE_NUMBER: '53', GITHUB_REPOSITORY: 'o/r' }, undefined, { fetchImpl });
+    assert.equal(calls.outputs['checkpoint-written'], 'false');
+    assert.equal(calls.outputs.outcome, 'success');
+  });
+
+  it('simulate-orphan exits right after the checkpoint without waiting or reporting an outcome', async () => {
+    const fetchImpl = async () => ({ ok: true, status: 200 });
+    const calls = await runWith({ STATUS_COMMENT_ID: '555', ISSUE_NUMBER: '53', GITHUB_REPOSITORY: 'o/r', SIMULATE_ORPHAN: 'true' }, undefined, { fetchImpl });
+    assert.equal(calls.outputs['simulated-orphan'], 'true');
+    assert.equal(calls.outputs.outcome, '');
+    assert.equal(calls.outputs['agent-id'] !== '', true);
   });
 
   it('rejects malformed effort values before any SDK call', async () => {
@@ -685,5 +719,54 @@ describe('action policy and failures', () => {
     } finally {
       fs.rmSync(runnerTemp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('waitWithBackoff', () => {
+  const { waitWithBackoff } = require('./run-agent');
+  /** @param {string} category */
+  const sdkFailing = (category, failures, result = { status: 'succeeded' }) => {
+    let calls = 0;
+    return {
+      calls: () => calls,
+      sdk: /** @type {any} */ ({
+        waitFor: async () => { calls += 1; if (calls <= failures) throw new Error(category); return result; },
+        classifyFailure: (error) => ({ category: error.message }),
+      }),
+    };
+  };
+  const handle = /** @type {any} */ ({ policy: { deadlineAt: 10_000_000 } });
+
+  it('retries transient rate-limit failures with backoff, then returns the result', async () => {
+    const sleeps = [];
+    const logs = [];
+    const { sdk, calls } = sdkFailing('rate-limit', 2);
+    const result = await waitWithBackoff({ sdk, handle, waitOptions: {}, sleep: async (ms) => { sleeps.push(ms); }, log: (m) => logs.push(m), now: () => 0 });
+    assert.deepEqual(result, { status: 'succeeded' });
+    assert.equal(calls(), 3);
+    assert.deepEqual(sleeps, [15000, 30000]);
+    assert.match(logs[0], /transient rate-limit error; retrying in 15s/);
+  });
+
+  it('rethrows non-transient failures immediately', async () => {
+    const { sdk, calls } = sdkFailing('authentication', 1);
+    await assert.rejects(waitWithBackoff({ sdk, handle, waitOptions: {}, sleep: async () => {}, log: () => {}, now: () => 0 }), /authentication/);
+    assert.equal(calls(), 1);
+  });
+
+  it('stops retrying past the deadline or after the retry limit', async () => {
+    const pastDeadline = sdkFailing('transport', 5);
+    await assert.rejects(waitWithBackoff({ sdk: pastDeadline.sdk, handle: { policy: { deadlineAt: 100 } }, waitOptions: {}, sleep: async () => {}, log: () => {}, now: () => 200 }), /transport/);
+    assert.equal(pastDeadline.calls(), 1);
+    const forever = sdkFailing('capacity', 100);
+    await assert.rejects(waitWithBackoff({ sdk: forever.sdk, handle, waitOptions: {}, sleep: async () => {}, log: () => {}, now: () => 0 }), /capacity/);
+    assert.equal(forever.calls(), 9);
+  });
+
+  it('never sleeps past the deadline', async () => {
+    const sleeps = [];
+    const { sdk } = sdkFailing('rate-limit', 1);
+    await waitWithBackoff({ sdk, handle: { policy: { deadlineAt: 5000 } }, waitOptions: {}, sleep: async (ms) => { sleeps.push(ms); }, log: () => {}, now: () => 0 });
+    assert.deepEqual(sleeps, [5000]);
   });
 });

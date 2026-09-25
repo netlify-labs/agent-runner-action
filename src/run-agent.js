@@ -17,6 +17,7 @@ const {
 } = require('nax-agent-runner-sdk');
 const { MODEL_ID_PATTERN } = require('./agent-catalog');
 const { parseDiffFiles } = require('./scope-files');
+const { writeCheckpoint } = require('./run-checkpoint');
 
 /** @typedef {import('nax-agent-runner-sdk').AgentRunnerSdk} AgentRunnerSdk */
 /** @typedef {import('nax-agent-runner-sdk').Handle} Handle */
@@ -418,6 +419,33 @@ function classifySdkError(error, sdk) {
   };
 }
 
+const TRANSIENT_POLL_CATEGORIES = new Set(['rate-limit', 'capacity', 'transport']);
+const MAX_POLL_RETRIES = 8;
+
+/**
+ * Wait for the run, riding out transient polling failures (rate limits,
+ * capacity, transport) with backoff until the run's own deadline. The agent
+ * keeps working while we poll, so giving up early would orphan the run.
+ * @param {{ sdk: AgentRunnerSdk, handle: Handle, waitOptions: any, sleep?: (ms: number) => Promise<void>, log: (message: string) => void, now?: () => number }} input
+ * @returns {Promise<RunResult>}
+ */
+async function waitWithBackoff({ sdk, handle, waitOptions, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), log, now = Date.now }) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await sdk.waitFor(handle, waitOptions);
+    } catch (error) {
+      const failure = classifySdkError(error, sdk);
+      const remaining = handle.policy.deadlineAt - now();
+      if (!TRANSIENT_POLL_CATEGORIES.has(failure.category) || attempt > MAX_POLL_RETRIES || remaining <= 0) {
+        throw error;
+      }
+      const delay = Math.min(120000, 15000 * 2 ** (attempt - 1), Math.max(1000, remaining));
+      log(`Polling hit a transient ${failure.category} error; retrying in ${Math.round(delay / 1000)}s (retry ${attempt} of ${MAX_POLL_RETRIES}).`);
+      await sleep(delay);
+    }
+  }
+}
+
 /**
  * @param {FailureClassification} failure
  * @param {ActionInput | undefined} input
@@ -527,11 +555,13 @@ async function fetchDeployScreenshot(deployId, token) {
  * @property {(name: string, value: unknown) => void} [setOutput]
  * @property {(message: string) => void} [log]
  * @property {(deployId: string, token: string) => Promise<string>} [getScreenshot]
+ * @property {typeof fetch} [fetchImpl] used for status-comment checkpoint writes
+ * @property {(ms: number) => Promise<void>} [sleep] backoff sleep (tests)
  */
 
 /**
  * @param {RunAgentOptions} [options]
- * @returns {Promise<{handle: Handle, result: RunResult, landing?: LandingOutcome}>}
+ * @returns {Promise<{handle: Handle, result?: RunResult, landing?: LandingOutcome, simulatedOrphan?: boolean}>}
  */
 async function runAgentAction(options = {}) {
   const env = options.env || process.env;
@@ -559,6 +589,8 @@ async function runAgentAction(options = {}) {
     'agent-pr-branch': '',
     'agent-commit-sha': '',
     'agent-landing-kind': 'none',
+    'checkpoint-written': 'false',
+    'simulated-orphan': 'false',
   })) {
     setOutput(name, value);
   }
@@ -568,6 +600,33 @@ async function runAgentAction(options = {}) {
   /** @type {AgentRunnerSdk | undefined} */
   let sdk = options.sdk;
   let stage = 'validate-env';
+  const fetchImpl = options.fetchImpl || fetch;
+  const startedAt = Date.now();
+  /** @type {Promise<unknown>[]} */
+  const pendingCheckpoints = [];
+  /**
+   * Persist the checkpoint to the status comment (best-effort).
+   * @param {Handle} current
+   * @returns {Promise<boolean>}
+   */
+  const persistCheckpoint = async (current) => {
+    const resolved = /** @type {ActionInput} */ (input);
+    const result = await writeCheckpoint({
+      handle: current,
+      sdk: /** @type {AgentRunnerSdk} */ (sdk),
+      token: resolved.token,
+      env,
+      state: 'running',
+      startedAt,
+      ...(resolved.model ? { model: resolved.model } : {}),
+      ...(resolved.effort ? { effort: resolved.effort } : {}),
+      fetchImpl,
+      log,
+    });
+    if (!result.written) log(`Checkpoint not persisted (${result.reason}); this run can't be recovered if the job dies.`);
+    else if (result.promptStripped) log('Checkpoint stored without the prompt (it was too large for the status comment).');
+    return result.written;
+  };
 
   try {
     input = readActionInput(env);
@@ -584,6 +643,7 @@ async function runAgentAction(options = {}) {
           handle,
           resolvedInput.runnerTemp,
         );
+        pendingCheckpoints.push(persistCheckpoint(handle));
       },
     });
 
@@ -623,17 +683,32 @@ async function runAgentAction(options = {}) {
     setOutput('agent-id', handle.runnerId);
     saveHandleCheckpoint(sdk, handle, input.runnerTemp);
     log(`Agent Runner ${handle.runnerId} started.`);
+    const checkpointWritten = await persistCheckpoint(handle);
+    setOutput('checkpoint-written', checkpointWritten ? 'true' : 'false');
+    if (env.SIMULATE_ORPHAN === 'true') {
+      // Test-only: leave the run exactly as a lost runner would (checkpoint
+      // "running", no landing, no final comments).
+      setOutput('simulated-orphan', 'true');
+      log(`simulate-orphan: exiting after the checkpoint for ${handle.runnerId}.`);
+      return { handle, simulatedOrphan: true };
+    }
 
     stage = 'poll-agent';
-    const result = await sdk.waitFor(handle, {
-      ...requestOptions,
-      pollIntervalMs: POLL_INTERVAL_MS,
-      onProgress: (event) => {
-        if (event.kind === 'stateChanged') {
-          const safeState = event.state.replace(/[^A-Za-z0-9._-]/g, '');
-          log(`Agent Runner state: ${safeState || 'unknown'}.`);
-        }
+    const result = await waitWithBackoff({
+      sdk,
+      handle,
+      waitOptions: {
+        ...requestOptions,
+        pollIntervalMs: POLL_INTERVAL_MS,
+        onProgress: (/** @type {{ kind: string, state?: string }} */ event) => {
+          if (event.kind === 'stateChanged' && event.state) {
+            const safeState = event.state.replace(/[^A-Za-z0-9._-]/g, '');
+            log(`Agent Runner state: ${safeState || 'unknown'}.`);
+          }
+        },
       },
+      sleep: options.sleep,
+      log,
     });
     if (result.status !== 'succeeded') {
       const failure = terminalFailure(result);
@@ -682,6 +757,8 @@ async function runAgentAction(options = {}) {
       handle = landed.handle;
       landingOutcome = landed.landing;
       saveHandleCheckpoint(sdk, handle, input.runnerTemp);
+      pendingCheckpoints.push(persistCheckpoint(handle));
+      await Promise.allSettled(pendingCheckpoints);
       const failedLanding = landingFailure(landed.landing);
       if (failedLanding) {
         setOutput(
@@ -818,6 +895,7 @@ if (require.main === module) {
 module.exports = {
   CHECKPOINT_FILE_PREFIX,
   ReportedActionError,
+  waitWithBackoff,
   actionFailureCategory,
   appendGithubOutput,
   createLegacyHandle,
