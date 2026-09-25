@@ -99,6 +99,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      actions: read   # recovery checks whether an earlier run's job is still alive
     steps:
       - uses: actions/checkout@v4
       # This repo dogfoods itself — checkout + ./ runs the local action.

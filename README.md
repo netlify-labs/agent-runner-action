@@ -181,6 +181,10 @@ Or comment `@netlify make it blue` on an existing PR.
 | `protected-paths-action` | No | `comment` | `comment` (always on), plus optionally `label` and/or `draft` |
 | `scope-instructions` | No | `default` | Guidance appended to every agent prompt; `default` = report unrelated build/deploy failures instead of working around them, `none` disables |
 | `simulate-orphan` | No | `false` | Test-only (used by the canary): exit right after the run checkpoint is written, as if the runner were lost. Never set this in real workflows |
+| `operation` | No | `trigger` | `trigger` reacts to `@netlify` mentions; `recover-scan` finds agent runs whose job died and dispatches recovery (see [Recovering unfinished runs](#recovering-unfinished-runs)) |
+| `recover-workflow` | No | `netlify-agents.yml` | For `recover-scan`: the main workflow file to dispatch |
+| `recover-lookback-hours` | No | `48` | For `recover-scan`: only check issues and PRs updated this recently |
+| `recover-max-items` | No | `50` | For `recover-scan`: maximum recently updated issues and PRs to check |
 | `dry-run` | No | `false` | Start an agent run but skip commit/PR creation |
 | `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent run |
 | `job-timeout-minutes` | No | `''` | The job's `timeout-minutes`. When set, the agent limit is shortened to leave 5 minutes for setup, so the agent times out cleanly before GitHub cancels the job |
@@ -319,6 +323,26 @@ As soon as an agent run starts, the status comment shows **View the in progress 
 Result and status headers show what each run used, for example `Run #3 | claude · Fable 5 · high`. For follow-ups, the effort you requested is shown even though Netlify doesn't report it back.
 
 **Trust model.** The action reads checkpoints only from comments written by its own bot identity. GitHub lets anyone with write access edit comments, and repository write access already allows starting and steering runs. Given that, a tampered checkpoint can at most point the action at another run on the same Netlify site: the sealed handle is authenticated, and its IDs are checked against the public fields and your configured site.
+
+## Recovering unfinished runs
+
+Sometimes the agent keeps working on Netlify after its GitHub job is gone: the runner machine was lost, or the job crashed after the run started. The run's checkpoint in the status comment records that it never finished, and there are two ways it gets finished.
+
+**On the next `@netlify` comment in that thread.** Before starting the new request, the action finishes the previous run:
+- It waits for the previous run if it's still working, using up to 40% of the agent time limit so the new request still has time to run.
+- It opens the PR, or reports the result, and mentions the person who asked for it.
+- If the branch changed since the run started, it reports the result instead of landing it.
+- It stops the run instead of landing anything if the thread was closed, if the workflow was cancelled, or if the run passed its time limit.
+
+If the previous run is still working after that, the comment says so and the new request isn't started.
+
+**On a schedule (optional).** Copy [`workflow-templates/netlify-agents-recover.yml`](workflow-templates/netlify-agents-recover.yml) into `.github/workflows/`. GitHub starts it every 30 minutes; it doesn't react to comments. Each time, it:
+1. checks issues and PRs updated in the last 48 hours for unfinished runs whose job is gone
+2. dispatches your main workflow for each such thread with `recover_thread`
+
+Recovery then happens inside that thread's own concurrency group, one job at a time. A scan with nothing to do takes about 20–30 seconds of Actions time. GitHub may delay scheduled runs, and it disables schedules in public repositories after 60 days without activity.
+
+For recovery dispatches to work, your main workflow needs the `recover_thread` input and the thread-scoped `concurrency` group from the current templates.
 
 ## Versioning
 

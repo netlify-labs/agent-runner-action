@@ -1,0 +1,6 @@
+{
+  "name": "Netlify Agent Runners recovery",
+  "description": "Optional schedule that finishes Netlify agent runs whose GitHub job died, without waiting for another @netlify comment.",
+  "iconName": "zap",
+  "categories": ["Automation", "Deployment"]
+}
