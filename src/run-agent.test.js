@@ -430,6 +430,26 @@ describe('effort forwarding', () => {
     assert.equal('model' in withoutModel.createSession[0], false);
   });
 
+  it('forwards a tilde model ID and a translated wire effort unchanged', async () => {
+    const calls = await runWith({
+      NETLIFY_AGENT: 'opencode',
+      NETLIFY_MODEL: '~deepseek/deepseek-v4-flash-latest',
+      NETLIFY_EFFORT: 'xhigh',
+    });
+    assert.equal(calls.createRunner[0].agent, 'opencode');
+    assert.equal(calls.createRunner[0].model, '~deepseek/deepseek-v4-flash-latest');
+    assert.equal(calls.createRunner[0].effort, 'xhigh');
+  });
+
+  it('rejects an over-long model ID before any SDK call', async () => {
+    const calls = { createRunner: [], createSession: [] };
+    await assert.rejects(
+      runWith({ NETLIFY_MODEL: `m${'x'.repeat(128)}` }, calls),
+      ReportedActionError,
+    );
+    assert.equal(calls.createRunner.length, 0);
+  });
+
   it('rejects malformed model values before any SDK call', async () => {
     const calls = { createRunner: [], createSession: [] };
     await assert.rejects(

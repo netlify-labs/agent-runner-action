@@ -436,4 +436,73 @@ describe('getContext', () => {
       assert.ok(core.outputs['trigger-text'].startsWith('Build a page'), core.outputs['trigger-text']);
     });
   });
+
+  describe('opencode and wire efforts', () => {
+    beforeEach(() => {
+      delete process.env.DEFAULT_EFFORT;
+      delete process.env.DEFAULT_MODEL_ID;
+    });
+
+    function commentContext(body) {
+      return {
+        eventName: 'issue_comment',
+        payload: {
+          issue: { number: 5 },
+          comment: { body, html_url: 'https://github.com/o/r/issues/5#c1' },
+        },
+        repo: { owner: 'o', repo: 'r' },
+      };
+    }
+
+    it('outputs the wire effort and the displayed label separately', async () => {
+      await getContext({ github: mockGithub(), context: commentContext('@netlify glm max Refactor'), core });
+      assert.equal(core.outputs.agent, 'opencode');
+      assert.equal(core.outputs['model-id'], 'z-ai/glm-5.2');
+      assert.equal(core.outputs.effort, 'xhigh');
+      assert.equal(core.outputs['effort-label'], 'max');
+    });
+
+    it('parses CRLF comment bodies from the GitHub web UI', async () => {
+      await getContext({ github: mockGithub(), context: commentContext('@netlify fable high\r\nFix the header\r\n'), core });
+      assert.equal(core.outputs.agent, 'claude');
+      assert.equal(core.outputs['model-id'], 'claude-fable-5');
+      assert.equal(core.outputs.effort, 'high');
+    });
+
+    it('accepts an opencode dispatch with a tilde model ID', async () => {
+      const context = {
+        eventName: 'workflow_dispatch',
+        payload: { inputs: { trigger_text: 'Fix it', agent: 'codex', model_id: '~deepseek/deepseek-v4-flash-latest', effort: 'max' } },
+        repo: { owner: 'o', repo: 'r' },
+      };
+      await getContext({ github: mockGithub(), context, core });
+      assert.equal(core.outputs.agent, 'opencode');
+      assert.equal(core.outputs['model-id'], '~deepseek/deepseek-v4-flash-latest');
+      assert.equal(core.outputs.effort, 'max');
+      assert.equal(core.outputs['config-warnings'], '');
+    });
+
+    it('keeps the dispatch agent for an uncataloged model_id', async () => {
+      const context = {
+        eventName: 'workflow_dispatch',
+        payload: { inputs: { trigger_text: 'Fix it', agent: 'opencode', model_id: 'moonshotai/kimi-k4' } },
+        repo: { owner: 'o', repo: 'r' },
+      };
+      await getContext({ github: mockGithub(), context, core });
+      assert.equal(core.outputs.agent, 'opencode');
+      assert.equal(core.outputs['model-id'], 'moonshotai/kimi-k4');
+      assert.match(core.outputs['config-warnings'], /not in the action's catalog/);
+    });
+
+    it('lets a mention model win over dispatch inputs left at their defaults', async () => {
+      const context = {
+        eventName: 'workflow_dispatch',
+        payload: { inputs: { trigger_text: '@netlify kimi low Fix it', agent: 'codex', model_id: 'auto', effort: 'auto' } },
+        repo: { owner: 'o', repo: 'r' },
+      };
+      await getContext({ github: mockGithub(), context, core });
+      assert.equal(core.outputs['model-id'], 'moonshotai/kimi-k3');
+      assert.equal(core.outputs.effort, 'low');
+    });
+  });
 });

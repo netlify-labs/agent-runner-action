@@ -3,6 +3,7 @@
 
 /** @typedef {import('./types').ActionCore} ActionCore */
 const { STATUS_COMMENT_MARKER, renderRunnerIdMarker } = require('./comment-markers');
+const { PROVIDERS } = require('./agent-catalog');
 const { classifyFailure } = require('./failure-taxonomy');
 const utils = require('./utils');
 
@@ -53,7 +54,7 @@ function renderAgentUnavailableHint(category, errorText) {
   if (!providerMatch) return '';
 
   const unavailableModel = providerMatch[1].toLowerCase();
-  const alternates = ['claude', 'codex', 'gemini'].filter(model => model !== unavailableModel);
+  const alternates = PROVIDERS.filter(model => model !== unavailableModel);
   if (alternates.length === 0) return '';
   return `Try ${alternates.map(model => `\`@netlify ${model}\``).join(' or ')} instead.`;
 }

@@ -1,7 +1,8 @@
 // Extract context information from the GitHub event.
 // Sets outputs: issue-number, pr-number, head-ref, base-ref, head-sha,
 //               is-pr, trigger-text, has-linked-pr, agent, model, model-id,
-//               model-label, effort, config-warnings, is-dry-run
+//               model-label, effort, effort-label, config-warnings,
+//               is-dry-run
 
 /** @typedef {import('./types').ActionParams} ActionParams */
 
@@ -136,7 +137,7 @@ module.exports = async function getContext({ github, context, core }) {
   if (dispatchEffort && dispatchEffort !== 'auto') merged.effort = dispatchEffort;
 
   const resolved = utils.resolveSelection(merged, { defaultAgent, defaultModelId, defaultEffort });
-  const { agent, modelId, modelLabel, effort, warnings } = resolved;
+  const { agent, modelId, modelLabel, effort, effortLabel, warnings } = resolved;
   for (const warning of warnings) {
     console.log(`::warning title=Agent configuration::${warning}`);
   }
@@ -171,6 +172,7 @@ module.exports = async function getContext({ github, context, core }) {
   core.setOutput('model-id', modelId);
   core.setOutput('model-label', modelLabel);
   core.setOutput('effort', effort);
+  core.setOutput('effort-label', effortLabel);
   core.setOutput('config-warnings', warnings.join('\n'));
   core.setOutput('is-dry-run', isDryRun.toString());
 

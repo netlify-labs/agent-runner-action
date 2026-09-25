@@ -2,6 +2,7 @@
 // Agent Runner lifecycle or landing calls.
 
 const { renderRunnerIdMarker } = require('./comment-markers');
+const { stripSelection } = require('./utils');
 
 /** @typedef {import('./types').ActionParams} ActionParams */
 
@@ -10,12 +11,7 @@ const { renderRunnerIdMarker } = require('./comment-markers');
  * @returns {string}
  */
 function cleanPullRequestTitle(title) {
-  return title
-    .replace(
-      /@(netlify|nelify|netlfy|netify|netlif|netfly)([_-](agents?([_-]runs?)?|ai))?\s+((with|using|use|via)\s+)?(claude|codex|gemini)?\s*/i,
-      '',
-    )
-    .trim();
+  return stripSelection(title).replace(/\s{2,}/g, ' ').trim();
 }
 
 /**

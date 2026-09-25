@@ -27,7 +27,7 @@ inputs:
     required: false
     default: ''
   default-agent:
-    description: 'Default agent to use (claude, codex, or gemini)'
+    description: 'Default agent to use (claude, codex, gemini, or opencode)'
     required: false
     default: 'codex'
   default-model:
@@ -39,7 +39,7 @@ inputs:
     required: false
     default: ''
   default-effort:
-    description: 'Default effort level (low, medium, high). Empty or auto lets the backend choose.'
+    description: 'Default effort level (low, medium, high; some OpenCode models also take max). Empty or auto lets the backend choose.'
     required: false
     default: ''
   manage-labels:
@@ -666,8 +666,9 @@ runs:
           const ghActionUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
           const modelLabel = ${{ toJSON(steps.context-info.outputs.model-label) }} || '';
           const effort = ${{ toJSON(steps.context-info.outputs.effort) }} || '';
+          const effortLabel = ${{ toJSON(steps.context-info.outputs.effort-label) }} || '';
           const configWarnings = ${{ toJSON(steps.context-info.outputs.config-warnings) }} || '';
-          const body = utils.buildInProgressComment({ prompt: triggerText, model, modelLabel, effort, configWarnings, ghActionUrl }) +
+          const body = utils.buildInProgressComment({ prompt: triggerText, model, modelLabel, effort, effortLabel, configWarnings, ghActionUrl }) +
             (isDryRun ? '\n\n> **Preview mode** — no changes will be committed.\n' : '');
           const { data: comment } = await github.rest.issues.createComment({
             owner: context.repo.owner, repo: context.repo.repo,
@@ -873,9 +874,10 @@ runs:
           const ghActionUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
           const modelLabel = ${{ toJSON(steps.context-info.outputs.model-label) }} || '';
           const effort = ${{ toJSON(steps.context-info.outputs.effort) }} || '';
+          const effortLabel = ${{ toJSON(steps.context-info.outputs.effort-label) }} || '';
           const configWarnings = ${{ toJSON(steps.context-info.outputs.config-warnings) }} || '';
           const body = utils.buildInProgressComment({
-            agentRunUrl, prompt: triggerText, model, modelLabel, effort, configWarnings, runnerId, ghActionUrl
+            agentRunUrl, prompt: triggerText, model, modelLabel, effort, effortLabel, configWarnings, runnerId, ghActionUrl
           });
           await github.rest.issues.updateComment({
             owner: context.repo.owner, repo: context.repo.repo,

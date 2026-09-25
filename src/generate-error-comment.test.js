@@ -114,6 +114,17 @@ describe('generate-error-comment', () => {
     assert.ok(body.includes('<!-- netlify-agent-run-status -->'));
   });
 
+  it('suggests every other provider when opencode is unavailable', async () => {
+    setEnv({
+      ISSUE_NUMBER: '43',
+      AGENT_ERROR: 'Agent Runner opencode is not available right now',
+    });
+
+    const body = await renderComment();
+    assert.ok(body.includes('`@netlify claude` or `@netlify codex` or `@netlify gemini`'));
+    assert.ok(!body.includes('`@netlify opencode`'));
+  });
+
   it('renders timeout failures with timeout guidance', async () => {
     setEnv({
       ISSUE_NUMBER: '51',

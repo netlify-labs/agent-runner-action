@@ -8,17 +8,26 @@
 // passed through for the backend to validate.
 
 /**
+ * @typedef {object} CatalogEffort
+ * @property {string} id Level users type and see (e.g. `max`).
+ * @property {string} [wire] Value sent to Agent Runner when it differs.
+ */
+
+/**
  * @typedef {object} CatalogModel
  * @property {string} id Wire model ID sent to Agent Runner.
  * @property {string} label Display label.
  * @property {string} provider Agent provider that owns the model.
- * @property {string[]} aliases Short names accepted after the agent word.
+ * @property {string[]} aliases Short names accepted in mentions.
  * @property {boolean} standalone Aliases also work without an agent word.
- * @property {string[]} efforts Supported explicit effort levels.
+ * @property {CatalogEffort[]} efforts Supported explicit effort levels.
  */
 
 /** @type {string[]} */
-const LOW_MEDIUM_HIGH = ['low', 'medium', 'high'];
+const PROVIDERS = ['claude', 'codex', 'gemini', 'opencode'];
+
+/** @type {CatalogEffort[]} */
+const LOW_MEDIUM_HIGH = [{ id: 'low' }, { id: 'medium' }, { id: 'high' }];
 
 /** @type {CatalogModel[]} */
 const MODELS = [
@@ -34,12 +43,19 @@ const MODELS = [
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', provider: 'gemini', aliases: ['pro', 'gemini-3.1-pro'], standalone: false, efforts: LOW_MEDIUM_HIGH },
   { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', provider: 'gemini', aliases: ['flash'], standalone: false, efforts: LOW_MEDIUM_HIGH },
   { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite', provider: 'gemini', aliases: ['flash-lite', 'lite'], standalone: false, efforts: LOW_MEDIUM_HIGH },
+  { id: 'moonshotai/kimi-k3', label: 'Kimi K3', provider: 'opencode', aliases: ['kimi', 'k3', 'kimi-k3'], standalone: true, efforts: [{ id: 'low' }, { id: 'high' }, { id: 'max' }] },
+  { id: 'moonshotai/kimi-k2.7-code', label: 'Kimi K2.7 Code', provider: 'opencode', aliases: ['kimi-code', 'k2.7', 'kimi-k2.7-code'], standalone: true, efforts: [] },
+  { id: 'z-ai/glm-5.2', label: 'GLM 5.2', provider: 'opencode', aliases: ['glm', 'glm-5.2'], standalone: true, efforts: [{ id: 'high' }, { id: 'max', wire: 'xhigh' }] },
+  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro', provider: 'opencode', aliases: ['deepseek', 'deepseek-pro', 'deepseek-v4-pro'], standalone: true, efforts: [{ id: 'high' }, { id: 'max', wire: 'xhigh' }] },
+  { id: '~deepseek/deepseek-v4-flash-latest', label: 'DeepSeek V4 Flash Latest', provider: 'opencode', aliases: ['deepseek-flash', 'deepseek-v4-flash'], standalone: true, efforts: [{ id: 'low' }, { id: 'high' }, { id: 'max' }] },
+  { id: 'x-ai/grok-4.5', label: 'Grok 4.5', provider: 'opencode', aliases: ['grok', 'grok-4.5'], standalone: true, efforts: LOW_MEDIUM_HIGH },
+  { id: 'minimax/minimax-m3', label: 'MiniMax M3', provider: 'opencode', aliases: ['minimax', 'minimax-m3'], standalone: true, efforts: [] },
 ];
 
 /**
  * Efforts accepted when the model is Auto. The UI hides effort until a model
  * is pinned, but the backend accepts and records these for Auto runs.
- * @type {string[]}
+ * @type {CatalogEffort[]}
  */
 const AUTO_MODEL_EFFORTS = LOW_MEDIUM_HIGH;
 
@@ -52,10 +68,13 @@ const AUTO_MODEL_EFFORTS = LOW_MEDIUM_HIGH;
 const EFFORT_WORDS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 /**
- * Standalone aliases that may also be used as an @netlify-<name> suffix.
+ * Single-word standalone aliases, usable as an @netlify-<name> suffix.
  * @type {string[]}
  */
-const STANDALONE_SUFFIXES = ['fable', 'opus', 'sonnet', 'haiku'];
+const STANDALONE_SUFFIXES = ['fable', 'opus', 'sonnet', 'haiku', 'kimi', 'glm', 'deepseek', 'grok', 'minimax'];
+
+/** Model IDs are lowercase and may start with `~` (backend alias IDs). */
+const MODEL_ID_PATTERN = /^~?[a-z0-9][a-z0-9._~\/-]{0,127}$/;
 
 /**
  * Find a catalog model by exact wire ID.
@@ -94,12 +113,25 @@ function resolveConfiguredModel(word) {
   return modelById(normalized) || MODELS.find((model) => model.aliases.includes(normalized));
 }
 
+/**
+ * Find a supported effort by user-facing level or wire value.
+ * @param {CatalogEffort[]} efforts
+ * @param {string} level
+ * @returns {CatalogEffort | undefined}
+ */
+function findEffort(efforts, level) {
+  return efforts.find((effort) => effort.id === level || effort.wire === level);
+}
+
 module.exports = {
+  PROVIDERS,
   MODELS,
   AUTO_MODEL_EFFORTS,
   EFFORT_WORDS,
   STANDALONE_SUFFIXES,
+  MODEL_ID_PATTERN,
   modelById,
   resolveModelWord,
   resolveConfiguredModel,
+  findEffort,
 };
