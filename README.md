@@ -303,6 +303,23 @@ Configure it with `protected-paths`:
 
 The block is hidden from the prompt shown in comments. Set your own text to replace it, or `none` to turn it off.
 
+## Run checkpoints and stopping
+
+As soon as an agent run starts, the status comment shows **View the in progress agent run** and stores a hidden checkpoint for it. The checkpoint holds the runner and session IDs, the requested agent, model and effort, the time limit, and the SDK's resumable run handle. The handle is **encrypted**:
+- It's sealed with AES-256-GCM under a key derived from your `NETLIFY_AUTH_TOKEN`.
+- It's bound to this repository, thread, and runner, so a copy pasted into another thread fails to open.
+- The prompt and site ID never appear in the comment in plain text.
+
+**Cancelling the workflow stops the agent.** If you cancel the workflow run (from the Actions tab), the action stops the agent run and the status comment says "⏹ The workflow was cancelled, so the agent run was stopped." This is best-effort: GitHub gives cancelled jobs only a short grace period.
+
+**Set `job-timeout-minutes`.** GitHub also cancels a job when it hits its own `timeout-minutes`, and that looks the same as a human cancel. Set `job-timeout-minutes` to your job's `timeout-minutes`. The action then shortens the agent's limit, leaving 5 minutes for setup, so the agent times out cleanly first. The templates already do this.
+
+**Polling is resilient.** Rate limits and other transient API errors while waiting for the agent are retried with backoff until the run's time limit, instead of failing the job while the agent keeps working.
+
+Result and status headers show what each run used, for example `Run #3 | claude · Fable 5 · high`. For follow-ups, the effort you requested is shown even though Netlify doesn't report it back.
+
+**Trust model.** The action reads checkpoints only from comments written by its own bot identity. GitHub lets anyone with write access edit comments, and repository write access already allows starting and steering runs. Given that, a tampered checkpoint can at most point the action at another run on the same Netlify site: the sealed handle is authenticated, and its IDs are checked against the public fields and your configured site.
+
 ## Versioning
 
 Releases are tagged `vX.Y.Z`, and the major tag `v1` always points at the latest `v1.Y.Z` release.

@@ -388,6 +388,11 @@ jobs:
   <p>Configure it with <code>protected-paths</code> (globs; a pattern without <code>/</code> matches only at the root; <code>default</code>, <code>none</code>, and <code>!pattern</code> are supported) and escalate with <code>protected-paths-action: comment,label,draft</code>. By default, <code>scope-instructions</code> also tells agents to report unrelated build or deploy failures instead of working around them.</p>
 </section>
 
+<section id="checkpoints">
+  <h2>Run checkpoints and stopping</h2>
+  <p>When a run starts, the status comment links to the live agent run and stores an encrypted checkpoint. The checkpoint is sealed with a key derived from your Netlify token, bound to this thread and runner, and never contains the prompt or site ID in plain text. Cancelling the workflow stops the agent run. Set <code>job-timeout-minutes</code> to your job's <code>timeout-minutes</code> so the agent's own limit fits inside the job. Transient API errors while waiting are retried until the run's time limit.</p>
+</section>
+
 <section id="versioning">
   <h2>Versioning</h2>
   <p>Releases are tagged <code>vX.Y.Z</code>, and <code>v1</code> always points at the latest <code>v1.Y.Z</code> release. Use <code>@v1</code> to follow minor and patch releases automatically, or pin a release commit with a version comment (<code>@&lt;sha&gt; # v1.2.0</code>) and let Dependabot's <code>github-actions</code> updates propose upgrades.</p>
