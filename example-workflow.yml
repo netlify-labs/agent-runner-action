@@ -9,6 +9,7 @@
 #   @netlify Build a landing page with a hero section
 #   @netlify claude Add dark mode support
 #   @netlify claude high Refactor the checkout flow   (optional effort level)
+#   @netlify fable high Refactor the checkout flow    (model implies the agent)
 #   @netlify codex Fix the mobile layout
 
 name: Netlify Agent Runners
@@ -34,6 +35,25 @@ on:
           - claude
           - gemini
         default: 'codex'
+      model_id:
+        description: 'Model (auto lets the backend choose; a model picks its own agent)'
+        required: false
+        type: choice
+        options:
+          - auto
+          - claude-fable-5
+          - claude-opus-5
+          - claude-opus-4-8
+          - claude-sonnet-5
+          - claude-haiku-4-5
+          - gpt-5.6-sol
+          - gpt-5.6-terra
+          - gpt-5.6-luna
+          - gpt-5.4-mini
+          - gemini-3.1-pro-preview
+          - gemini-3.6-flash
+          - gemini-3.5-flash-lite
+        default: 'auto'
       effort:
         description: 'Effort level (auto lets the backend choose)'
         required: false
@@ -43,8 +63,6 @@ on:
           - low
           - medium
           - high
-          - xhigh
-          - max
         default: 'auto'
   pull_request_target:
     types: [opened, reopened]
@@ -84,7 +102,8 @@ jobs:
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
           # Optional settings:
           # default-agent: 'codex'        # Default agent (claude, codex, gemini)
-          # default-effort: ''            # Default effort (low, medium, high, xhigh, max); empty = Auto
+          # default-model-id: ''          # Default model (e.g. claude-fable-5 or fable); empty = Auto
+          # default-effort: ''            # Default effort (low, medium, high); empty = Auto
           # manage-labels: 'false'        # Auto-create and apply labels
           # dry-run: 'false'              # Still starts an agent run; skips commit/PR creation
           # preflight-only: 'false'       # Validate setup only; starts no agent run
