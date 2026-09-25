@@ -126,6 +126,16 @@ module.exports = async function getContext({ github, context, core }) {
   // appended below). Stop and ask mode build on this.
   const parsedCommand = utils.parseCommand(selectionText);
   if (recoverThread && issueNumber) parsedCommand.command = 'recover';
+  // "@netlify stop" must be its own comment; in an issue or PR body, review,
+  // or dispatch it is reported instead of starting a run with prompt "stop".
+  const stopCandidates = context.eventName === 'issues'
+    ? [payload.issue?.title || '', payload.issue?.body || '']
+    : [selectionText];
+  if (!recoverThread && stopCandidates.some((text) => utils.isStopCommand(text))) {
+    parsedCommand.command = context.eventName === 'issue_comment' || context.eventName === 'pull_request_review_comment'
+      ? 'stop'
+      : 'stop-misplaced';
+  }
 
   // Detect preview/dry-run mode from trigger text
   const isDryRun = process.env.DRY_RUN === 'true' ||

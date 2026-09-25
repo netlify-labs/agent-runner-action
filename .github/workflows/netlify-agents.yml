@@ -79,9 +79,10 @@ on:
     types: [created, edited]
 
 concurrency:
-  # recover_thread dispatches share the thread's group, so recovery runs one
-  # at a time with any other agent job on the same issue or PR.
-  group: netlify-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || inputs.recover_thread || github.run_id }}
+  # One agent job per issue or PR at a time; recover_thread dispatches share
+  # the thread's group. A comment that is exactly "@netlify stop" gets its own
+  # group so it runs right away instead of queueing behind the run it stops.
+  group: ${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && github.event.comment.body == '@netlify stop' && format('netlify-stop-{0}', github.run_id) || format('netlify-{0}-{1}', github.repository, github.event.pull_request.number || github.event.issue.number || inputs.recover_thread || github.run_id) }}
   cancel-in-progress: false
 
 jobs:

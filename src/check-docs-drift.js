@@ -379,7 +379,7 @@ function checkDocsDrift(options = {}) {
 
     const requiredSnippets = [
       'concurrency:',
-      'group: netlify-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || inputs.recover_thread || github.run_id }}',
+      "github.event.comment.body == '@netlify stop' && format('netlify-stop-{0}', github.run_id) || format('netlify-{0}-{1}', github.repository, github.event.pull_request.number || github.event.issue.number || inputs.recover_thread || github.run_id) }}",
       'cancel-in-progress: false',
       'permissions:',
       'contents: write',

@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { openHandle, deriveKey, checkpointAad } = require('./checkpoint-crypto');
 const { buildResumeHandle } = require('./resume-handle');
-const { parseResultCommentIdentifiers } = require('./comment-markers');
+const { findStopRequest, parseResultCommentIdentifiers } = require('./comment-markers');
 const { renderResultComment } = require('./generate-result-comment');
 const { renderStatusComment } = require('./generate-status-comment');
 
@@ -191,6 +191,12 @@ async function recoverRun(params) {
     try {
       handle = await sdk.stop(handle, requestOptions);
     } catch (error) {
+      // Already stopped (for example by the @netlify stop run): nothing to retry.
+      const snapshot = await sdk.getSnapshot(handle, requestOptions).catch(() => null);
+      if (snapshot && snapshot.kind === 'terminal') {
+        await writeStatus({ state: 'stopped', outcome: 'failure', stopReason: message });
+        return { outcome: /** @type {RecoveryOutcome} */ ('stopped'), reason };
+      }
       log(`Recovery: stop failed (${/** @type {Error} */ (error).message}); will retry next time.`);
       await writeStatus({ state: 'stop-pending', outcome: 'failure', stopReason: `${message} Stopping the agent run didn't go through yet; it will be retried.` });
       return { outcome: /** @type {RecoveryOutcome} */ ('still-running'), reason: 'stop-failed' };
@@ -219,6 +225,11 @@ async function recoverRun(params) {
 
   if (owner.conclusion === 'cancelled') {
     return stop('owner-cancelled', 'Stopped: the workflow was cancelled while the agent was running.');
+  }
+  const threadComments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: Number(thread), per_page: 100 });
+  const stopRequest = env.BOT_LOGIN ? findStopRequest(threadComments, { botLogin: env.BOT_LOGIN, runnerId: checkpoint.runnerId }) : null;
+  if (stopRequest) {
+    return stop('stop-requested', `Stopped by @${stopRequest.by}.`);
   }
   const threadInfo = await threadState({ github, repo, thread });
   if (threadInfo.closed) {
@@ -269,8 +280,7 @@ async function recoverRun(params) {
   }
 
   // Result comment (idempotent per session).
-  const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: Number(thread), per_page: 100 });
-  const already = comments.some((/** @type {{ body?: string }} */ comment) => {
+  const already = threadComments.some((/** @type {{ body?: string }} */ comment) => {
     const ids = parseResultCommentIdentifiers(comment.body || '');
     return ids && ids.sessionId === handle.currentSessionId;
   });

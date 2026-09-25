@@ -380,7 +380,7 @@ function resolveSelection(selection, defaults = {}) {
 
 /**
  * @typedef {object} MentionCommand
- * @property {'run' | 'stop' | 'recover'} command
+ * @property {'run' | 'stop' | 'stop-misplaced' | 'recover'} command
  * @property {'normal' | 'ask'} mode
  * @property {{ agent: string | null, model: string | null, effort: string | null }} selection
  * @property {string} prompt Cleaned prompt (mention, selector words, and markers removed)
@@ -400,6 +400,16 @@ function selectorPrefixEnd(line) {
   const rest = line.slice(selection.end);
   const separator = /^(?:[ \t]*(?:[:,]|\.(?=\s|$)))?/.exec(rest);
   return selection.end + (separator ? separator[0].length : 0);
+}
+
+/**
+ * Is this comment exactly "@netlify stop" (trimmed, any case)? Anything more,
+ * like "@netlify stop the cron job", is an ordinary run request.
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isStopCommand(text) {
+  return /^@netlify\s+stop$/i.test(String(text || '').trim());
 }
 
 /**
@@ -675,6 +685,7 @@ function buildInProgressComment({ agentRunUrl, prompt, model, modelLabel, effort
 // ---------------------------------------------------------------------------
 
 module.exports = {
+  isStopCommand,
   TRIGGER_BASES,
   TRIGGER_PATTERN,
   VALID_MODELS,

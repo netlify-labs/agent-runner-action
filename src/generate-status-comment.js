@@ -155,13 +155,12 @@ function renderStatusComment({ env = process.env, context, outcome, checkpoint =
   const stoppedBy = String(env.STOP_REQUESTED_BY || '').replace(/[^A-Za-z0-9-]/g, '');
   const stopReason = String(env.STOP_REASON || '').replace(/[\r\n<>]/g, ' ').slice(0, 300);
   const statusIcon = stopped ? '⏹' : isFailure ? '❌' : '✅';
+  const lateStop = !stopped && !isFailure && stoppedBy ? ` Stop requested by @${stoppedBy} after the run finished.` : '';
   const statusLine = stopped
     ? (stopReason || (stoppedBy ? `Stopped by @${stoppedBy}.` : 'The workflow was cancelled, so the agent run was stopped.'))
     : isFailure
       ? 'Netlify Agent Run failed.'
-      : isDryRun
-        ? 'Netlify Agent Run completed (preview).'
-        : 'Netlify Agent Run completed.';
+      : `${isDryRun ? 'Netlify Agent Run completed (preview).' : 'Netlify Agent Run completed.'}${lateStop}`;
   const header = agentRunUrl
     ? `### [Netlify Agent Run Status](${agentRunUrl}) ${statusIcon}`
     : `### Netlify Agent Run Status ${statusIcon}`;
@@ -249,7 +248,11 @@ async function readLiveCheckpoint(github, context, commentId) {
  */
 module.exports = async function generateStatusComment({ github, context, core }) {
   const live = await readLiveCheckpoint(github, context, process.env.STATUS_COMMENT_ID);
-  const checkpoint = mergeFinalCheckpoint(live, process.env.AGENT_ID || process.env.RUNNER_ID || '');
+  let checkpoint = mergeFinalCheckpoint(live, process.env.AGENT_ID || process.env.RUNNER_ID || '');
+  // Stopped with @netlify stop and didn't succeed first: record it as stopped.
+  if (checkpoint && process.env.STOP_REQUESTED_BY && process.env.AGENT_OUTCOME !== 'success') {
+    checkpoint = { ...checkpoint, state: 'stopped' };
+  }
   const rendered = renderStatusComment({ context, checkpoint });
   core.setOutput('status-body', rendered.statusBody);
   core.setOutput('comment-body', rendered.statusBody);

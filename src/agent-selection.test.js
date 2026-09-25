@@ -69,7 +69,7 @@ describe('agent catalog integrity', () => {
   });
 
   it('has aliases that are unique and never collide with agents, efforts, or connectors', () => {
-    const reserved = new Set([...catalog.PROVIDERS, ...catalog.EFFORT_WORDS, 'with', 'using', 'use', 'via', 'auto']);
+    const reserved = new Set([...catalog.PROVIDERS, ...catalog.EFFORT_WORDS, 'with', 'using', 'use', 'via', 'auto', 'stop', 'ask']);
     const seen = new Map();
     for (const model of catalog.MODELS) {
       for (const alias of model.aliases) {
