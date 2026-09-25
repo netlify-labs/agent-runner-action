@@ -260,3 +260,10 @@ describe('ask-mode status', () => {
   });
 });
 
+
+describe('status for a run that failed before finishing', () => {
+  it('shows the requested agent, model, and effort when no session file exists', () => {
+    const body = renderStatusComment({ env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site', AGENT_ID: 'no_sessions_runner', AGENT_OUTCOME: 'timeout', REQUESTED_AGENT: 'claude', REQUESTED_MODEL_ID: 'claude-fable-5', REQUESTED_EFFORT: 'high' }, context: context(), outcome: 'failure' }).statusBody;
+    assert.match(body, /Run #1 \| claude · Fable 5 · high \| failed at /);
+  });
+});

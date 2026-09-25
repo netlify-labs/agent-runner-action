@@ -293,7 +293,10 @@ not_implemented() {
   return 1
 }
 scenario_cancel_stops() {
-  start_issue_case cancel-stops "@netlify codex mini low Create docs/canary-cancel-${RUN_MARKER}.md with a numbered list of 200 short, distinct facts about static site hosting, one per line. Do not edit other files." || return 1
+  # A long task, cancelled as soon as the checkpoint says it's running.
+  # GitHub can take a minute to deliver the cancel to the running step; if
+  # the agent finishes and opens its PR first, the status must say so.
+  start_issue_case cancel-stops "@netlify codex mini low Create three files, docs/canary-cancel-${RUN_MARKER}-a.md, -b.md and -c.md, each with a numbered list of 300 short, distinct facts about static site hosting, one per line, with no repeats across files. Do not edit other files." || return 1
   output issue-url "$CASE_ISSUE_URL"
   output run-url "$CASE_RUN_URL"
   local body runner
@@ -311,6 +314,17 @@ scenario_cancel_stops() {
   fi
   expect_equal cancel-stops "downstream run conclusion" "$(gh run view "$CASE_RUN_ID" --repo "$CANARY_REPO" --json conclusion --jq .conclusion)" cancelled
   body=$(status_comment_body "$CASE_ISSUE_NUMBER")
+  local comments pr
+  comments=$(gh issue view "$CASE_ISSUE_NUMBER" --repo "$CANARY_REPO" --json comments --jq '[.comments[].body] | join("\n")')
+  pr=$(printf '%s\n' "$comments" | pr_number_from_comments || true)
+  if [ -n "$pr" ]; then
+    # The race: the run landed before the cancel reached it.
+    log "[cancel-stops] the agent finished and opened #${pr} before the cancel arrived"
+    expect_equal cancel-stops "checkpoint state (landed before cancel)" "$(printf '%s' "$body" | checkpoint_state_from_body)" finalized
+    expect_contains cancel-stops "status comment (landed before cancel)" "$body" "cancelled after the agent had already finished"
+    expect_not_contains cancel-stops "status comment (landed before cancel)" "$body" "so the agent run was stopped"
+    return 0
+  fi
   expect_equal cancel-stops "checkpoint state" "$(printf '%s' "$body" | checkpoint_state_from_body)" stopped
   expect_contains cancel-stops "status comment" "$body" "The workflow was cancelled, so the agent run was stopped."
   local states
@@ -320,13 +334,7 @@ scenario_cancel_stops() {
   else
     record_check cancel-stops "backend session no longer running" "${states:-none}" pass
   fi
-  local comments
-  comments=$(gh issue view "$CASE_ISSUE_NUMBER" --repo "$CANARY_REPO" --json comments --jq '[.comments[].body] | join("\n")')
-  if [ -z "$(printf '%s\n' "$comments" | pr_number_from_comments || true)" ]; then
-    record_check cancel-stops "no PR was opened" "none" pass
-  else
-    record_check cancel-stops "no PR was opened" "a PR is linked" fail
-  fi
+  record_check cancel-stops "no PR was opened" "none" pass
 }
 scenario_orphan_recovery() {
   # The "[simulate-orphan]" title marker makes the canary workflow pass
