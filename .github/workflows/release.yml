@@ -113,9 +113,21 @@ jobs:
       MAJOR_TAG: ${{ needs.validate.outputs.major-tag }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      # Tag rulesets make vX.Y.Z immutable and restrict moving v1. Repository
+      # rulesets can't list the GitHub Actions app as a bypass actor, so tags
+      # are pushed over SSH with a write deploy key (a ruleset bypass actor).
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+      - name: Check deploy key
+        env:
+          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+        run: |
+          if [ -z "${RELEASE_DEPLOY_KEY:-}" ]; then
+            echo "::error title=Release::Missing RELEASE_DEPLOY_KEY secret (a write deploy key allowed to bypass the tag rulesets)."
+            exit 1
+          fi
       - name: Create release tag and move major tag
         run: |
           set -euo pipefail
