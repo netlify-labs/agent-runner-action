@@ -72,35 +72,47 @@ checkpoint_state_from_body() {
 }
 
 pin_canary_workflow() {
-  local workdir="${RUNNER_TEMP:-/tmp}/agent-runner-action-canary"
-  rm -rf "$workdir"
-  gh repo clone "$CANARY_REPO" "$workdir" -- --depth 1
-  (
-    cd "$workdir" || exit 1
-    git config user.name "github-actions[bot]"
-    git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-    if [ ! -f "$CANARY_WORKFLOW_PATH" ]; then
-      echo "::error::Canary workflow file not found: ${CANARY_WORKFLOW_PATH}"
-      exit 1
-    fi
-    # Pin every canary workflow that uses the action (main + recovery).
-    local files
-    files=$(grep -l 'netlify-labs/agent-runner-action@' .github/workflows/*.yml)
-    for file in $files; do
-      ACTION_REF="$ACTION_REF" perl -0pi -e \
-        's#netlify-labs/agent-runner-action@[A-Za-z0-9._/-]+#"netlify-labs/agent-runner-action@".$ENV{ACTION_REF}#ge' \
-        "$file"
-    done
-    if git diff --quiet -- .github/workflows; then
-      log "Canary workflows already pinned to ${ACTION_REF}."
-    else
+  # Pin every canary workflow that uses the action (main + recovery). Two
+  # canaries for the same commit can race here, so a rejected push re-clones
+  # and retries; if the other run already pinned the same ref, we're done.
+  local workdir="${RUNNER_TEMP:-/tmp}/agent-runner-action-canary" attempt
+  for attempt in 1 2 3; do
+    rm -rf "$workdir"
+    gh repo clone "$CANARY_REPO" "$workdir" -- --depth 1 || return 1
+    if (
+      cd "$workdir" || exit 1
+      git config user.name "github-actions[bot]"
+      git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      if [ ! -f "$CANARY_WORKFLOW_PATH" ]; then
+        echo "::error::Canary workflow file not found: ${CANARY_WORKFLOW_PATH}"
+        exit 2
+      fi
+      local files
+      files=$(grep -l 'netlify-labs/agent-runner-action@' .github/workflows/*.yml)
+      for file in $files; do
+        ACTION_REF="$ACTION_REF" perl -0pi -e \
+          's#netlify-labs/agent-runner-action@[A-Za-z0-9._/-]+#"netlify-labs/agent-runner-action@".$ENV{ACTION_REF}#ge' \
+          "$file"
+      done
+      if git diff --quiet -- .github/workflows; then
+        log "Canary workflows already pinned to ${ACTION_REF}."
+        exit 0
+      fi
       git add .github/workflows
-      git commit -m "chore: pin Agent Runners canary to ${ACTION_REF}"
+      git commit -q -m "chore: pin Agent Runners canary to ${ACTION_REF}"
       git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${CANARY_REPO}.git"
-      git push origin HEAD:main
+      git push -q origin HEAD:main || exit 1
       log "Pinned canary workflows to ${ACTION_REF}."
+    ); then
+      return 0
+    elif [ $? -eq 2 ]; then
+      return 1
     fi
-  )
+    log "Pin push was rejected (attempt ${attempt}); retrying."
+    sleep $((attempt * 5))
+  done
+  echo "::error::Couldn't pin the canary workflows to ${ACTION_REF}."
+  return 1
 }
 
 # run_issue_case <case> <prompt>
@@ -494,7 +506,7 @@ run_scenario() {
     return 1
   fi
   log "Running canary scenario ${name} against ${ACTION_REF}"
-  pin_canary_workflow
+  pin_canary_workflow || { CANARY_FAILED=1; return 1; }
   "$fn" || CANARY_FAILED=1
   {
     echo "### Scenario \`${name}\`"

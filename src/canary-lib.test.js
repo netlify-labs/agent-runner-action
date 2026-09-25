@@ -180,3 +180,33 @@ backend_session_modes() { echo ask; }
     assert.match(result.checks, /no PR was opened \| #9 \| ❌/);
   });
 });
+
+describe('canary-lib pin_canary_workflow', () => {
+  // gh clone is stubbed to create a local repo; git push to a bare remote
+  // fails on the first attempt (a racing canary), then succeeds.
+  it('retries a rejected push and pins every workflow that uses the action', () => {
+    const script = String.raw`
+REMOTE="$RUNNER_TEMP/remote.git"
+git init -q --bare "$REMOTE"
+seed="$RUNNER_TEMP/seed"; git init -q "$seed"; mkdir -p "$seed/.github/workflows"
+printf 'uses: netlify-labs/agent-runner-action@old\n' > "$seed/.github/workflows/netlify-agents.yml"
+printf 'uses: netlify-labs/agent-runner-action@old\n' > "$seed/.github/workflows/netlify-agents-recover.yml"
+printf 'name: other\n' > "$seed/.github/workflows/cleanup.yml"
+git -C "$seed" -c user.email=a@b -c user.name=a add -A; git -C "$seed" -c user.email=a@b -c user.name=a commit -qm seed; git -C "$seed" push -q "$REMOTE" HEAD:main
+gh() { git clone -q --branch main "$REMOTE" "$4"; }
+git() {
+  if [ "$1" = remote ]; then return 0; fi
+  if [ "$1" = push ]; then n=$(( $(cat "$RUNNER_TEMP/attempts" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$RUNNER_TEMP/attempts"; [ "$n" -lt 2 ] && return 1; command git push -q "$REMOTE" HEAD:main; return $?; fi
+  command git "$@"
+}
+sleep() { :; }
+CANARY_REPO=o/r CANARY_WORKFLOW_PATH=.github/workflows/netlify-agents.yml ACTION_REF=newsha pin_canary_workflow; echo "status=$?"
+command git -C "$seed" pull -q "$REMOTE" main
+cat "$seed/.github/workflows/netlify-agents.yml" "$seed/.github/workflows/netlify-agents-recover.yml"
+`;
+    const result = bash(script);
+    assert.match(result.stdout, /status=0/, result.stdout + result.stderr);
+    assert.match(result.stdout, /Pin push was rejected \(attempt 1\); retrying\./);
+    assert.equal((result.stdout.match(/agent-runner-action@newsha/g) || []).length, 2, result.stdout);
+  });
+});
