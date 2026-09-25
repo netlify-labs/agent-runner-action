@@ -556,3 +556,27 @@ describe('getContext recover_thread dispatch', () => {
     assert.equal(core.outputs.command, 'run');
   });
 });
+
+describe('getContext @netlify stop', () => {
+  beforeEach(() => { process.env.DEFAULT_MODEL = 'codex'; process.env.DRY_RUN = 'false'; });
+  const repo = { owner: 'o', repo: 'r' };
+  /** @param {any} context */
+  const command = async (context) => { const core = mockCore(); await getContext({ github: mockGithub(), context, core }); return core.outputs.command; };
+
+  const cases = [
+    { name: 'exact issue comment', eventName: 'issue_comment', payload: { issue: { number: 5 }, comment: { body: '@netlify stop' } }, expected: 'stop' },
+    { name: 'case and whitespace', eventName: 'issue_comment', payload: { issue: { number: 5 }, comment: { body: '  @Netlify   STOP \n' } }, expected: 'stop' },
+    { name: 'review comment', eventName: 'pull_request_review_comment', payload: { pull_request: { number: 6, head: { ref: 'h', sha: 's' }, base: { ref: 'main' } }, comment: { body: '@netlify stop' } }, expected: 'stop' },
+    { name: 'stop as a task stays a run', eventName: 'issue_comment', payload: { issue: { number: 5 }, comment: { body: '@netlify stop the cron job from firing twice' } }, expected: 'run' },
+    { name: 'stop with a selector stays a run', eventName: 'issue_comment', payload: { issue: { number: 5 }, comment: { body: '@netlify claude stop' } }, expected: 'run' },
+    { name: 'issue body', eventName: 'issues', payload: { issue: { number: 5, title: 'Something', body: '@netlify stop' } }, expected: 'stop-misplaced' },
+    { name: 'issue title', eventName: 'issues', payload: { issue: { number: 5, title: '@netlify stop', body: '' } }, expected: 'stop-misplaced' },
+    { name: 'review body', eventName: 'pull_request_review', payload: { pull_request: { number: 6, head: { ref: 'h', sha: 's' }, base: { ref: 'main' } }, review: { body: '@netlify stop' } }, expected: 'stop-misplaced' },
+    { name: 'dispatch', eventName: 'workflow_dispatch', payload: { inputs: { trigger_text: '@netlify stop' } }, expected: 'stop-misplaced' },
+  ];
+  for (const testCase of cases) {
+    it(`${testCase.name} -> ${testCase.expected}`, async () => {
+      assert.equal(await command({ eventName: testCase.eventName, payload: testCase.payload, repo }), testCase.expected, JSON.stringify(testCase));
+    });
+  }
+});

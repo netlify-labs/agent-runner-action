@@ -260,3 +260,21 @@ describe('renderResultComment run configuration header', () => {
     assert.ok(resultBody.startsWith('### [Run #1 | codex | Agent Run completed]'));
   });
 });
+
+describe('renderResultComment stop requests', () => {
+  const env = () => ({ RUNNER_TEMP: tempDir, AGENT_ID: 'runner_1', SITE_NAME: 'site', SESSION_DATA_MAP: '{}' });
+  it('renders a stopped result instead of a failure', () => {
+    writeSessions('runner_1', [{ id: 'session_1', prompt: '@netlify do it', state: 'cancelled', agent_config: { agent: 'codex' } }]);
+    const { resultBody } = renderResultComment({ context: context(), outcome: 'failure', env: { ...env(), STOP_REQUESTED_BY: 'octocat', AGENT_ERROR: 'Agent run stopped.' } });
+    assert.match(resultBody, /Agent Run stopped\]\(.*\) ⏹/);
+    assert.match(resultBody, /Stopped by @octocat\./);
+    assert.match(resultBody, /\*Stopped at /);
+    assert.doesNotMatch(resultBody, /Category|Error excerpt/);
+  });
+  it('keeps a success and notes a late stop request', () => {
+    writeSessions('runner_1', [{ id: 'session_1', prompt: '@netlify do it', state: 'done', result: 'Done.', agent_config: { agent: 'codex' } }]);
+    const { resultBody } = renderResultComment({ context: context(), outcome: 'success', env: { ...env(), STOP_REQUESTED_BY: 'octocat' } });
+    assert.match(resultBody, /Agent Run completed\]/);
+    assert.match(resultBody, /Stop requested by @octocat after the run finished\./);
+  });
+});

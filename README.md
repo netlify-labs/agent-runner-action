@@ -125,7 +125,7 @@ on:
     types: [created, edited]
 
 concurrency:
-  group: netlify-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  group: ${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && github.event.comment.body == '@netlify stop' && format('netlify-stop-{0}', github.run_id) || format('netlify-{0}-{1}', github.repository, github.event.pull_request.number || github.event.issue.number || inputs.recover_thread || github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -316,6 +316,15 @@ As soon as an agent run starts, the status comment shows **View the in progress 
 
 **Cancelling the workflow stops the agent.** If you cancel the workflow run (from the Actions tab), the action stops the agent run and the status comment says "⏹ The workflow was cancelled, so the agent run was stopped." This is best-effort: GitHub gives cancelled jobs only a short grace period.
 
+**Comment `@netlify stop` to stop a run.** Add a comment on the issue or PR containing only `@netlify stop`. Anyone allowed to start runs can stop them. The action:
+- stops the agent run right away and replies "⏹ Stopping the agent run, requested by @you"
+- makes the run's status and result comments say "Stopped by @you" instead of "failed"; nothing it changed is applied
+- still reports the result, with "Stop requested after the run finished", if the run had already finished
+
+`@netlify stop` only works as its own comment. In an issue or PR description or a review, the action replies with how to use it. A longer comment like `@netlify stop the cron job from firing twice` is an ordinary request.
+
+For the stop to run immediately, instead of waiting behind the run it stops, your workflow needs the stop-aware `concurrency` group from the current templates. Without it, the stop waits and then replies "Nothing to stop". The action's logs and job summary show "Workflow file updates available" when your workflow is missing it.
+
 **Set `job-timeout-minutes`.** GitHub also cancels a job when it hits its own `timeout-minutes`, and that looks the same as a human cancel. Set `job-timeout-minutes` to your job's `timeout-minutes`. The action then shortens the agent's limit, leaving 5 minutes for setup, so the agent times out cleanly first. The templates already do this.
 
 **Polling is resilient.** Rate limits and other transient API errors while waiting for the agent are retried with backoff until the run's time limit, instead of failing the job while the agent keeps working.
@@ -342,7 +351,7 @@ If the previous run is still working after that, the comment says so and the new
 
 Recovery then happens inside that thread's own concurrency group, one job at a time. A scan with nothing to do takes about 20–30 seconds of Actions time. GitHub may delay scheduled runs, and it disables schedules in public repositories after 60 days without activity.
 
-For recovery dispatches to work, your main workflow needs the `recover_thread` input and the thread-scoped `concurrency` group from the current templates.
+For recovery dispatches to work, your main workflow needs the `recover_thread` input and the thread-scoped `concurrency` group from the current templates. It also needs `actions: read` so recovery can tell whether the earlier run's job is still alive.
 
 ## Versioning
 

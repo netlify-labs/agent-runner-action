@@ -237,6 +237,13 @@ describe('stopped runs', () => {
     assert.match(body, /Stopped by @DavidWells\./);
   });
 
+  it('notes a stop that arrived after a successful run', () => {
+    const finalized = { ...stoppedCheckpoint, state: 'finalized' };
+    const body = renderStatusComment({ env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site', AGENT_OUTCOME: 'success', STOP_REQUESTED_BY: 'octocat' }, context: context(), checkpoint: finalized }).statusBody;
+    assert.match(body, /Netlify Agent Run completed\. Stop requested by @octocat after the run finished\./);
+    assert.match(body, /✅/);
+  });
+
   it('still reports success if the run finished before the stop took effect', () => {
     const body = renderStatusComment({ env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site', AGENT_OUTCOME: 'success' }, context: context(), checkpoint: stoppedCheckpoint }).statusBody;
     assert.match(body, /Netlify Agent Run completed\./);

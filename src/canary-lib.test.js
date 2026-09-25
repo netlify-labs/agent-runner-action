@@ -127,3 +127,39 @@ sleep() { :; }
   });
 });
 
+
+describe('canary-lib stop-command scenario', () => {
+  const stub = String.raw`
+start_issue_case() { CASE_ISSUE_NUMBER=7; CASE_ISSUE_URL=https://github.com/o/r/issues/7; CASE_RUN_ID=100; CASE_RUN_URL=u; }
+wait_run_completed() { [ "$1" = 100 ] && OWNER_DONE=1; return 0; }
+OWNER_DONE=0
+status_comment_body() {
+  if [ "$OWNER_DONE" = 1 ]; then printf 'Stopped by @me.\n<!-- netlify-agent-run-checkpoint:{"v":1,"state":"stopped","runnerId":"r1"} -->'
+  else echo '<!-- netlify-agent-run-checkpoint:{"v":1,"state":"running","runnerId":"r1"} -->'; fi
+}
+gh() {
+  case "$1 $2" in
+    "issue comment") echo "commented $*" >&2 ;;
+    "run list") echo 900 ;;
+    "run view")
+      case "$*" in
+        *conclusion*) echo success ;;
+        *) if [ "$OWNER_DONE" = 1 ]; then echo completed; else echo "$OWNER_STATUS"; fi ;;
+      esac ;;
+    "issue view") printf '⏹ Stopping the agent run, requested by @me.\n' ;;
+  esac
+}
+sleep() { :; }
+backend_session_states() { echo stopped; }
+`;
+  it('passes when the stop runs alongside the owner and the owner reports it', () => {
+    const result = bash(`${stub}\nscenario_stop_command; echo "failed=$CANARY_FAILED"`, { env: { RUN_MARKER: 'm1', OWNER_STATUS: 'in_progress', CANARY_REPO: 'o/r', CANARY_WORKFLOW_NAME: 'w' } });
+    assert.match(result.stdout, /failed=0/, result.checks);
+    assert.match(result.stderr, /commented issue comment 7 --repo o\/r --body @netlify stop/);
+    assert.match(result.checks, /stop ran while the owner was still running \| owner in_progress \| ✅/);
+  });
+  it('fails when the stop only ran after the owner finished (stop queued behind it)', () => {
+    const result = bash(`${stub}\nscenario_stop_command; echo "failed=$CANARY_FAILED"`, { env: { RUN_MARKER: 'm1', OWNER_STATUS: 'completed', CANARY_REPO: 'o/r', CANARY_WORKFLOW_NAME: 'w' } });
+    assert.match(result.stdout, /failed=1/);
+  });
+});

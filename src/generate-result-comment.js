@@ -214,13 +214,23 @@ function renderResultComment({ env = process.env, context, outcome }) {
   const title = cleanProse(latestSession.title || env.AGENT_TITLE || '');
   const resultSummary = cleanProse(latestSession.result || env.AGENT_RESULT || '');
   const links = buildLinks(env, context, latestSession, sessions);
-  const statusIcon = isFailure ? '❌' : '✅';
+  // Stopped with @netlify stop: not a failure; say who stopped it.
+  const stoppedBy = String(env.STOP_REQUESTED_BY || '').replace(/[^A-Za-z0-9-]/g, '');
+  const stopped = isFailure && Boolean(stoppedBy);
+  const statusIcon = stopped ? '⏹' : isFailure ? '❌' : '✅';
+  const verb = stopped ? 'stopped' : isFailure ? 'failed' : 'completed';
 
-  let body = `### [Run #${runNumber} | ${model} | Agent Run ${isFailure ? 'failed' : 'completed'}](${agentRunUrl}) ${statusIcon}\n\n`;
+  let body = `### [Run #${runNumber} | ${model} | Agent Run ${verb}](${agentRunUrl}) ${statusIcon}\n\n`;
   if (usageSummary) body += `**Usage:** ${usageSummary}\n\n`;
   if (cleanPrompt) body += utils.formatPromptBlock(cleanPrompt, sourceUrl);
 
-  if (isFailure) {
+  if (stopped) {
+    body += `### Result\n\nStopped by @${stoppedBy}. Changes the agent made before it stopped were not applied.\n\n`;
+  } else if (!isFailure && stoppedBy) {
+    body += `> Stop requested by @${stoppedBy} after the run finished.\n\n`;
+  }
+
+  if (isFailure && !stopped) {
     const failure = classifyFailure({
       category: env.FAILURE_CATEGORY || env.AGENT_FAILURE_CATEGORY || '',
       stage: env.FAILURE_STAGE || env.AGENT_FAILURE_STAGE || '',
@@ -256,7 +266,7 @@ function renderResultComment({ env = process.env, context, outcome }) {
   }
 
   if (links.length > 0) body += `${links.join(' | ')}\n\n`;
-  body += `*${isFailure ? 'Failed' : 'Completed'} at ${timestamp}*\n`;
+  body += `*${stopped ? 'Stopped' : isFailure ? 'Failed' : 'Completed'} at ${timestamp}*\n`;
 
   assertNoStateMarkers(body);
   body = truncateResultBody(body, agentRunUrl);

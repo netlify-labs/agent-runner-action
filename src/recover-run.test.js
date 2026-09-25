@@ -148,9 +148,35 @@ describe('recoverRun', () => {
 
   it('records stop-pending when stopping fails', async () => {
     const github = fakeGithub({ conclusion: 'cancelled' });
-    const result = await run(fakeSdk({ stopError: new Error('503') }), github, makeCheckpoint());
+    const result = await run(fakeSdk({ stopError: new Error('503'), snapshot: { kind: 'running' } }), github, makeCheckpoint());
     assert.deepEqual([result.outcome, result.reason], ['still-running', 'stop-failed']);
     assert.equal(parseCheckpoint(status(github))?.state, 'stop-pending');
+  });
+
+  it('treats a failed stop of an already-finished run as stopped', async () => {
+    const github = fakeGithub({ conclusion: 'cancelled' });
+    const result = await run(fakeSdk({ stopError: new Error('409 already stopped') }), github, makeCheckpoint());
+    assert.deepEqual([result.outcome, result.reason], ['stopped', 'owner-cancelled']);
+    assert.equal(parseCheckpoint(status(github))?.state, 'stopped');
+  });
+
+  it('honors a bot-authored @netlify stop request instead of landing', async () => {
+    const { renderStopRequestMarker } = require('./comment-markers');
+    const marker = renderStopRequestMarker({ runnerId: 'runner1', sessionId: 'session1', by: 'octocat' });
+    const github = fakeGithub({ comments: [{ user: { login: 'github-actions[bot]' }, body: `⏹ Stopping\n\n${marker}` }] });
+    const sdk = fakeSdk();
+    const result = await run(sdk, github, makeCheckpoint(), { env: { RUNNER_TEMP: temp, SITE_NAME: 'site', GITHUB_RUN_ID: '222', BOT_LOGIN: 'github-actions[bot]' } });
+    assert.deepEqual([result.outcome, result.reason], ['stopped', 'stop-requested']);
+    assert.ok(!sdk.calls.includes('land'), 'never lands a stopped run');
+    assert.match(status(github), /Stopped by @octocat\./);
+  });
+
+  it('ignores a stop-request marker typed by someone other than the bot', async () => {
+    const { renderStopRequestMarker } = require('./comment-markers');
+    const marker = renderStopRequestMarker({ runnerId: 'runner1', sessionId: 'session1', by: 'octocat' });
+    const github = fakeGithub({ comments: [{ user: { login: 'mallory' }, body: marker }] });
+    const result = await run(fakeSdk(), github, makeCheckpoint(), { env: { RUNNER_TEMP: temp, SITE_NAME: 'site', GITHUB_RUN_ID: '222', BOT_LOGIN: 'github-actions[bot]' } });
+    assert.equal(result.outcome, 'finalized');
   });
 
   it('stops a run that is past its deadline, keeping the original deadline', async () => {

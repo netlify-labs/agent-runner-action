@@ -6,6 +6,7 @@ const RUNNER_ID_MARKER_PREFIX = '<!-- netlify-agent-runner-id:';
 const SESSION_DATA_MARKER_PREFIX = '<!-- netlify-agent-session-data:';
 const RESULT_COMMENT_MARKER_PREFIX = '<!-- netlify-agent-run-result:';
 const CHECKPOINT_MARKER_PREFIX = '<!-- netlify-agent-run-checkpoint:';
+const STOP_REQUEST_MARKER_PREFIX = '<!-- netlify-agent-stop-request:';
 const RESULT_COMMENT_MARKER_NAME = 'netlify-agent-run-result';
 const MARKER_SUFFIX = '-->';
 
@@ -18,7 +19,7 @@ const RUNNER_ID_FORMAT = /^[A-Za-z0-9_-]{1,128}$/;
 // found in user-influenced content is stripped before parsing/rendering, so
 // outsiders cannot smuggle fake markers and bot comments cannot accidentally
 // reflect attacker-supplied markers from echoed user content.
-const ALLOWED_MARKER_INNER = /^\s*netlify-agent-(?:run-status|run-history|run-result(?::|\s|$)|runner-id:|session-data:|scope:|run-checkpoint:)/;
+const ALLOWED_MARKER_INNER = /^\s*netlify-agent-(?:run-status|run-history|run-result(?::|\s|$)|runner-id:|session-data:|scope:|run-checkpoint:|stop-request:)/;
 
 // Allowlist for URL-bearing fields in session-data entries. These URLs flow
 // into bot-rendered Markdown links; anything outside these patterns gets
@@ -552,7 +553,68 @@ function parseCheckpoint(body) {
   }
 }
 
+/**
+ * @typedef {{ runnerId: string, sessionId: string, by: string }} StopRequest
+ */
+
+/**
+ * @param {unknown} value
+ * @returns {StopRequest | null}
+ */
+function validateStopRequest(value) {
+  if (!value || typeof value !== 'object') return null;
+  const v = /** @type {Record<string, unknown>} */ (value);
+  if (typeof v.runnerId !== 'string' || !RUNNER_ID_FORMAT.test(v.runnerId)) return null;
+  if (typeof v.sessionId !== 'string' || !RUNNER_ID_FORMAT.test(v.sessionId)) return null;
+  if (typeof v.by !== 'string' || !GITHUB_LOGIN_FORMAT.test(v.by)) return null;
+  return { runnerId: v.runnerId, sessionId: v.sessionId, by: v.by };
+}
+
+/**
+ * @param {StopRequest} request
+ * @returns {string} the marker, or '' when invalid
+ */
+function renderStopRequestMarker(request) {
+  const valid = validateStopRequest(request);
+  return valid ? renderMarker(`${STOP_REQUEST_MARKER_PREFIX}${JSON.stringify(valid)}`) : '';
+}
+
+/**
+ * @param {unknown} body
+ * @returns {StopRequest | null}
+ */
+function parseStopRequest(body) {
+  const rawValue = readMarkerValue(body, STOP_REQUEST_MARKER_PREFIX);
+  if (!rawValue) return null;
+  try {
+    return validateStopRequest(JSON.parse(rawValue));
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Newest stop request for this runner in comments written by the bot. Only
+ * bot-authored comments are trusted; anyone can type the marker by hand.
+ * @param {Array<{ body?: string | null, user?: { login?: string } | null }>} comments
+ * @param {{ botLogin: string, runnerId: string }} filter
+ * @returns {StopRequest | null}
+ */
+function findStopRequest(comments, { botLogin, runnerId }) {
+  for (const comment of [...comments].reverse()) {
+    if (!comment.user || comment.user.login !== botLogin) continue;
+    const request = parseStopRequest(comment.body);
+    if (request && request.runnerId === runnerId) return request;
+  }
+  return null;
+}
+
 module.exports = {
+  STOP_REQUEST_MARKER_PREFIX,
+  validateStopRequest,
+  renderStopRequestMarker,
+  parseStopRequest,
+  findStopRequest,
   STATUS_COMMENT_MARKER,
   HISTORY_COMMENT_MARKER,
   RUNNER_ID_MARKER_PREFIX,

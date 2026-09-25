@@ -378,7 +378,74 @@ scenario_orphan_recovery() {
     record_check orphan-recovery "PR diff contains the marker" "missing" fail
   fi
 }
-scenario_stop_command() { not_implemented stop-command; }
+scenario_stop_command() {
+  # A long run, then a comment that is exactly "@netlify stop". The stop run
+  # must finish while the owner is still running (stop-aware concurrency),
+  # and the owner's final comments must say "Stopped by @user".
+  start_issue_case stop-command "@netlify codex mini low Create docs/canary-stop-${RUN_MARKER}.md with a numbered list of 200 short, distinct facts about static site hosting, one per line. Do not edit other files." || return 1
+  output issue-url "$CASE_ISSUE_URL"
+  output run-url "$CASE_RUN_URL"
+  local body runner
+  if ! body=$(wait_checkpoint_state "$CASE_ISSUE_NUMBER" running 600); then
+    record_check stop-command "checkpoint reaches running" "never seen" fail
+    return 1
+  fi
+  runner=$(printf '%s' "$body" | checkpoint_runner_from_body)
+  record_check stop-command "checkpoint reaches running" "runner ${runner}" pass
+
+  local stop_started
+  stop_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  log "[stop-command] commenting @netlify stop on #${CASE_ISSUE_NUMBER}"
+  gh issue comment "$CASE_ISSUE_NUMBER" --repo "$CANARY_REPO" --body '@netlify stop' >/dev/null
+  local start=$SECONDS stop_run=""
+  while [ -z "$stop_run" ]; do
+    if [ $((SECONDS - start)) -gt 300 ]; then
+      record_check stop-command "stop comment starts a run" "none seen" fail
+      return 1
+    fi
+    sleep 10
+    stop_run=$(gh run list --repo "$CANARY_REPO" --workflow "$CANARY_WORKFLOW_NAME" --event issue_comment --limit 10 \
+      --json databaseId,createdAt --jq "[.[] | select(.createdAt >= \"${stop_started}\")] | last | .databaseId // empty")
+  done
+  log "[stop-command] stop run https://github.com/${CANARY_REPO}/actions/runs/${stop_run}"
+  if ! wait_run_completed "$stop_run" 600; then
+    record_check stop-command "stop run completes" "timed out" fail
+    return 1
+  fi
+  expect_equal stop-command "stop run conclusion" "$(gh run view "$stop_run" --repo "$CANARY_REPO" --json conclusion --jq .conclusion)" success
+  local owner_status
+  owner_status=$(gh run view "$CASE_RUN_ID" --repo "$CANARY_REPO" --json status --jq .status)
+  if [ "$owner_status" = "completed" ]; then
+    record_check stop-command "stop ran while the owner was still running" "owner already completed" fail
+  else
+    record_check stop-command "stop ran while the owner was still running" "owner ${owner_status}" pass
+  fi
+  local comments
+  comments=$(gh issue view "$CASE_ISSUE_NUMBER" --repo "$CANARY_REPO" --json comments --jq '[.comments[].body] | join("\n")')
+  expect_contains stop-command "stop reply" "$comments" "⏹ Stopping the agent run, requested by @"
+
+  if ! wait_run_completed "$CASE_RUN_ID" 600; then
+    record_check stop-command "owner run completes after the stop" "timed out" fail
+    return 1
+  fi
+  body=$(status_comment_body "$CASE_ISSUE_NUMBER")
+  expect_equal stop-command "checkpoint state" "$(printf '%s' "$body" | checkpoint_state_from_body)" stopped
+  expect_contains stop-command "status comment" "$body" "Stopped by @"
+  expect_not_contains stop-command "status comment" "$body" "Netlify Agent Run failed"
+  local states
+  states=$(backend_session_states "$runner" | tr '\n' ' ')
+  if printf '%s' "$states" | grep -Eq 'running|pending|queued'; then
+    record_check stop-command "backend session no longer running" "$states" fail
+  else
+    record_check stop-command "backend session no longer running" "${states:-none}" pass
+  fi
+  comments=$(gh issue view "$CASE_ISSUE_NUMBER" --repo "$CANARY_REPO" --json comments --jq '[.comments[].body] | join("\n")')
+  if [ -z "$(printf '%s\n' "$comments" | pr_number_from_comments || true)" ]; then
+    record_check stop-command "no PR was opened" "none" pass
+  else
+    record_check stop-command "no PR was opened" "a PR is linked" fail
+  fi
+}
 scenario_ask() { not_implemented ask; }
 
 run_scenario() {

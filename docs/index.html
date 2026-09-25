@@ -235,7 +235,7 @@ on:
     types: [created, edited]
 
 concurrency:
-  group: netlify-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  group: ${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && github.event.comment.body == '@netlify stop' && format('netlify-stop-{0}', github.run_id) || format('netlify-{0}-{1}', github.repository, github.event.pull_request.number || github.event.issue.number || inputs.recover_thread || github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -395,6 +395,7 @@ jobs:
 <section id="checkpoints">
   <h2>Run checkpoints and stopping</h2>
   <p>When a run starts, the status comment links to the live agent run and stores an encrypted checkpoint. The checkpoint is sealed with a key derived from your Netlify token, bound to this thread and runner, and never contains the prompt or site ID in plain text. Cancelling the workflow stops the agent run. Set <code>job-timeout-minutes</code> to your job's <code>timeout-minutes</code> so the agent's own limit fits inside the job. Transient API errors while waiting are retried until the run's time limit.</p>
+  <p>To stop a run, add a comment containing only <code>@netlify stop</code>. The action stops the agent right away, and the run's comments say "Stopped by @you" instead of "failed". This needs the stop-aware <code>concurrency</code> group from the current templates, so the stop doesn't wait behind the run it stops.</p>
 </section>
 
 <section id="versioning">

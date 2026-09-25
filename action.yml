@@ -540,6 +540,8 @@ runs:
           core.setOutput('failure-category', firstFailureCategory);
           core.setOutput('failure-stage', firstFailureStage);
           core.setOutput('should-continue', shouldContinue ? 'true' : 'false');
+          const { checkWorkflowFile } = require(`${process.env.ACTION_DIR}/src/workflow-notice.js`);
+          await checkWorkflowFile({ github, context, core }).catch(() => {});
 
     # -----------------------------------------------------------------------
     # 5. Resolve bot identity, then find or create the sticky status comment.
@@ -614,6 +616,7 @@ runs:
         && (steps.trigger-text-size.outputs.safe == 'false' || steps.preflight.outputs.should-continue != 'true')
         && github.event_name != 'workflow_dispatch'
         && steps.context-info.outputs.issue-number != ''
+        && !startsWith(steps.context-info.outputs.command, 'stop')
       uses: actions/github-script@v8
       id: preflight-comment
       env:
@@ -724,7 +727,10 @@ runs:
         IS_PR="${{ steps.context-info.outputs.is-pr }}"
         HAS_LINKED_PR="${{ steps.extract-agent-id.outputs.has-linked-pr == 'true' && 'true' || 'false' }}"
         COMMAND="${{ steps.context-info.outputs.command }}"
-        if [[ "$COMMAND" == "recover" ]]; then
+        if [[ "$COMMAND" == stop* ]]; then
+          # @netlify stop is handled by its own step; it never starts a run.
+          echo "should-continue=false" >> $GITHUB_OUTPUT
+        elif [[ "$COMMAND" == "recover" ]]; then
           # Recovery finishes this thread's own run; never redirect it.
           echo "should-continue=true" >> $GITHUB_OUTPUT
         elif [[ "$IS_PR" == "false" && "$HAS_LINKED_PR" == "true" ]]; then
@@ -735,13 +741,36 @@ runs:
         fi
 
     - name: Redirect to PR if issue has linked PR
-      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'false' && steps.extract-agent-id.outputs.linked-pr-number != ''
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'false' && steps.extract-agent-id.outputs.linked-pr-number != '' && !startsWith(steps.context-info.outputs.command, 'stop')
       uses: peter-evans/create-or-update-comment@v5
       with:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.context-info.outputs.issue-number }}
         body: |
           > This issue already has a linked pull request. Please add follow-up `@netlify` prompts on PR #${{ steps.extract-agent-id.outputs.linked-pr-number }}${{ steps.extract-agent-id.outputs.agent-run-url && format(', or use the [Netlify Agent Runners dashboard]({0})', steps.extract-agent-id.outputs.agent-run-url) || '' }}.
+
+    # -----------------------------------------------------------------------
+    # 8b. "@netlify stop": stop the thread's agent run. This job runs outside
+    #     the thread's concurrency group (see the workflow templates), so it
+    #     never edits the status comment; it replies with a stop-request
+    #     marker that the owning job or recovery reads when finishing.
+    # -----------------------------------------------------------------------
+    - name: Handle stop request
+      id: stop-request
+      if: steps.trigger-check.outputs.should-run == 'true' && startsWith(steps.context-info.outputs.command, 'stop') && steps.preflight.outputs.should-continue == 'true'
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
+        NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
+        NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
+        COMMAND: ${{ steps.context-info.outputs.command }}
+        CHECKPOINT: ${{ steps.extract-agent-id.outputs.checkpoint }}
+        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const stopRun = require(`${process.env.ACTION_DIR}/src/stop-run.js`);
+          await stopRun({ github, context, core });
 
     # -----------------------------------------------------------------------
     # 9. Create initial status comment
@@ -970,6 +999,7 @@ runs:
         NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
         CHECKPOINT: ${{ steps.extract-agent-id.outputs.checkpoint }}
         COMMAND: ${{ steps.context-info.outputs.command }}
+        BOT_LOGIN: ${{ steps.bot-identity.outputs.login }}
         ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
         IS_PR: ${{ steps.context-info.outputs.is-pr }}
         STATUS_COMMENT_ID: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
@@ -1057,6 +1087,28 @@ runs:
         script: |
           const stopOnCancel = require(`${process.env.ACTION_DIR}/src/stop-on-cancel.js`);
           await stopOnCancel({ github, context, core });
+
+    # Was this run stopped with @netlify stop? The stop run replies with a
+    # bot-authored marker; the final comments say "Stopped by @user".
+    - name: Check stop request
+      id: stop-check
+      if: >-
+        always() && !cancelled()
+        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.netlify-agent.outputs.agent-id != ''
+        && steps.netlify-agent.outputs.simulated-orphan != 'true'
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
+        AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+        BOT_LOGIN: ${{ steps.bot-identity.outputs.login }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const { checkStopRequest } = require(`${process.env.ACTION_DIR}/src/stop-run.js`);
+          await checkStopRequest({ github, context, core });
 
     - name: Check run scope
       id: check-scope
@@ -1147,6 +1199,7 @@ runs:
         REQUESTED_MODE: normal
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        STOP_REQUESTED_BY: ${{ steps.stop-check.outputs.by }}
         AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
         AGENT_SCREENSHOT_URL: ${{ steps.netlify-agent.outputs.agent-screenshot-url }}
         AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
@@ -1171,7 +1224,7 @@ runs:
       if: >-
         always()
         && !cancelled()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover' && !startsWith(steps.context-info.outputs.command, 'stop')
         && steps.should-continue.outputs.should-continue == 'true'
         && steps.netlify-agent.outputs.outcome != 'success'
         && steps.context-info.outputs.issue-number != ''
@@ -1188,6 +1241,7 @@ runs:
         FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.trigger-text-size.outputs.failure-category || steps.preflight.outputs.failure-category }}
         FAILURE_STAGE: ${{ steps.netlify-agent.outputs.failure-stage || steps.trigger-text-size.outputs.failure-stage || steps.preflight.outputs.failure-stage }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        STOP_REQUESTED_BY: ${{ steps.stop-check.outputs.by }}
         AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
         AGENT_SCREENSHOT_URL: ${{ steps.netlify-agent.outputs.agent-screenshot-url }}
         AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
@@ -1212,7 +1266,7 @@ runs:
     - name: Post result comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover' && !startsWith(steps.context-info.outputs.command, 'stop')
         && (steps.generate_success_comment.outputs.result-body || steps.generate_error_comment.outputs.result-body)
         && steps.context-info.outputs.issue-number != ''
       id: post_result_comment
@@ -1231,7 +1285,7 @@ runs:
     - name: Generate status comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover' && !startsWith(steps.context-info.outputs.command, 'stop')
         && steps.context-info.outputs.issue-number != ''
         && (steps.generate_success_comment.outputs.result-body || steps.generate_error_comment.outputs.result-body || steps.netlify-agent.outputs.outcome != 'success')
       id: generate_status_comment
@@ -1247,6 +1301,7 @@ runs:
         AGENT_OUTCOME: ${{ steps.netlify-agent.outputs.outcome }}
         AGENT_STEP_OUTCOME: ${{ steps.netlify-agent.outcome }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
+        STOP_REQUESTED_BY: ${{ steps.stop-check.outputs.by }}
         AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
         AGENT_SCREENSHOT_URL: ${{ steps.netlify-agent.outputs.agent-screenshot-url }}
         AGENT_PR_URL: ${{ steps.netlify-agent.outputs.agent-pr-url }}
@@ -1274,7 +1329,7 @@ runs:
       id: post_status_comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover' && !startsWith(steps.context-info.outputs.command, 'stop')
         && steps.generate_status_comment.outputs.comment-body
         && (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) != ''
       continue-on-error: true
@@ -1290,7 +1345,7 @@ runs:
     - name: Generate history comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover' && !startsWith(steps.context-info.outputs.command, 'stop')
         && steps.context-info.outputs.is-pr == 'true'
         && steps.context-info.outputs.issue-number != ''
         && steps.post_result_comment.outputs.result-comment-id != ''
@@ -1310,7 +1365,7 @@ runs:
     - name: Post or update history comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover' && !startsWith(steps.context-info.outputs.command, 'stop')
         && steps.context-info.outputs.is-pr == 'true'
         && steps.generate_history_comment.outputs.comment-body != ''
         && steps.context-info.outputs.issue-number != ''
@@ -1327,7 +1382,7 @@ runs:
     - name: Cross-post to PR and update issue
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover' && !startsWith(steps.context-info.outputs.command, 'stop')
         && steps.context-info.outputs.is-pr != 'true'
         && steps.netlify-agent.outputs.agent-pr-url != ''
         && steps.generate_status_comment.outputs.comment-body
@@ -1360,7 +1415,7 @@ runs:
     - name: Fallback status update
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover' && !startsWith(steps.context-info.outputs.command, 'stop')
         && github.event_name != 'workflow_dispatch'
         && steps.context-info.outputs.issue-number != ''
         && steps.preflight-comment.outcome != 'success'
@@ -1397,7 +1452,7 @@ runs:
     - name: Update reaction on completion
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true' && steps.recover.outputs.blocked != 'true' && steps.context-info.outputs.command != 'recover' && !startsWith(steps.context-info.outputs.command, 'stop')
         && steps.acknowledge.outputs.reaction-id != ''
         && steps.netlify-agent.outputs.outcome == 'success'
       continue-on-error: true
