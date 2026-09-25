@@ -35,7 +35,7 @@ Key conditions:
 
 - `runAgentAction()` calls `sdk.start(...)` for new runs or `createLegacyHandle()` + `sdk.followUp(...)` for follow-ups, then `sdk.waitFor(handle)`, then `sdk.land(handle)` when `result.changes === 'changed'` and not dry-run.
 - `saveHandleCheckpoint()` serializes the handle to `$RUNNER_TEMP/agent-runner-sdk-handle-<runnerId>.json` (mode `0600`) after start and after landing, and through the SDK `onLandingCheckpoint` hook. **`RUNNER_TEMP` is destroyed when the job ends**, so these checkpoints never outlive the job.
-- `createLegacyHandle()` already rebuilds a valid SDK handle from only a runner ID, the site ID, and the listed sessions. It uses a placeholder prompt (`'Resume a pre-SDK agent-runner-action run.'`) and validates the result through `sdk.parseHandle`. This is the mechanism recovery will generalize.
+- `createLegacyHandle()` already rebuilds a valid SDK handle from only a runner ID, the site ID, and the listed sessions. It uses a placeholder prompt (`'Resume a pre-SDK agent-runner-action run.'`) and a UUID `requestId`, and validates the result through `sdk.parseHandle`. The SDK README discourages this ("Do not persist only runner/session IDs or construct handles by hand", line 255), so recovery uses it only as a fallback when the encrypted full handle can't be decrypted. Tested against 0.3.0: rebuilt `run` and `session` handles, including landing progress, pass `parseHandle` when request IDs are UUIDs, and are rejected otherwise (`input.requestId must be a UUID`).
 - Result data available after `waitFor`: `RunResult` (SDK `dist/result.d.ts`) has `status`, `runnerId`, `sessionId`, `resultText`, `usage`, `changes: 'changed' | 'unchanged' | 'unknown'`, **`diff?: { kind: 'inline', text } | { kind: 'url', url }`**, `deployUrl`, and `links`. The diff is the **current session's** change set, not the PR's cumulative diff.
 
 ### SDK durable handles (`nax-agent-runner-sdk@0.3.0` README, "Durable handles and deadlines")
@@ -51,7 +51,8 @@ Key conditions:
 - Markers: `<!-- netlify-agent-run-status -->`, `<!-- netlify-agent-run-history -->`, `<!-- netlify-agent-runner-id:… -->`, `<!-- netlify-agent-session-data:{json} -->`, `<!-- netlify-agent-run-result runnerId=… sessionId=… totalTokens=… -->`.
 - `ALLOWED_MARKER_INNER` is an allowlist; `stripUntrustedHtmlComments()` removes any other HTML comment from user-influenced content before parsing, so outsiders cannot smuggle fake state.
 - Session-data entries are sanitized per field (`pr_url`, `gh_action_url`, `screenshot` URL allowlists; `commit_sha` format; 2048-char cap).
-- The status comment is found only among **bot-authored** comments, and the PR-body fallback is used only for same-repo PRs (see `extract-agent-id.js`). That is the trust anchor for durable state.
+- The status comment is found only among **bot-authored** comments, and the PR-body fallback is used only for same-repo PRs (see `extract-agent-id.js`). That is the trust anchor for durable state. Note: GitHub lets anyone with write access edit other users' comments, including the bot's ("Anyone with write access to a repository can edit comments on issues, discussions, pull requests, and commits," GitHub docs, *Managing disruptive comments*).
+- GitHub's comment update API has no conditional write (no compare-and-swap), so comment content can't serve as a lock. Workflow **concurrency groups** are the only mutual-exclusion primitive available.
 
 ### Result and history comments
 
@@ -178,26 +179,32 @@ Zero-dependency matcher on repo-relative POSIX paths:
 
 ### Where the changed-file list comes from
 
-In priority order:
+GitHub's file metadata is the primary source. Diff parsing is only a best-effort fallback for runs that land nothing.
 
-1. **The session diff** (`RunResult.diff`, `kind: 'inline'`). Parse `diff --git a/<old> b/<new>` headers plus `new file mode` / `deleted file mode` / `rename from`/`rename to` lines. This gives exactly the files *this run* changed, including in dry runs where no commit exists.
-2. **`kind: 'url'` diffs** (large diffs): skip fetching the URL, which may need auth and be large, and fall through.
-3. **After landing**, the landed commit: `GET /repos/{o}/{r}/commits/{commitSha}` → `files[].filename` / `status` / `previous_filename` (commit SHA from `currentSession.commitSha`).
-4. If none is available, report "Couldn't determine which files this run changed" in the step summary only. Don't post a warning without evidence.
+1. **New PR opened by this run:** `GET /repos/{o}/{r}/pulls/{n}/files`, paginated (100 per page; the API returns at most 3,000 files). On a brand-new PR this is exactly this run's change set.
+2. **Follow-up committed to an existing PR:** `GET /repos/{o}/{r}/commits/{commitSha}` for `currentSession.commitSha`, paginating `files` (the API caps files per commit at 3,000).
+3. **Dry run and ask mode** (nothing landed): parse `RunResult.diff` when it's `kind: 'inline'`. This is best-effort, because the SDK types don't promise a complete Git extended-header diff. The parser:
+   - reads `diff --git` headers and `new file mode` / `deleted file mode` / `rename from` / `rename to` / `similarity index` lines
+   - implements Git's `core.quotePath` C-style unescaping (octal escapes for non-ASCII bytes, `\t`, `\n`, `\"`, `\\`)
+   - handles `/dev/null` sides and binary markers
+   - rejects malformed headers instead of guessing
 
-Parser edge cases, each with a unit test: quoted paths with spaces or non-ASCII (`diff --git "a/my file" "b/my file"`), renames (flag the new path and mention the old), deletions (flag protected deletions too), binary files, mode-only changes, and `/dev/null` sides.
+   `kind: 'url'` diffs aren't fetched.
+4. **Incomplete data is said out loud:** if a list hit an API cap, the diff was missing or malformed, or a parse rejected lines, the scope section says "Couldn't check every changed file (reason)". It never claims a clean result it can't prove. If no file list is available at all, only the step summary mentions it.
+
+Each rule has fixtures: paginated PR files, a 3,000-file cap, quoted paths with spaces, tabs and UTF-8 bytes, renames, deletions, binary files, mode-only changes, and malformed input.
 
 New-top-level detection:
 
-- **Root files:** added files (`new file mode` or status `added`) whose path has no `/`.
-- **Top-level folders:** for each distinct first path segment among added files, check whether it exists on the base ref: `GET /repos/{o}/{r}/contents/{segment}?ref={base}`, where 404 means new. At most 10 lookups per run. Beyond that, report "and N more new top-level entries" without checking.
+- **Root files:** added files (`status: added`, or `new file mode`) whose path has no `/`.
+- **Top-level folders:** for each distinct first path segment among added files, check whether it exists on the base ref: `GET /repos/{o}/{r}/contents/{segment}?ref={base}`, where 404 means new. At most 10 lookups per run; beyond that, report "and N more new top-level entries" without checking.
 
 ### Pipeline placement
 
 - `src/scope-guard.js` (new, pure): `collectChangedFiles({ diffText, commitFiles })`, `evaluateScope({ files, patterns, baseTopLevel })`, and `renderScopeSection(flags)`, which escapes paths for Markdown, caps the list at 20 rows plus "and N more", and never renders HTML comments.
-- `run-agent.js` (finish phase, after landing or after wait in dry run): compute the changed files and write `scope-flags` / `scope-flag-count` outputs, plus `$RUNNER_TEMP/agent-scope-<runnerId>.json` for renderers. It does *not* need GitHub API access for the inline-diff path.
-- New step **`Check run scope`** (github-script, after `Run Netlify Agent Runners`, `continue-on-error: true`): performs the commit-files fallback and top-level lookups (it has the GitHub client), finalizes the flags, and applies `label` / `draft` actions.
-  - `draft` uses GraphQL `convertPullRequestToDraft`. It is applied only when this run *created* the PR (`landing.kind === 'prOpen'` and there was no prior runner PR), never to a PR a human already moved out of draft.
+- `run-agent.js`: in dry-run and ask mode, write the parsed inline-diff file list to `$RUNNER_TEMP/agent-scope-<runnerId>.json`. Landed runs are left to the next step.
+- New step **`Check run scope`** (github-script, after `Run Netlify Agent Runners`, `continue-on-error: true`): fetches the PR or commit file list (it has the GitHub client), runs the top-level lookups, evaluates the patterns, writes `scope-flags` / `scope-flag-count` outputs and the flags file for renderers, and applies the `label` / `draft` actions.
+  - `draft` uses GraphQL `convertPullRequestToDraft` (allowed for a workflow token with `pull-requests: write`, whoever opened the PR). It is attempted only when this run *created* the PR and the PR is open and not already a draft, using the node ID fetched from the PR API. Failures (token policy, repository rules, unsupported state) are non-fatal and reported in the step summary.
 - `renderResultComment` and `renderStatusComment` read the flags file or env and add the section and the one-liner.
 
 ### Scope instructions
@@ -241,18 +248,28 @@ This is on by default because both observed scope-creep runs added workaround fi
 | Failure | Today | After |
 |---|---|---|
 | Job cancelled while the agent runs | Agent keeps running; comment stuck at "manifesting"; for new runs nothing records the runner | **Cancel means stop:** a cancel step stops the agent and marks the run stopped |
-| Job-level `timeout-minutes` shorter than the agent's time limit plus setup | GitHub cancels the job at its timeout; same as above | Preflight detects the mismatch, warns, and shortens the agent's limit to fit, so the agent's own timeout fires first and reports cleanly |
-| Runner machine lost, or crash after `sdk.start` | Same; the crash wrapper now reports failure, but the work is still lost | Recovered by the next `@netlify` comment or the optional recovery cron |
+| Job-level `timeout-minutes` shorter than the agent's time limit plus setup | GitHub cancels the job at its timeout; same as above | With the new `job-timeout-minutes` input, preflight warns and shortens the agent's limit to fit, so the agent's own timeout fires first and reports cleanly |
+| Runner machine lost, or crash after `sdk.start` | Same; the crash wrapper now reports failure, but the work is still lost | Recovered by the next `@netlify` comment or the optional recovery cron (which dispatches the thread's workflow) |
+| Cancel step didn't finish (cleanup is best-effort) | n/a | Recovery sees the owner run's `cancelled` conclusion and stops the agent instead of landing |
 | No way to stop a run from the thread | Only by cancelling the workflow, which didn't stop the agent | `@netlify stop` |
 | Follow-up effort not echoed by the backend | History shows only the agent | Requested agent/model/effort recorded per session |
 
-### Why not store the raw SDK handle
+### Where the handle lives: encrypted in the status comment
 
-The handle contains the full original prompt (possibly large, possibly a blob reference), the `siteId`, and prompt-delivery metadata. Writing it to a comment would publish the prompt again (bad for private context pasted into issues, and it can exceed GitHub's 65,536-character comment limit). It would also publish the site ID, which some consumers keep as a secret. `createLegacyHandle()` already proves a valid handle can be rebuilt from identifiers alone. So we persist a **checkpoint**, not a handle.
+The SDK's contract is to persist the **complete** handle returned by every mutating call ("Do not persist only runner/session IDs or construct handles by hand", SDK README line 255). The handle contains the original prompt, the `siteId`, retry state, prompt-delivery metadata, and landing progress (`prUrl`, `committedSessionIds`, `expectedPrHeadSha`). Resumable landing depends on that progress. Publishing the handle in plain text would repost prompts and expose the site ID, which some consumers keep as a secret.
+
+So the status comment stores the **full serialized handle, encrypted**:
+
+- **Cipher:** AES-256-GCM (`node:crypto`), random 96-bit nonce per write.
+- **Key:** HKDF-SHA256 with the `NETLIFY_AUTH_TOKEN` value as input key material, `salt = "<owner>/<repo>"`, and `info = "netlify-agent-run-checkpoint/v1"`. Only jobs that hold the token can decrypt. The token never leaves the runner.
+- **Binding:** the GCM additional authenticated data is `"<owner>/<repo>#<issue-or-PR number>:<runnerId>"`. A ciphertext copied into another thread, or paired with a different runner ID, fails authentication.
+- **Size:** GitHub comments are capped at 65,536 characters, and the status body uses a few KB. If the base64url ciphertext would exceed 40,000 characters, the handle is re-serialized with `input.prompt` / `sessionInput.prompt` replaced by a fixed placeholder before encrypting. The prompt is only needed for ambiguous-create reconciliation, which is finished by then. The summary records "handle stored without prompt".
+- **Fallback:** if decryption fails (token rotated, key version unknown, ciphertext missing), recovery rebuilds a handle from the public fields, the same way `createLegacyHandle` already does in production. This was tested against SDK 0.3.0: rebuilt `run` and `session` handles, including landing progress, pass `sdk.parseHandle` when request IDs are UUIDs. The public fields therefore include the landing progress needed for that rebuild.
+- **Updates:** the checkpoint is rewritten after every SDK call that returns a new handle: start or follow-up, every `onLandingCheckpoint`, and landing.
 
 ### Checkpoint marker
 
-`<!-- netlify-agent-run-checkpoint:{json} -->`, stored in the **status comment** (bot-authored, mutable, already the source of truth for `runner-id`).
+`<!-- netlify-agent-run-checkpoint:{json} -->`, stored in the **status comment** (bot-authored, already the source of truth for `runner-id`).
 
 ```jsonc
 {
@@ -266,161 +283,164 @@ The handle contains the full original prompt (possibly large, possibly a blob re
   "effort": "max",               // optional, EFFORT_WORDS (wire value)
   "mode": "normal",              // normal | ask
   "landing": "pr",               // pr | none (dry run / ask)
-  "deadlineAt": 1790000000000,   // handle.policy.deadlineAt (ms epoch)
+  "deadlineAt": 1790000000000,   // handle.policy.deadlineAt (ms epoch), never rewritten
   "startedAt": 1789998500000,
   "ghRunId": 36086874799,        // workflow run that owns it
   "ghRunAttempt": 1,
-  "requester": "DavidWells",     // GitHub login that triggered the run (for @-mention on recovery)
-  "prHeadSha": "2a62981…",       // PR head when the session started (follow-ups on a PR); used to detect a moved branch
-  "prUrl": "https://github.com/o/r/pull/56",   // once known; PR URL allowlist
-  "lease": { "ghRunId": 36090000000, "until": 1790000300000 } // only while recovering
+  "requester": "DavidWells",     // login that triggered the run (for @-mention on recovery)
+  "prHeadSha": "2a62981…",       // PR head when the session started (follow-ups on a PR)
+  "prUrl": "https://github.com/o/r/pull/56",   // PR URL allowlist
+  "committedSessionIds": ["…"],  // landing progress, for the rebuild fallback
+  "kv": 1,                       // key/cipher version
+  "handle": "<base64url nonce‖ciphertext‖tag>"
 }
 ```
 
-- The size stays under 1 KB. No prompt, no site ID, no tokens.
-- `comment-markers.js` gains `renderCheckpointMarker()` / `parseCheckpoint()`. Parsing validates every field against the same formats used elsewhere (runner ID, model ID, effort words, PR URL allowlist, finite integers) and drops the whole checkpoint when `v` is unknown or any required field is invalid.
+- `comment-markers.js` gains `renderCheckpointMarker()` / `parseCheckpoint()`. Parsing validates every public field against the formats used elsewhere (runner ID, model ID, effort words, PR URL allowlist, SHA format, finite integers, base64url with a length cap). It drops the whole checkpoint when `v` or `kv` is unknown or any required field is invalid.
 - `ALLOWED_MARKER_INNER` adds `run-checkpoint:`.
-- `extract-agent-id.js` outputs `checkpoint` (the validated JSON) and `checkpoint-state`.
+- `extract-agent-id.js` outputs `checkpoint` (validated public fields plus ciphertext) and `checkpoint-state`.
+- After decrypting, recovery compares the handle's `runnerId`, `currentSessionId` and `siteId` with the public fields and the configured site. On any mismatch it skips with a warning, so public fields edited by hand can't redirect recovery.
+
+### Single writer per thread
+
+GitHub comment updates have no compare-and-swap, so a lease written into the comment can't provide mutual exclusion: two jobs can both write and then both read back their own lease. The only reliable lock GitHub offers is a **workflow concurrency group**. The design rule is:
+
+> Only the job that holds the thread's concurrency group (`netlify-<repo>-<thread>`) writes the thread's status comment and checkpoint, lands, or recovers.
+
+- Trigger jobs already hold the thread group.
+- The recovery cron **doesn't recover anything itself**. It dispatches the main workflow once per unfinished thread (`workflow_dispatch` with input `recover_thread: <number>`). The template's concurrency group includes that input, so the recovery run queues and serializes with any trigger job on the same thread.
+- `@netlify stop` runs **outside** the thread group (it must not queue behind the run it stops). So it never writes the status comment while an owner is alive (see below).
 
 ### Lifecycle
 
 ```mermaid
 stateDiagram-v2
-  [*] --> running: start phase succeeded
-  running --> finalized: finish phase landed or reported a terminal result
-  running --> stopped: job cancelled, or @netlify stop (stop succeeded)
+  [*] --> running: run started (checkpoint written by run-agent)
+  running --> finalized: owner landed or reported a terminal result
+  running --> stopped: cancel step, @netlify stop, deadline passed, or thread closed
   running --> stop_pending: stop requested but the stop call failed
-  stop_pending --> stopped: next trigger or recovery cron retries the stop
-  running --> recovering: next trigger or recovery cron found the owning job dead
+  stop_pending --> stopped: next thread job retries the stop
+  running --> recovering: thread job found the owning run dead
   recovering --> finalized: recovered and comments rendered
-  recovering --> stopped: thread closed while the agent was running
-  recovering --> running: still running at end of wait budget (lease released)
+  recovering --> stopped: past deadline, owner was cancelled, or thread closed
+  recovering --> running: still running when this job's share of time ran out
   stopped --> [*]
   finalized --> [*]
 ```
 
-(`stop_pending` is written `stop-pending` in the marker.)
-
-`finalized` and `stopped` are terminal. A later follow-up writes a **new** checkpoint for its new session; it never edits a terminal one back to `running`.
+(`stop_pending` is written `stop-pending` in the marker.) `finalized` and `stopped` are terminal. A later follow-up writes a new checkpoint for its new session.
 
 ### Pipeline changes
 
-1. **Split `run-agent.js` into two phases**, invoked as `node run-agent.js start` and `node run-agent.js finish`:
-   - `start`: validate input, `sdk.start` / `sdk.followUp`, save the full handle to `$RUNNER_TEMP` (as today), and write outputs `agent-id`, `session-id`, and `checkpoint` (the JSON above with `state: running`). No waiting.
-   - `finish`: load the handle file, then `waitFor` → landing → scope guard → outputs, exactly as today's second half.
-   - With no argument, the script runs both phases (keeps `simulate.js`, tests, and any external callers working).
-   - The crash-fallback wrapper applies to both steps. A `start` crash leaves no checkpoint, which is correct because no runner exists. A `finish` crash leaves the `running` checkpoint for recovery.
-2. **New step `Record run checkpoint`** between the two phases (github-script, `continue-on-error: true`). It updates the status comment to the in-progress body **with** the agent-run link, the runner-ID marker, and the checkpoint marker.
-   - This also fixes a visible gap: new runs finally show "View the in progress agent run" while running, not only follow-ups.
-   - It replaces `Update status to in-progress` for new runs and merges with it for follow-ups (a single step either way).
-3. **New step `Stop agent on cancel`** with `if: cancelled() && steps.run-start.outputs.checkpoint != ''`. **Cancelling the workflow means "stop this work".** The step calls `sdk.stop` on the checkpointed runner, sets `state: stopped`, and updates the status comment: "⏹ The workflow was cancelled, so the agent run was stopped." If the stop call fails, it writes `state: stop-pending`, and the next trigger or the recovery cron retries the stop. GitHub gives cancelled jobs a short grace period, so this step does one stop attempt and one comment update, nothing else.
-   - GitHub also runs `cancelled()` steps when a job exceeds its own `timeout-minutes`, and the step can't reliably tell that apart from a human cancel. That's why preflight prevents the mismatch (next item) instead of guessing at cancel time.
-4. **Preflight job-timeout check.** Preflight reads the running job's `timeout-minutes` from the workflow file at `github.sha` (path from `GITHUB_WORKFLOW_REF`, job from `GITHUB_JOB`, fetched with the contents API; the step runs before checkout). If the agent limit (`timeout-minutes` input) plus a 5-minute setup margin exceeds the job timeout, it warns (log annotation and step summary) and **shortens the agent's limit** to `job timeout − 5 minutes` for this run. If the file can't be read or the job has no explicit timeout (GitHub's default is 360 minutes), the check is skipped.
-5. **Final status rendering** writes `state: finalized` (or keeps `stopped`) into the checkpoint marker, alongside the existing markers.
+1. **Keep one run step** (`Run Netlify Agent Runners`, id `netlify-agent`). Splitting it into start and finish steps would move outputs between step IDs and break every `steps.netlify-agent.outputs.*` reference in `action.yml`. Instead, `run-agent.js` itself writes the checkpoint to the status comment right after `sdk.start` / `sdk.followUp` returns, and again after landing:
+   - It already has `GITHUB_TOKEN`. New env: `STATUS_COMMENT_ID` (`steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id`), `ISSUE_NUMBER`, `GITHUB_REPOSITORY`, and the model/effort labels.
+   - It renders the in-progress body with the existing `utils.buildInProgressComment` (now including the agent-run link and runner-ID marker) plus the checkpoint marker, and `PATCH`es the comment.
+   - This fixes a visible gap too: new runs finally show "View the in progress agent run" while running, not only follow-ups. `Update status to in-progress` is removed; its follow-up behavior moves here.
+   - A failed checkpoint write is a warning (annotation and step summary "checkpoint not persisted: run can't be recovered if this job dies"). The run continues.
+   - Outputs, failure paths and the crash-fallback wrapper are unchanged. New output: `checkpoint-written` (`true`/`false`).
+2. **New step `Stop agent on cancel`** with `if: cancelled() && steps.install-deps.outputs.action-dir != ''`. It loads the handle file from `$RUNNER_TEMP` (a no-op if none exists), calls `sdk.stop`, sets `state: stopped`, and updates the status comment: "⏹ The workflow was cancelled, so the agent run was stopped."
+   - **This is best-effort.** It runs on a manual cancel, but GitHub doesn't guarantee cleanup steps finish, and a lost runner runs nothing at all. So recovery also honors cancel intent: an owning run whose conclusion is `cancelled` means "stop", not "land" (see the recovery rules).
+   - If the stop call fails, it writes `state: stop-pending`.
+3. **`job-timeout-minutes` input and preflight check.** Reading `timeout-minutes` back out of workflow YAML is unreliable (expressions, matrices, reusable workflows, and `github.sha` vs `GITHUB_WORKFLOW_REF`). So the templates pass the job's timeout explicitly (`job-timeout-minutes: 35` next to `timeout-minutes: 30`). When it's set and `timeout-minutes + 5 > job-timeout-minutes`, preflight warns (log and step summary) and **shortens the agent's limit** to `job-timeout-minutes − 5` for this run, so the agent's own deadline fires first and reports cleanly. When it's empty, the check is skipped and the step summary suggests setting it.
+4. **Final status rendering** re-reads the status comment, merges the latest checkpoint (so it never overwrites a `stopped` state or a stop request, see below), and writes `state: finalized` or `stopped`.
 
 ### Recovery engine (`src/recover-run.js`, new)
 
 ```js
-recoverRun({ sdk, github, repo, issueNumber, statusComment, checkpoint, input, budgetMs, now })
+recoverRun({ sdk, github, repo, thread, statusComment, checkpoint, input, budgetMs, now })
   -> { outcome: 'finalized' | 'stopped' | 'still-running' | 'skipped', reason, sessionDataMap }
 ```
 
-Steps:
+It only ever runs inside a job that holds the thread's concurrency group (the trigger job, or the dispatched recovery run).
 
-1. **Handle reconstruction** (`buildResumeHandle(checkpoint, input)`, generalizing `createLegacyHandle`):
-   - Fetch the runner and sessions. **Verify `runner.siteId === input.siteId`**; otherwise skip with reason `site-mismatch`. This defends against a tampered or copied checkpoint pointing at another site's runner.
-   - Verify that the checkpoint session exists.
-   - Build a `kind: 'run'` or `kind: 'session'` handle with a placeholder prompt, `policy.deadlineAt = checkpoint.deadlineAt`, `landing` from the checkpoint, and `landing.prUrl` from the checkpoint or `runner.prUrl`. Validate with `sdk.parseHandle`.
-2. **Decide** from `sdk.getSnapshot(handle)`:
-
-Checks first, in order:
-
-- **Thread closed** (issue closed, or PR closed or merged): if the agent is still active, `sdk.stop`. Never land. Post a short result ("Stopped: this thread was closed before the run finished") → `stopped`.
-- **`stop-pending`**: retry `sdk.stop` → `stopped`.
-
-Then from the snapshot:
+1. **Get the handle:** decrypt the checkpoint handle. If that fails, rebuild it from the public fields. Verify `runner.siteId === input.siteId` and that the session exists; otherwise skip (`site-mismatch` / `missing-session`).
+2. **Pre-checks, in order:**
+   - **Owner still running** (`GET /actions/runs/{ghRunId}` is queued/in progress): skip. This shouldn't happen inside the thread group, but it's a cheap guard.
+   - **Owner was cancelled** (conclusion `cancelled`): the cancel step didn't finish. `sdk.stop` if active, then post "Stopped: the workflow was cancelled" → `stopped`.
+   - **Thread closed** (issue closed, or PR closed or merged): `sdk.stop` if active. Never land. Post "Stopped: this thread was closed before the run finished" → `stopped`.
+   - **`stop-pending`:** retry `sdk.stop` → `stopped`.
+   - **Past deadline** (`now ≥ deadlineAt`) and still active: `sdk.stop` as the SDK requires of out-of-band workers, then post a timed-out result → `stopped`. `deadlineAt` is the run's agent time limit, which preflight fits inside the job timeout. So an orphaned run gets exactly the time its job would have given it.
+3. **Then from `sdk.getSnapshot(handle)`:**
 
 | Snapshot | Action |
 |---|---|
-| terminal succeeded, changes, not landed (`landing: pr`), PR head unchanged | `sdk.land(handle)` → render result/status/history → `finalized` |
-| terminal succeeded, changes, not landed, **PR head moved** since `prHeadSha` (a human pushed) | don't land; render the result with "Not applied: the branch changed after this run started. See the agent run to apply it manually." → `finalized` |
+| terminal succeeded, changes, not landed (`landing: pr`), PR head unchanged | `sdk.land(handle)` → persist the returned handle → render result/status/history → `finalized` |
+| terminal succeeded, changes, not landed, **PR head moved** since `prHeadSha` | don't land; render the result with "Not applied: the branch changed after this run started. See the agent run to apply it manually." → `finalized` |
 | terminal succeeded, already landed or no changes | render comments only → `finalized` |
 | terminal failed / cancelled | render failure comments → `finalized` |
-| active | `sdk.waitFor` bounded by the recovering job's budget; then re-decide; if still active → release the lease → `still-running` |
+| active, before deadline | `sdk.waitFor` with this job's budget enforced by an `AbortSignal` (the handle's `deadlineAt` is **not** modified); re-decide; if still active → `still-running` (state stays `running`) |
 
-**No separate recovery time limit.** Recovery never stops a run for being slow; an orphaned run is allowed to finish and land. The reconstructed handle's `deadlineAt` is set to the end of the recovering job's budget, not the original deadline, so `waitFor` returns in time for this job to exit cleanly. The run is simply checked again by the next trigger or cron.
-
-3. **Rendering** reuses existing modules: write `agent-sessions-<runnerId>.json` exactly as `run-agent.js` does, then call `renderResultComment` (header gets a `· recovered` suffix, and the body starts with "@<requester>, your earlier request finished." so the requester gets a GitHub notification), `renderStatusComment`, and `renderHistoryTocFromComments`, and post or update them with the same markers.
-4. **Idempotency.** A recovered session that already has a result comment (`parseResultCommentIdentifiers` finds its `sessionId`) never gets a second one. `sdk.land` is itself resumable.
+4. **Rendering** reuses existing modules: write `agent-sessions-<runnerId>.json` exactly as `run-agent.js` does, then call `renderResultComment` and post or update the comments with the same markers. The header gets a `· recovered` suffix, and the body starts with "@<requester>, your earlier request finished." `renderStatusComment` and `renderHistoryTocFromComments` follow.
+5. **Idempotency:** recovery runs under a single writer, so duplicates can only come from retries of the same job. A session that already has a result comment (`parseResultCommentIdentifiers` finds its `sessionId`) never gets a second one, and `sdk.land` resumes from the handle's landing progress.
 
 ### Recovery on the next trigger ("finish before follow")
 
-When a new `@netlify` comment arrives and `checkpoint-state` is `running`, `stop-pending`, or `recovering` with an expired lease:
+When a trigger job (already holding the thread group) finds a `running` or `stop-pending` checkpoint:
 
-- Concurrency groups in the templates (`netlify-<repo>-<issue>`, `cancel-in-progress: false`) serialize jobs per thread. If a `running` checkpoint's `ghRunId` points to a completed workflow run (`GET /actions/runs/{id}`), the owner is dead. If that run is still in progress, the current job was queued behind it. That can't normally happen with a correct concurrency group, but it's handled: wait up to the budget, then proceed.
-- A new step **`Recover unfinished run`** (github-script, requires the staged SDK via `ACTION_DIR`) runs `recoverRun` before the start phase.
-- **Wait, then run the new request.** Recovery may use at most **40% of the effective agent time limit** (`timeout-minutes`, after any preflight shortening). The rest is reserved for the new request, so one job never needs more than its timeout.
-- If recovery finalizes within that share, the new prompt continues as a normal follow-up on the same runner. That keeps the runner's context, and the SDK follow-up path lands onto the existing PR. The user sees the recovered result and then the new one.
-- If the old session is still running when its share is used up, the job posts "The previous run is still working, so this request wasn't started. Comment again once it finishes." It then **does not** start the new prompt, because the backend rejects an active-session conflict anyway. Nothing queues the request, so the message must not promise it.
-- Downstream steps must use the recovered `session-data-map` output (`steps.recover.outputs.session-data-map || steps.extract-agent-id.outputs.session-data-map`).
+- A new step **`Recover unfinished run`** (github-script, requires the staged SDK via `ACTION_DIR`, `NETLIFY_AUTH_TOKEN` in env) runs `recoverRun` before the run step.
+- **Wait, then run the new request.** Recovery may use at most **40% of the effective agent time limit** (after any preflight shortening). The rest is reserved for the new request.
+- If recovery finishes within that share, the new prompt continues as a normal follow-up on the same runner. The user sees the recovered result and then the new one.
+- If the old session is still running when its share is used up, the job posts "The previous run is still working, so this request wasn't started. Comment again once it finishes." It does **not** start the new prompt; nothing queues it, and the message must not promise that.
+- Downstream steps use the recovered `session-data-map` (`steps.recover.outputs.session-data-map || steps.extract-agent-id.outputs.session-data-map`).
 
 ### Scheduled recovery (opt-in cron workflow)
 
-What it is: an **optional second workflow file** that a repo adds next to its main one. GitHub starts it on a timer (`on: schedule`); it doesn't react to comments. Each time, it finds agent runs whose GitHub job died without finishing them and finishes them: it waits for the agent if needed, lands the PR, and updates the comments, as if the original job had finished normally. Without it, an orphaned run is picked up only when someone comments `@netlify` again on that thread.
+What it is: an **optional second workflow file** that a repo adds next to its main one. GitHub starts it on a timer (`on: schedule`); it doesn't react to comments. It **finds** threads with unfinished runs and **dispatches the main workflow** for each, so every recovery runs inside that thread's concurrency group. Without it, an orphaned run is picked up only when someone comments `@netlify` again on that thread.
 
-Cost and caveats to document: a run with nothing to do takes about 20 to 30 seconds of Actions time (roughly 15 to 25 minutes a day at every 30 minutes). GitHub may delay scheduled runs under load and disables schedules in public repos after 60 days without activity.
+Cost and caveats to document: a scan with nothing to do takes about 20 to 30 seconds of Actions time (roughly 15 to 25 minutes a day at every 30 minutes). GitHub may delay scheduled runs under load and disables schedules in public repos after 60 days without activity.
 
-A new action input `operation: 'trigger' | 'recover'` (default `trigger`). With `recover`, the composite runs a short path: install deps → `Sweep unfinished runs` → step summary. A new template `workflow-templates/netlify-agents-recover.yml`:
+A new action input `operation: 'trigger' | 'recover-scan'` (default `trigger`). With `recover-scan`, the composite runs a short path: install deps → `Find unfinished runs` → dispatch → step summary. The main workflow template gains a `recover_thread` dispatch input; a dispatch that carries it recovers that thread and starts nothing new. The new template `workflow-templates/netlify-agents-recover.yml`:
 
 ```yaml
 on:
   schedule: [{ cron: '*/30 * * * *' }]
   workflow_dispatch:
-concurrency: { group: netlify-agents-recover, cancel-in-progress: false }
-permissions: { contents: read, issues: write, pull-requests: write, actions: read }
+concurrency: { group: netlify-agents-recover-scan, cancel-in-progress: false }
+permissions: { contents: read, issues: read, pull-requests: read, actions: write }
 jobs:
-  recover:
+  scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: netlify-labs/agent-runner-action@v1
         with:
-          operation: recover
+          operation: recover-scan
+          recover-workflow: netlify-agents.yml   # the main workflow file to dispatch
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
 ```
 
-Sweep algorithm (`src/sweep-runs.js`):
+Scan algorithm (`src/scan-unfinished-runs.js`):
 
-1. `GET /repos/{o}/{r}/issues?state=all&sort=updated&direction=desc&since=<now − recover-lookback-hours>` (includes PRs; default 48 hours), capped at `recover-max-items` (default 50). Closed items are included so their still-running agents can be stopped (see the thread-closed rule). The default is safe because `timeout-minutes` is capped at 24 hours (`MAX_TIMEOUT_MINUTES` in `run-agent.js`) and the checkpoint write itself updates the issue. So every unfinished run's thread was updated within its deadline plus one day.
-2. For each item, find the bot's status comment (paginated comments filtered by bot login and status marker) and parse the checkpoint. Skip if absent, `finalized`, or `stopped`.
-3. **Liveness:** `GET /actions/runs/{ghRunId}`. If the run is `queued`, `in_progress`, `waiting`, `requested`, or `pending`, skip it (still owned).
-4. **Lease:** write `state: recovering` plus `lease: { ghRunId: <recovery-cron run>, until: now + 10 min }`, then re-read the comment. Proceed only if our lease is present, so a concurrent trigger job or a second cron run loses cleanly.
-5. Run `recoverRun` with `budgetMs` = the cron job's remaining time divided by the remaining items (floor 2 minutes).
-6. Write a summary table: item, runner, action taken, reason.
-
-The trigger path honors a fresh lease the same way: if another job holds an unexpired lease, it waits up to 60 seconds for `finalized` and then proceeds without recovering.
+1. `GET /repos/{o}/{r}/issues?state=all&sort=updated&direction=desc&since=<now − recover-lookback-hours>` (includes PRs; default 48 hours), capped at `recover-max-items` (default 50). Closed items are included so their still-running agents get stopped. The default is safe because `timeout-minutes` is capped at 24 hours (`MAX_TIMEOUT_MINUTES` in `run-agent.js`) and each checkpoint write updates the thread.
+2. For each item, find the bot's status comment and parse the checkpoint's public fields (no decryption is needed to scan). Skip if absent, `finalized`, or `stopped`.
+3. Skip if the owning run (`ghRunId`) is still queued or in progress.
+4. `POST /repos/{o}/{r}/actions/workflows/{recover-workflow}/dispatches` with `ref` = the default branch and `inputs.recover_thread` = the number. The workflow's concurrency group serializes it with any trigger job on that thread. Double dispatches are harmless: the second run finds a terminal checkpoint and exits.
+5. Write a summary table: item, runner, state, dispatched or skipped (with reason).
 
 ### `@netlify stop`
 
-A write-access user (the same `allowed-users` / collaborator rule as starting runs) comments `@netlify stop` on the thread:
+A write-access user (the same `allowed-users` / collaborator rule as starting runs) posts a comment whose entire text is `@netlify stop`:
 
-1. The new workflow run reads the checkpoint from the thread's status comment.
-2. It calls `sdk.stop` on that runner and sets `state: stopped`. It does **not** cancel the other GitHub workflow run.
-3. The original job, still in `waitFor`, sees the run end as cancelled, finalizes the comments ("⏹ Stopped by @user"), and exits normally.
-4. With no active run: reply "Nothing to stop: the last run already finished."
+1. **Scope:** only `issue_comment` and `pull_request_review_comment` events. On other events (issue title/body, PR body, review body, dispatch), `@netlify stop` is not a command, and the action replies "Stop only works as its own comment."
+2. The stop run reads the checkpoint public fields and calls `sdk.stop` on that runner (idempotent).
+3. **It doesn't write the status comment while the owner is alive.** It posts its own reply ("⏹ Stopping the agent run, requested by @user") with a `<!-- netlify-agent-stop-request:{"runnerId":…,"by":…} -->` marker. The owner job, still in `waitFor`, sees the run end as cancelled. Its final rendering re-reads the thread, finds the bot-authored stop request for its runner, renders "⏹ Stopped by @user" (not a failure), and writes `state: stopped`.
+4. If the owner is dead (its run completed), the stop run writes the stop-request reply and dispatches the main workflow with `recover_thread` (same as the cron), so the status comment update happens under the thread lock.
+5. With no active run: reply "Nothing to stop: the last run already finished."
 
-Parser: `stop` becomes a reserved command word, recognized only as the entire mention (`@netlify stop`, optionally followed by punctuation). `@netlify stop the cron job from firing twice` stays a normal build request. The catalog-integrity test adds `stop` to the reserved words.
+Grammar: the parser recognizes stop only when the trimmed comment body, case-insensitively, is exactly `@netlify stop`. `@netlify stop the cron job from firing twice` stays a normal build request. The catalog-integrity test adds `stop` to the reserved words.
 
-**Concurrency caveat.** The templates put every run for a thread in one concurrency group (`netlify-<repo>-<issue>`, `cancel-in-progress: false`), so a stop run would queue behind the job it's trying to stop. The templates change so stop comments get their own group:
+**Concurrency routing** (templates). Stop comments need their own group so they don't queue behind the run they stop. GitHub expressions have no regex or trim, so the routing uses an exact equality check, which is case-insensitive for strings in GitHub expressions:
 
 ```yaml
 concurrency:
-  group: ${{ contains(github.event.comment.body, '@netlify stop') && format('netlify-stop-{0}', github.run_id) || format('netlify-{0}-{1}', github.repository, github.event.pull_request.number || github.event.issue.number || github.run_id) }}
+  group: ${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && github.event.comment.body == '@netlify stop' && format('netlify-stop-{0}', github.run_id) || format('netlify-{0}-{1}', github.repository, github.event.pull_request.number || github.event.issue.number || inputs.recover_thread || github.run_id) }}
   cancel-in-progress: false
 ```
 
-Workflow files without this change degrade gracefully: the stop runs after the agent finishes and replies "Nothing to stop". Preflight detects a workflow file without the stop-aware group and reports "Workflow file updates available" in the log and step summary only, never in comments.
+- The parser and the routing both use exact whole-comment matching, so a longer prompt containing `@netlify stop` never bypasses the thread group.
+- A stop comment with extra whitespace fails the routing but passes the parser (which trims), so it queues and then replies "Nothing to stop". That degrades safely.
+- Workflow files without the new expression degrade the same way. To tell maintainers, preflight fetches the running workflow file (path from `GITHUB_WORKFLOW_REF`, contents API) and does a plain text search for `netlify-stop-`; no YAML evaluation is involved. If it's missing, the log and step summary show "Workflow file updates available: add the stop-aware concurrency group" (never a comment). If the fetch fails, the check is silently skipped.
 
 ### Per-run agent, model, and effort
 
@@ -430,28 +450,35 @@ Workflow files without this change degrade gracefully: the stop runs after the a
 
 ### Security review (Workstream B)
 
-- Checkpoints are read only from bot-authored status comments (same as `runner-id`). Repo admins can edit any comment. That is within the existing trust model (admins already control the workflow and secrets).
-- Tampering can at most point recovery or `@netlify stop` at a different runner. The site-ID check limits that to runners on the configured site, which the token can already act on. Recovery never creates runs; it only waits, lands, stops, and comments.
-- No secrets in markers. The checkpoint never includes the prompt or site ID. Tests assert this by serializing a checkpoint built from a handle whose prompt and site ID are canaries (`PROMPT_CANARY_…`, `SITE_CANARY_…`).
-- The recovery cron's permissions are the minimum listed above. It never checks out code.
+- **Who can write state:** checkpoints and stop requests are read only from comments authored by the bot identity (`steps.bot-identity.outputs.login`). GitHub lets **anyone with write access edit other users' comments**, and any workflow or integration that runs as the same bot identity can too. Login alone is not cryptographic provenance. Write-access users are already trusted to start, steer, and stop runs, so this is within the existing trust model, and the design limits what an edit can do:
+  - the encrypted handle is authenticated with GCM and bound to repo, thread and runner, so edits to it are detected
+  - edited public fields are cross-checked against the decrypted handle and the configured site
+  - recovery never creates runs; it only waits, lands, stops, and comments
+- **No plaintext secrets in markers:** the prompt and site ID exist only inside the ciphertext. Tests serialize a checkpoint from a handle containing canary strings (`PROMPT_CANARY_…`, `SITE_CANARY_…`) and assert that neither appears in the rendered comment.
+- **Edited trigger comments:** `issue_comment` `edited` events re-run authorization for the editor, and the requester recorded in the checkpoint is the login of the event's `sender`.
+- **Permissions:** the scan workflow needs only read permissions plus `actions: write` to dispatch, and it never checks out code or decrypts.
 
 ### Tests (Workstream B)
 
-- Marker round-trip and sanitization: invalid fields drop the checkpoint, the unknown-`v` case, the size bound, allowlist stripping of forged checkpoints in user comments, and the canary-string assertions above.
-- `buildResumeHandle`: `run` and `session` kinds pass `sdk.parseHandle`; site mismatch; missing session.
-- `recoverRun`: every row of the decision table and both pre-checks (closed thread, `stop-pending`) against a fake transport, the same style as `run-agent.test.js` `dryRunTransport`. Also: the 40% budget split with an injected clock, the moved-PR-head rule, the requester @-mention, the lease race (two recoverers, one wins), and idempotency (an existing result comment for the session means no duplicate).
-- Cancel: the `Stop agent on cancel` step calls stop and writes `stopped`; a failing stop writes `stop-pending`.
-- Preflight job timeout: parses `timeout-minutes` from a workflow fixture (job-level and missing), shortens the agent limit, and warns only in logs and summary.
-- `@netlify stop`: parser (whole-mention only), permission check, the stop-aware concurrency expression in all templates, "Nothing to stop", and the outdated-workflow detection.
-- Phase split: `start` then `finish` equals today's single-process outputs (golden comparison over the existing `run-agent` test scenarios). The no-argument mode still works.
-- `action-steps.test.js`: the checkpoint step sits between the phases; the cancel step's condition; both phases are wrapped by the crash fallback; recovery steps load from `ACTION_DIR`.
-- History parsing: old-format and new-format headers.
-- **Live canary scenario "cancel stops":** the controller starts a canary run, cancels the downstream workflow run after the checkpoint appears, and asserts that the runner is stopped (backend state), the checkpoint is `stopped`, and no PR was created.
-- **Live canary scenario "orphan recovery":** a cancel can't simulate a lost runner (it now stops the agent), so the controller:
-  1. starts a canary run with a test-only input `simulate-orphan: true`, which makes the finish phase exit right after the checkpoint is written, without waiting (it leaves `state: running` and a completed owning run, exactly what a lost runner leaves)
-  2. dispatches the canary repo's recovery workflow and waits
-  3. asserts that the PR landed, the result comment has the `recovered` suffix and the requester @-mention, and the checkpoint is `finalized`
-- **Live canary scenario "stop command":** start a run, comment `@netlify stop`, and assert "Stopped by @…" and the `stopped` checkpoint.
+- **Crypto:** encrypt/decrypt round-trip; tampered ciphertext, nonce, or tag fails; ciphertext moved to another thread or runner fails via AAD; wrong token fails and triggers the rebuild fallback; prompt stripping above the size cap; key-version handling.
+- **Markers:** round-trip and sanitization; invalid fields drop the checkpoint; unknown `v`/`kv`; allowlist stripping of forged checkpoints in user comments; the canary-string assertions.
+- **Rebuild fallback:** `run` and `session` kinds with landing progress pass `sdk.parseHandle` (UUID request IDs); site mismatch; missing session; public-field/handle mismatch skips.
+- **`recoverRun`:** every pre-check and decision-table row against a fake transport, the same style as `run-agent.test.js` `dryRunTransport`. That includes owner cancelled → stop, past deadline → stop, the `AbortSignal` budget with an injected clock (and `deadlineAt` unchanged), the 40% budget split, moved PR head, the requester @-mention, and idempotency.
+- **`run-agent` checkpoint writes:** the comment is PATCHed after start and after landing; a failed write gives `checkpoint-written=false` and a warning without failing the run; existing outputs are unchanged (the existing `run-agent` scenarios still pass untouched).
+- **Final rendering merge:** a stop request or `stopped` state written by another job is preserved; a stop plus a simultaneous successful completion renders "Stopped by", and the landing outcome is still reported if it already happened.
+- **Cancel step:** it calls stop and writes `stopped`; a failing stop writes `stop-pending`; no handle file means a no-op.
+- **`job-timeout-minutes`:** shortening, warning placement, empty input skips.
+- **Scan:** it selects only unfinished checkpoints with dead owners, dispatches with the right inputs, and caps the lookback and item count. A double dispatch is harmless (the second run finds a terminal state).
+- **`@netlify stop`:** exact-comment parsing, the event scope, the permission check, the routing expression in all templates (evaluated by a tiny expression-evaluator test over fixture events for all six trigger types), "Nothing to stop", and the dead-owner dispatch path.
+- **`action-steps.test.js`:** the cancel step's condition, the recovery step loads from `ACTION_DIR`, and the run step receives `STATUS_COMMENT_ID`.
+- **History parsing:** old-format and new-format headers.
+- **Live canary scenarios:**
+  - **"cancel stops":** cancel the downstream run after the checkpoint appears; assert the backend runner is stopped, the checkpoint is `stopped`, and no PR was created.
+  - **"orphan recovery":**
+    1. Start a run with the test-only input `simulate-orphan: true`, which makes `run-agent.js` exit right after writing the checkpoint, leaving `state: running` and a completed (successful) owning run, which is what a lost runner leaves.
+    2. Dispatch the scan workflow.
+    3. Assert that a `recover_thread` run was dispatched, the PR landed, the result has the `recovered` suffix and the @-mention, and the checkpoint is `finalized`.
+  - **"stop command":** start a run, comment `@netlify stop`, and assert "Stopped by @…" in the status comment and the `stopped` checkpoint.
 
 ---
 
@@ -476,7 +503,7 @@ Jobs:
    - `version` is valid SemVer without prerelease.
    - `v<version>` doesn't exist and is greater than the latest `v1.*`.
    - The major is `1` (a `2.x` release needs a deliberate workflow edit).
-   - `GITHUB_SHA` is the current `main` HEAD.
+   - `GITHUB_SHA` is the current `main` HEAD. This check is **required when publishing**. On a dry run from another branch it is reported as "skipped (not main)", so the workflow logic can be tested on a branch.
 2. `checks`, on that SHA: `bun test src/*.test.js`, `bunx tsc --noEmit`, `bun run docs:check`, `bun run simulate -- --fixture fixtures/events/issue-opened-body-trigger.json --format json`, and `br dep cycles --json` (skipped when `br` isn't installed in CI; recorded as a warning).
 3. `canary`: `uses: ./.github/workflows/canary.yml` with `action_ref: ${{ github.sha }}`, `secrets: inherit`. **Requires adding `workflow_call`** (same inputs as `workflow_dispatch`) to `canary.yml`.
 4. `publish` (`needs: [validate, checks, canary]`, skipped when `dry_run`):
@@ -487,7 +514,9 @@ Jobs:
 
 ### Repository settings (manual, documented in the plan's checklist)
 
-- Tag ruleset: restrict creation, update, and deletion of `v*` tags to the release workflow (GitHub Actions bypass) and repo admins. Tag immutability is otherwise only convention.
+- Two tag rulesets, because the moving major tag and the immutable release tags need opposite rules:
+  - `v[0-9]*.[0-9]*.[0-9]*` (release tags): creation only by the release workflow (GitHub Actions bypass) and admins; **updates and deletion blocked for everyone**, so release tags are immutable.
+  - `v1` (the moving major tag): updates (force-push) only by the release workflow and admins; deletion blocked.
 - **No approval environment.** Any maintainer who can dispatch `release.yml` can publish once tests and the canary pass; the canary is the gate.
 
 ### Docs and templates
@@ -502,7 +531,7 @@ Jobs:
 ### Tests (Workstream C)
 
 - `actionlint` on the new workflows, added to CI.
-- A `release.yml` dry run on a branch (`dry_run: true`) proves validation, checks, and canary without publishing.
+- A `release.yml` dry run on a branch (`dry_run: true`) proves validation (with the main-HEAD check reported as skipped), checks, and canary without publishing. The first real dry run, and every publish, runs from `main`.
 - Validation logic lives in `src/release-version.js` (pure: parse, compare, next-version checks) with unit tests, called by the workflow with `node`.
 
 ---
@@ -531,11 +560,20 @@ Ask mode needs an unambiguous signal. `@netlify ask the user to confirm before d
 | `ask:` as the first word, colon required | `@netlify ask: why does the context-service ingest job retry twice?` |
 | Explicit `mode:ask` token on the `@netlify` line | `@netlify claude sonnet mode:ask where is rate limiting configured?` |
 
-Parser changes (`src/utils.js`):
+Parser changes (`src/utils.js`). The mention is parsed into **one command object** from the first triggering line, **before** the source-URL line (`◌ <url>`) is appended in `get-context.js`:
+
+```js
+{ command: 'run' | 'stop', mode: 'normal' | 'ask', selection: { agent, model, effort }, prompt }
+```
+
+- Dispatch precedence: a `runner_mode` dispatch input overrides the mention's mode, the same way dispatch `agent` / `model_id` / `effort` inputs already override mention words.
+- The new `mode:ask` token counts only in the selector prefix, immediately after the mention and its selector words, so ordinary prose like "switch mode:ask to…" later in the prompt isn't read as a token. Existing `model:`/`effort:` tokens keep today's rule (anywhere on the `@netlify` line), because narrowing them would change how existing mentions resolve, which is breaking under the SemVer policy.
+
+Specific changes:
 
 - `MentionSelection` gains `mode: 'ask' | null`.
 - `ask` joins the selector suffixes (so `@netlify-ask` matches `TRIGGER_PATTERN`). `ask` and `stop` join the reserved words in the catalog-integrity test.
-- `ask:` is recognized only as the first word, immediately followed by `:`.
+- `ask:` is recognized only as the first word after the mention, immediately followed by `:`. Today's parser stops reading selector words at `ask:` (it isn't an agent, model, or effort), so `@netlify ask: …` is currently a normal request with prompt `ask: …`. The new rule captures it before selector parsing, and selector words may follow it (`@netlify ask: fable high why…`).
 - `EXPLICIT_MODE_PATTERN` matches `mode[:=](ask|normal)`.
 - `stripSelection` removes all three forms.
 - The catalog-integrity test adds `ask` to the reserved words, so no model alias can ever be `ask`.
@@ -547,12 +585,12 @@ Dispatch input: `runner_mode` (`normal` | `ask`), named to avoid colliding with 
 - `start` / `followUp` pass `mode: 'ask'`, and landing is forced to `none` (`land: 'none'`), regardless of `dry-run`.
 - **Never land in ask mode.** Even if `result.changes === 'changed'`, skip `sdk.land`. The result comment then says: "The agent changed files while answering; those changes were not applied. Ask again without `ask` to make changes." The scope guard is skipped in ask mode.
 - Result comment: the header uses "Agent Run answered", then a `### Answer` section with the full `resultText`, under the existing truncation contract. The status comment uses "💬 Answered" instead of "✅ completed". Labels, PR finalization, and cross-posting are skipped.
-- **Thread continuity:** on a PR with an existing runner, ask is a follow-up on that runner, so it sees the PR branch. On an issue with no runner, ask creates a runner. Whether its runner ID is recorded as the thread's runner depends on probe question 2:
+- **Thread continuity (provisional until D0):** the intended behavior is to reuse the thread's runner (decision 19). On a PR with an existing runner, ask is a follow-up on that runner, so it sees the PR branch. On an issue with no runner, ask creates a runner. D0 must confirm this. If the probe shows ask sessions interfere with later normal follow-ups (for example, an ask diff gets landed), the plan switches to isolated ask runners before D1. Whether an ask-created runner is recorded as the thread's runner depends on probe question 2:
   - if normal follow-ups work, record it (later "build it" requests continue with the same context)
   - otherwise, don't record the runner ID or the checkpoint, and the next normal request starts fresh
 - **Defaults:** an ask that names no agent, model, or effort uses the same resolution as normal runs (`default-agent`, `default-model-id`, `default-effort`, else Auto). There are no separate ask defaults.
 - **Layout:** the result-comment layout (`Run #N | claude · Fable 5 | answered`, the prompt block, then `### Answer`), so asks appear in the run history like everything else.
-- Checkpoints, recovery, and `@netlify stop` work unchanged (`landing: none`, `mode: ask`). Recovery of an ask run renders the answer comment.
+- Checkpoints, recovery, and `@netlify stop` are expected to work unchanged (`landing: none`, `mode: ask`), and recovery of an ask run renders the answer comment. This is **provisional**: it's confirmed only after Workstream B ships and D0 shows how ask sessions behave.
 
 ### Tests (Workstream D)
 
@@ -568,11 +606,11 @@ Dispatch input: `runner_mode` (`normal` | `ask`), named to avoid colliding with 
 ```text
 Check trigger
 Install action dependencies (install-deps)
-[operation == recover] → Sweep unfinished runs → Write step summary → end
+[operation == recover-scan] → Find unfinished runs → dispatch recover_thread runs → Write step summary → end
 Acknowledge trigger
 Get context information            (+ runner-mode, scope inputs)
 Check trigger text size            (+ scope-instructions length)
-Run preflight checks               (+ job-timeout check and shortening, outdated-workflow notice)
+Run preflight checks               (+ job-timeout-minutes check and shortening, outdated-workflow notice)
 Resolve bot identity
 Find existing status comment
 Find existing history comment
@@ -580,12 +618,11 @@ Extract existing agent run ID      (+ checkpoint, checkpoint-state)
 … preflight / linked PR / initial comments (unchanged) …
 Checkout repository
 … project detection / CLI / site name (unchanged) …
-[@netlify stop] → Stop checkpointed run → status/summary → end   (new, B)
+[@netlify stop] → Stop checkpointed run → stop-request reply → end   (new, B; outside the thread group)
+[recover_thread dispatch] → Recover unfinished run → comments → end   (new, B)
 Recover unfinished run             (new, B; ≤ 40% of the agent time limit)
-Start Netlify Agent Runner         (run-agent.js start, crash-wrapped)
-Record run checkpoint              (new, B; replaces "Update status to in-progress")
-Finish Netlify Agent Runner        (run-agent.js finish, crash-wrapped)
-Stop agent on cancel               (new, B; if: cancelled())
+Run Netlify Agent Runners          (unchanged id; now writes the encrypted checkpoint to the status comment after start and landing)
+Stop agent on cancel               (new, B; if: cancelled(); best-effort)
 Check run scope                    (new, A; also posts on the PR for issue-triggered runs)
 Finalize Agent Runner pull request metadata
 Manage labels
@@ -604,10 +641,10 @@ Each item is one PR with its own tests and canary run, released as a minor versi
 |---|---|---|---|
 | 1 | C: `workflow_call` on the canary, `release.yml`, `src/release-version.js`, README "Versioning", drift check | none | `v1.0.0` (the first release) |
 | 2 | A: `path-globs`, `scope-guard`, `Check run scope`, rendering, inputs, canary "scope creep" | none (rebases on 1) | `v1.1.0` |
-| 3 | B1: checkpoint marker, phase split, `Record run checkpoint`, `Stop agent on cancel`, preflight job-timeout check, per-run model/effort in comments, canary "cancel stops" | none | `v1.2.0` (user-visible: live run links for new runs, full model and effort in history, cancel stops the agent) |
-| 4 | B2: `recover-run`, trigger-path recovery (40% budget), lease, requester mention | 3 | `v1.3.0` |
-| 5 | B3: `operation: recover`, opt-in cron template, canary "orphan recovery" (with `simulate-orphan`) | 4 | `v1.4.0` |
-| 5b | B4: `@netlify stop`, stop-aware concurrency in templates, outdated-workflow notice, canary "stop command" | 3 | `v1.4.x` or with 5 |
+| 3 | B1: encrypted checkpoint (crypto, marker), `run-agent.js` checkpoint writes, `Stop agent on cancel`, `job-timeout-minutes`, per-run model/effort in comments, canary "cancel stops" | none | `v1.2.0` (user-visible: live run links for new runs, full model and effort in history, cancel stops the agent) |
+| 4 | B2: `recover-run`, trigger-path recovery (40% budget), `recover_thread` dispatch path and template concurrency, requester mention | 3 | `v1.3.0` |
+| 5 | B3: `operation: recover-scan`, opt-in cron template, canary "orphan recovery" (with `simulate-orphan`) | 4 | `v1.4.0` |
+| 5b | B4: `@netlify stop`, stop-request marker, final-render merge, stop-aware concurrency in templates, outdated-workflow notice, canary "stop command" | 4 | `v1.4.x` or with 5 |
 | 6 | D0: ask probe script plus recorded findings (plan update only) | none | none |
 | 7 | D1: ask mode parser, behavior, rendering, canary "ask" | 6 (and 3, for checkpoint compatibility) | `v1.5.0` |
 
@@ -618,8 +655,9 @@ Items 1, 2, 3 and 6 can proceed in parallel. After each release: bump `gtm-servi
 | Area | Unit | Executes real `action.yml` shell | Canary | `gtm-services` smoke |
 |---|---|---|---|---|
 | Scope guard | globs, diff parsing, PR #52/#54/#56 fixtures, rendering, escaping | `Check run scope` gating | "scope creep" | observe the next real run |
-| Checkpoints | marker round-trip, secrecy canaries, phase-split parity | checkpoint and cancel steps | "orphan recovery" | none |
-| Recovery | decision table, lease race, idempotency | recovery step gating | "orphan recovery" | optional manual cancel test |
+| Checkpoints | crypto round-trip and AAD binding, marker sanitization, secrecy canaries, rebuild fallback, checkpoint writes from `run-agent.js` | cancel step, `STATUS_COMMENT_ID` wiring | "cancel stops" | none |
+| Recovery | pre-checks and decision table, deadline and budget, single-writer dispatch, idempotency | recovery step gating, `recover_thread` routing | "orphan recovery" | optional manual test |
+| Stop | exact-comment parsing, routing expression over all event types, stop-request merge | stop routing | "stop command" | one stop |
 | Releases | version validation | none | canary via `workflow_call` | `@v1` resolves |
 | Ask mode | parser, never-land, rendering | none | "ask" | one question |
 
@@ -628,8 +666,10 @@ Existing gates stay: `bun test`, `tsc`, docs drift, and the PR canary.
 ## Backward Compatibility
 
 - Comments without checkpoint or scope markers behave as today. Old action versions ignore the new marker because it's stripped by their allowlist, which is correct, since they can't use it.
-- `run-agent.js` without a phase argument runs both phases.
-- The `Update status to in-progress` behavior for follow-ups is preserved inside `Record run checkpoint`.
+- The run step keeps its ID (`netlify-agent`) and every output, so no `steps.netlify-agent.outputs.*` reference changes.
+- The `Update status to in-progress` behavior for follow-ups moves into `run-agent.js`'s post-start checkpoint write (same body, plus the checkpoint marker).
+- Explicit `model:`/`effort:` tokens keep working anywhere on the `@netlify` line; only the new `mode:ask` token is limited to the selector prefix.
+- Template changes (`job-timeout-minutes`, the stop-aware concurrency group, `recover_thread`) are needed only for the new features. Old workflow files keep working.
 - All new inputs default to current behavior except `flag-new-top-level` and the default `protected-paths` list. Those only add a comment section (never block), which counts as additive under the SemVer policy.
 - History parsing accepts old and new result headers.
 
@@ -639,8 +679,11 @@ Existing gates stay: `bun test`, `tsc`, docs drift, and the PR canary.
 |---|---|
 | False-positive scope flags annoy teams | Root-only semantics; `!` exclusions; `protected-paths: none`; flags never block |
 | Draft conversion surprises a human who already marked the PR ready | Only convert PRs this run created |
-| Recovery double-lands or double-comments | Liveness check via `ghRunId`, lease with re-read, result-comment idempotency, resumable `sdk.land` |
-| A deliberate cancel is mistaken for a job timeout (both run `cancelled()` steps) | Preflight shortens the agent limit to fit the job, so real timeouts are reported by the agent before GitHub cancels the job |
+| Recovery double-lands or double-comments | All recovery runs inside the thread's concurrency group (single writer); the cron only dispatches; result-comment idempotency; resumable `sdk.land` from the persisted handle |
+| Token rotation makes stored handles undecryptable | Fallback rebuild from public fields (tested to pass `parseHandle`); the summary notes the fallback |
+| A large prompt pushes the status comment past 65,536 characters | Prompt stripped from the handle above a 40,000-character ciphertext cap |
+| A deliberate cancel is mistaken for a job timeout (both run `cancelled()` steps) | With `job-timeout-minutes`, preflight shortens the agent limit to fit the job, so real timeouts are reported by the agent before GitHub cancels the job |
+| The cancel cleanup step doesn't run (lost runner, grace period exhausted) | Recovery treats an owner run with conclusion `cancelled` as a stop request |
 | Recovery lands changes onto a branch a human has since changed | `prHeadSha` check: report, don't land |
 | `@netlify stop` queues behind the run it should stop | Stop-aware concurrency group in the templates; old files degrade to "Nothing to stop" |
 | A checkpoint write fails (API error) and recovery silently isn't possible | The step logs a warning and the step summary records "checkpoint not persisted"; the run itself continues |
@@ -649,6 +692,27 @@ Existing gates stay: `bun test`, `tsc`, docs drift, and the PR canary.
 | The `v1` tag moved by mistake | Tag ruleset, release workflow as the only writer, `dry_run` default `true` |
 | The default scope instruction changes agent behavior in unwanted ways | Narrow wording (it only covers unrelated build and deploy failures); `scope-instructions: ''` opts out; listed under "Behavior changes" in the release notes |
 
+## Review Log
+
+- **2026-09-25, Codex via `nax run agent codex` (runner `6ab6c43768ad7de041b2cc8e`, 116.26 credits).** Each claim was checked against the code, the SDK and GitHub's docs before any change.
+  - **Accepted:**
+    - comment leases aren't locks, replaced by concurrency groups
+    - hand-built handles are discouraged, replaced by an encrypted full handle
+    - cancel cleanup is best-effort, so recovery honors cancelled owners
+    - deadline semantics, per the SDK contract
+    - YAML timeout discovery replaced by `job-timeout-minutes`
+    - stop routing limited to comment events with exact matching
+    - stop versus final-render race, via the stop-request marker and merge
+    - diff-parsing limits: GitHub file APIs first, best-effort parsing with Git unquoting
+    - release dry-run on a branch and separate tag rulesets
+    - ask continuity marked provisional
+    - one command object for the grammar
+    - non-fatal draft conversion
+  - **Replaced with a simpler fix:** the start/finish phase split. `run-agent.js` writes the checkpoint itself, so step IDs and outputs don't change.
+  - **Refuted:**
+    - "rebuilt handles fail `parseHandle`": both kinds pass with UUID request IDs
+    - "admins can't edit others' comments": anyone with write access can, so the trust note was widened, not narrowed
+
 ## Resolved Decisions
 
 Decided in the 2026-09-25 interview.
@@ -656,7 +720,7 @@ Decided in the 2026-09-25 interview.
 | # | Question | Decision |
 |---|---|---|
 | 1 | What does cancelling the workflow mean? | **Stop the agent.** A cancel step calls `sdk.stop`; the run is not recovered. |
-| 2 | Job `timeout-minutes` also triggers cancel steps | Preflight reads the job timeout, **warns, and shortens the agent limit** to fit (margin 5 minutes). Warnings go to logs and the step summary. |
+| 2 | Job `timeout-minutes` also triggers cancel steps | Preflight **warns and shortens the agent limit** to fit (margin 5 minutes), based on a new explicit **`job-timeout-minutes`** input set in the templates (revised after review: reading YAML is unreliable). Warnings go to logs and the step summary. |
 | 3 | Recovery finds the PR branch moved, or the thread closed | **Report, don't land.** A closed thread also stops a still-running agent. |
 | 4 | Scope flags as a GitHub check? | **Comments only.** Enforcement is left to CODEOWNERS. |
 | 5 | Where scope warnings appear | **Both** the result comment and the PR (for issue-triggered runs). |
@@ -665,7 +729,7 @@ Decided in the 2026-09-25 interview.
 | 8 | SemVer and default behavior changes | The policy is clarified: agent guidance and comment content are **minor**, listed under "Behavior changes". |
 | 9 | Scheduled recovery | **Opt-in cron template** `netlify-agents-recover.yml`. |
 | 10 | New request while the previous run is still working | **Wait, then run it,** with recovery capped at **40%** of the agent time limit; otherwise decline with a note. |
-| 11 | A slow or past-deadline orphaned run | **Let it finish and land.** There is no separate recovery time limit. |
+| 11 | A slow or past-deadline orphaned run | **Revised after review:** keep the run's original deadline (its agent time limit, which preflight fits inside the job timeout). An orphan finishes and lands if it completes before the deadline; past it, recovery stops it, as the SDK requires of out-of-band workers. |
 | 12 | Notify when a run is recovered later | **@-mention the requester** (login stored in the checkpoint). |
 | 13 | `@netlify stop` | **Yes**, with the stop-aware concurrency group in the templates; anyone with write access may stop. |
 | 14 | Outdated workflow files | Detected, then reported in **logs and the step summary only**. |
@@ -676,13 +740,16 @@ Decided in the 2026-09-25 interview.
 | 19 | Ask context | **Reuse the thread's runner.** |
 | 20 | Ask answer layout | **The result-comment layout**, so asks appear in history. |
 | 21 | Shipping order | **Releases → scope guard → checkpoints → recovery → cron and stop → ask probe → ask.** |
+| 22 | Where the SDK handle lives (added after review) | **Encrypted in the status comment** (AES-256-GCM, key from `NETLIFY_AUTH_TOKEN` via HKDF, bound to repo, thread and runner), with a rebuild-from-checkpoint fallback. |
+| 23 | Mutual exclusion for recovery (added after review) | **Workflow concurrency groups, not comment leases.** Only the job holding the thread group writes state; the cron dispatches per-thread runs. |
 
 ## Done When
 
 - `@v1` resolves to a tagged release created by `release.yml`, and `gtm-services` runs on a tagged version.
 - A run that changes `netlify.toml` or adds a top-level folder shows a "Review these changes" section in its result comment, proven by the canary.
 - Cancelling a run's workflow stops the agent, and `@netlify stop` does the same from the thread, both proven by the canary.
-- An orphaned run (simulated with `simulate-orphan`) is finished by the recovery cron, with its PR landed, the requester mentioned, and the checkpoint finalized, proven by the canary.
+- An orphaned run (simulated with `simulate-orphan`) is finished through the recovery cron's per-thread dispatch, with its PR landed, the requester mentioned, and the checkpoint finalized, proven by the canary.
+- Status comments never contain a plaintext prompt or site ID (canary-string test), and a checkpoint copied into another thread fails decryption.
 - New runs show the agent-run link while in progress, and result and history comments show agent, model, and effort for every run, including follow-ups.
 - `@netlify-ask …` answers in a comment without a PR, proven by the canary, with the backend contract recorded in this plan.
 - All new shell steps are covered by tests that execute them.
