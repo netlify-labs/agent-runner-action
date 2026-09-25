@@ -96,6 +96,21 @@ function buildLinks(env, context, latestSession) {
 }
 
 /**
+ * A run failed if any signal says so. An empty agent outcome alone is not a
+ * success: the agent step may have crashed before reporting anything.
+ * @param {Record<string, string | undefined>} env
+ * @returns {boolean}
+ */
+function inferFailure(env) {
+  const agentOutcome = String(env.AGENT_OUTCOME || '').trim().toLowerCase();
+  return Boolean(env.AGENT_ERROR)
+    || Boolean(env.FAILURE_CATEGORY || env.AGENT_FAILURE_CATEGORY)
+    || agentOutcome === 'failure'
+    || agentOutcome === 'timeout'
+    || String(env.AGENT_STEP_OUTCOME || '').trim().toLowerCase() === 'failure';
+}
+
+/**
  * @param {{
  *   env?: Record<string, string | undefined>,
  *   context: import('./types').ActionContext,
@@ -111,7 +126,7 @@ function renderStatusComment({ env = process.env, context, outcome }) {
   const siteName = env.SITE_NAME || context.repo.repo;
   const sessionId = latestSession && latestSession.id ? String(latestSession.id) : '';
   const agentRunUrl = formatAgentRunUrl(siteName, agentId, sessionId);
-  const isFailure = outcome ? outcome === 'failure' : Boolean(env.AGENT_ERROR);
+  const isFailure = outcome ? outcome === 'failure' : inferFailure(env);
   const isDryRun = env.IS_DRY_RUN === 'true';
   const model = (latestSession && latestSession.agent_config && latestSession.agent_config.agent) || env.AGENT_MODEL || 'codex';
   const runNumber = sessions.length || 1;
@@ -181,4 +196,5 @@ module.exports = async function generateStatusComment({ context, core }) {
 };
 
 module.exports.renderStatusComment = renderStatusComment;
+module.exports.inferFailure = inferFailure;
 module.exports.resultCommentLink = resultCommentLink;
