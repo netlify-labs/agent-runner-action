@@ -413,7 +413,7 @@ describe('normalizeEffort', () => {
 describe('cleanPrompt with effort', () => {
   it('strips the agent and effort prefix', () => {
     assert.equal(utils.cleanPrompt('@netlify claude high Fix the header'), 'Fix the header');
-    assert.equal(utils.cleanPrompt('@netlify codex low: Fix the typo'), ': Fix the typo');
+    assert.equal(utils.cleanPrompt('@netlify codex low: Fix the typo'), 'Fix the typo');
   });
 
   it('keeps words that are not effort levels', () => {
@@ -434,5 +434,146 @@ describe('buildInProgressComment effort', () => {
   it('omits effort when Auto', () => {
     const body = utils.buildInProgressComment({ prompt: '@netlify claude Fix it', model: 'claude', effort: '' });
     assert.doesNotMatch(body, /Effort/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Model selection: parseSelection / resolveSelection
+// ---------------------------------------------------------------------------
+describe('model selection', () => {
+  /** @param {string} text @param {object} [defaults] */
+  function pick(text, defaults = {}) {
+    return utils.resolveSelection(utils.parseSelection(text), { defaultAgent: 'codex', ...defaults });
+  }
+
+  it('reads a standalone Claude model alias and infers the agent', () => {
+    const r = pick('@netlify fable high Fix it');
+    assert.equal(r.agent, 'claude');
+    assert.equal(r.modelId, 'claude-fable-5');
+    assert.equal(r.modelLabel, 'Fable 5');
+    assert.equal(r.effort, 'high');
+    assert.deepEqual(r.warnings, []);
+  });
+
+  it('reads agent, model, and effort in order', () => {
+    const r = pick('@netlify claude fable high Fix it');
+    assert.deepEqual([r.agent, r.modelId, r.effort], ['claude', 'claude-fable-5', 'high']);
+  });
+
+  it('reads a selector suffix such as @netlify-fable', () => {
+    const r = pick('@netlify-fable high Fix it');
+    assert.deepEqual([r.agent, r.modelId, r.effort], ['claude', 'claude-fable-5', 'high']);
+    const c = pick('@netlify-claude sonnet Fix it');
+    assert.deepEqual([c.agent, c.modelId], ['claude', 'claude-sonnet-5']);
+  });
+
+  it('keeps model Auto when only agent and effort are named', () => {
+    const r = pick('@netlify claude high Fix it');
+    assert.deepEqual([r.agent, r.modelId, r.effort], ['claude', '', 'high']);
+  });
+
+  it('requires the agent for short Codex and Gemini aliases', () => {
+    assert.equal(pick('@netlify codex sol medium: tune').modelId, 'gpt-5.6-sol');
+    assert.equal(pick('@netlify gemini flash Fix').modelId, 'gemini-3.6-flash');
+    assert.equal(pick('@netlify gemini flash-lite Fix').modelId, 'gemini-3.5-flash-lite');
+    assert.equal(pick('@netlify pro tip: fix it').modelId, '');
+    assert.equal(pick('@netlify sol fix it').modelId, '');
+  });
+
+  it('accepts versioned aliases and exact model IDs', () => {
+    assert.equal(pick('@netlify opus-4.8 low go').modelId, 'claude-opus-4-8');
+    assert.equal(pick('@netlify claude-fable-5 high x').modelId, 'claude-fable-5');
+    assert.equal(pick('@netlify gpt-5.4-mini x').agent, 'codex');
+  });
+
+  it('switches to the model agent with a warning on a mismatch', () => {
+    const r = pick('@netlify codex fable high x');
+    assert.deepEqual([r.agent, r.modelId, r.effort], ['claude', 'claude-fable-5', 'high']);
+    assert.match(r.warnings[0], /Fable 5 runs on claude, not codex/);
+  });
+
+  it('drops an effort the model does not support', () => {
+    const r = pick('@netlify fable max Fix');
+    assert.equal(r.modelId, 'claude-fable-5');
+    assert.equal(r.effort, '');
+    assert.match(r.warnings[0], /"max" is not supported by Fable 5/);
+  });
+
+  it('passes an explicit uncataloged model through with a warning', () => {
+    const r = pick('@netlify Build model:gpt-9 effort:low');
+    assert.deepEqual([r.agent, r.modelId, r.effort], ['codex', 'gpt-9', 'low']);
+    assert.match(r.warnings[0], /not in the action's catalog/);
+  });
+
+  it('does not read ordinary prompt words as selectors', () => {
+    for (const text of ['@netlify high contrast mode', '@netlify use flexbox for layout', '@netlify codex low-hanging fixes']) {
+      const r = pick(text);
+      assert.equal(r.modelId, '', text);
+      assert.equal(r.effort, '', text);
+    }
+  });
+
+  it('applies default-model-id only when it matches the mention agent', () => {
+    assert.equal(pick('@netlify Fix it', { defaultModelId: 'fable' }).modelId, 'claude-fable-5');
+    assert.equal(pick('@netlify Fix it', { defaultModelId: 'fable' }).agent, 'claude');
+    const other = pick('@netlify codex Fix it', { defaultModelId: 'fable' });
+    assert.deepEqual([other.agent, other.modelId], ['codex', '']);
+    assert.deepEqual(other.warnings, []);
+    assert.equal(pick('@netlify fable Fix it', { defaultModelId: 'auto' }).modelId, 'claude-fable-5');
+  });
+
+  it('resolves any alias in default-model-id', () => {
+    const r = pick('@netlify Fix it', { defaultModelId: 'sol' });
+    assert.deepEqual([r.agent, r.modelId], ['codex', 'gpt-5.6-sol']);
+  });
+
+  it('lets a mention model override default-model-id', () => {
+    assert.equal(pick('@netlify sonnet Fix', { defaultModelId: 'claude-fable-5' }).modelId, 'claude-sonnet-5');
+  });
+
+  it('extractModel returns the agent implied by a model', () => {
+    assert.equal(utils.extractModel('@netlify fable fix it', 'codex'), 'claude');
+    assert.equal(utils.extractModel('@netlify fix it', 'codex'), 'codex');
+  });
+});
+
+describe('TRIGGER_PATTERN selector suffixes', () => {
+  it('matches agent and model suffixes', () => {
+    for (const s of ['@netlify-fable', '@netlify-claude', '@netlify_codex', '@netlify-opus', '@netlify-sonnet']) {
+      assert.ok(utils.matchesTrigger(s), s);
+    }
+  });
+
+  it('still rejects unknown suffixes and scopes', () => {
+    for (const s of ['@netlify-fables', '@netlify-foo', '@netlify/fable']) {
+      assert.ok(!utils.matchesTrigger(s), s);
+    }
+  });
+});
+
+describe('cleanPrompt with models', () => {
+  it('strips agent, model, effort, and a trailing separator', () => {
+    assert.equal(utils.cleanPrompt('@netlify claude fable high Fix it'), 'Fix it');
+    assert.equal(utils.cleanPrompt('@netlify-fable high: Fix it'), 'Fix it');
+    assert.equal(utils.cleanPrompt('@netlify fable, fix it'), 'fix it');
+    assert.equal(utils.cleanPrompt('@netlify Build model:gpt-9 effort:low'), 'Build');
+  });
+
+  it('keeps text before the mention', () => {
+    assert.equal(utils.cleanPrompt('Thanks!\n@netlify sonnet fix'), 'Thanks!\nfix');
+  });
+});
+
+describe('buildInProgressComment model', () => {
+  it('shows model label and warnings', () => {
+    const body = utils.buildInProgressComment({
+      prompt: '@netlify codex fable high Fix it',
+      model: 'claude',
+      modelLabel: 'Fable 5',
+      effort: 'high',
+      configWarnings: 'Model Fable 5 runs on claude, not codex; using claude.',
+    });
+    assert.match(body, /\*\*Agent:\*\* `claude` · \*\*Model:\*\* Fable 5 · \*\*Effort:\*\* `high`/);
+    assert.match(body, /> ⚠️ Model Fable 5 runs on claude/);
   });
 });

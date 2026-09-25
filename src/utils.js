@@ -5,6 +5,7 @@
 /** @typedef {import('./types').InProgressCommentOptions} InProgressCommentOptions */
 
 const path = require('path');
+const catalog = require('./agent-catalog');
 const {
   STATUS_COMMENT_MARKER,
   renderRunnerIdMarker,
@@ -25,45 +26,48 @@ const FLAVOR_MESSAGES = require(path.join(__dirname, 'flavor-messages.json'));
 const TRIGGER_BASES = ['netlify', 'nelify', 'netlfy', 'netify', 'netlif', 'netfly'];
 
 const TRIGGER_BASE_PATTERN = `(?:${TRIGGER_BASES.join('|')})`;
-const TRIGGER_SUFFIX_PATTERN = '(?:[_-](?:agents?(?:[_-]runs?)?|ai))?';
-
-/**
- * Standalone @netlify mention (and typos) with optional suffixes like -agent,
- * -agents, or -ai. Rejects package scopes like @netlify/pkg and email-like
- * strings such as me@netlify.com.
- */
-const TRIGGER_PATTERN = new RegExp(
-  `(?<!\\w)@${TRIGGER_BASE_PATTERN}${TRIGGER_SUFFIX_PATTERN}(?![\\w./-])`,
-  'i'
-);
 
 // ---------------------------------------------------------------------------
-// Agent selection handling. Legacy API fields still use the name "model".
+// Agent, model, and effort selection. Legacy API fields still use the name
+// "model" for the agent provider; actual model IDs are "model IDs" here.
 // ---------------------------------------------------------------------------
 
 /** @type {string[]} */
 const VALID_MODELS = ['claude', 'codex', 'gemini'];
 const DEFAULT_MODEL = 'codex';
 
-/** Match "@netlify [with|using|via] <model>" */
-const MODEL_PATTERN = new RegExp(
-  `${TRIGGER_PATTERN.source}\\s+(?:(?:with|using|use|via)\\s+)?(${VALID_MODELS.join('|')})\\b`,
+/** @type {string[]} */
+const VALID_EFFORTS = catalog.EFFORT_WORDS;
+
+/**
+ * Selector suffixes such as @netlify-claude or @netlify-fable. Longest first
+ * so alternation never stops at a shorter prefix.
+ * @type {string[]}
+ */
+const SELECTOR_SUFFIXES = [...VALID_MODELS, ...catalog.STANDALONE_SUFFIXES]
+  .sort((a, b) => b.length - a.length);
+
+const TRIGGER_SUFFIX_PATTERN = `(?:[_-](?:agents?(?:[_-]runs?)?|ai|${SELECTOR_SUFFIXES.join('|')}))?`;
+
+/**
+ * Standalone @netlify mention (and typos) with optional suffixes like -agent,
+ * -agents, -ai, or a selector such as -claude or -fable. Rejects package
+ * scopes like @netlify/pkg and email-like strings such as me@netlify.com.
+ */
+const TRIGGER_PATTERN = new RegExp(
+  `(?<!\\w)@${TRIGGER_BASE_PATTERN}${TRIGGER_SUFFIX_PATTERN}(?![\\w./-])`,
   'i'
 );
 
-// ---------------------------------------------------------------------------
-// Effort selection. Omitted effort means backend-selected Auto.
-// ---------------------------------------------------------------------------
+/** Same as TRIGGER_PATTERN, capturing the selector suffix when present. */
+const TRIGGER_CAPTURE_PATTERN = new RegExp(
+  `(?<!\\w)@${TRIGGER_BASE_PATTERN}(?:[_-](?:agents?(?:[_-]runs?)?|ai|(${SELECTOR_SUFFIXES.join('|')})))?(?![\\w./-])`,
+  'i'
+);
 
-/** @type {string[]} */
-const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
-
-/** Effort word must be followed by whitespace, ':' or end of text. */
-const EFFORT_BOUNDARY = '(?=\\s|:|$)';
-
-/** Match "@netlify [with|using|via] <agent> <effort>" */
-const EFFORT_AFTER_AGENT_PATTERN = new RegExp(
-  `${TRIGGER_PATTERN.source}\\s+(?:(?:with|using|use|via)\\s+)?(?:${VALID_MODELS.join('|')})[ \\t]+(${VALID_EFFORTS.join('|')})${EFFORT_BOUNDARY}`,
+/** Match "@netlify [with|using|via] <agent>" (legacy agent-only pattern). */
+const MODEL_PATTERN = new RegExp(
+  `${TRIGGER_PATTERN.source}\\s+(?:(?:with|using|use|via)\\s+)?(${VALID_MODELS.join('|')})\\b`,
   'i'
 );
 
@@ -72,6 +76,13 @@ const EXPLICIT_EFFORT_PATTERN = new RegExp(
   `(?<![\\w-])effort[:=](auto|${VALID_EFFORTS.join('|')})(?![\\w-])`,
   'i'
 );
+
+/** Match an explicit "model:<id>" or "model=<id>" token. */
+const EXPLICIT_MODEL_PATTERN = /(?<![\w-])model[:=]([A-Za-z0-9][A-Za-z0-9._~\/-]*)(?![\w-])/i;
+
+/** One selector word, followed by whitespace, ':', ',' or end of line. */
+const SELECTOR_WORD_PATTERN = /^[ \t]+([A-Za-z0-9][A-Za-z0-9._~\/-]*?)(?=[ \t]|[:,]|$)/;
+const CONNECTOR_PATTERN = /^[ \t]+(?:with|using|use|via)(?=[ \t])/i;
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -109,15 +120,122 @@ function matchesTrigger(text) {
 }
 
 /**
- * Extract the model name from trigger text. Falls back to `defaultModel`.
+ * @typedef {object} MentionSelection
+ * @property {string | null} agent Agent word named in the mention.
+ * @property {string | null} model Model word or `model:` value, as written.
+ * @property {string | null} effort Effort word or `effort:` value.
+ * @property {number} start Index of the mention within the line.
+ * @property {number} end Index just past the consumed selector words.
+ */
+
+/**
+ * Parse the selector words that follow the first @netlify mention in `line`.
+ * Words are read in order agent -> model -> effort; each slot is optional,
+ * and reading stops at the first word that doesn't fit the next slot. A
+ * model word needs a preceding agent unless its alias is standalone (fable,
+ * opus, sonnet, haiku) or it is an exact model ID; a standalone alias after a
+ * different agent is still read as a model. An effort word needs a
+ * preceding agent or model. Explicit `model:<id>` / `effort:<level>` tokens
+ * anywhere on the line override the positional words.
+ *
+ * @param {string} line
+ * @returns {MentionSelection | null}
+ */
+function parseMentionLine(line) {
+  const trigger = TRIGGER_CAPTURE_PATTERN.exec(line);
+  if (!trigger) return null;
+  /** @type {MentionSelection} */
+  const selection = {
+    agent: null,
+    model: null,
+    effort: null,
+    start: trigger.index,
+    end: trigger.index + trigger[0].length,
+  };
+
+  /** @param {string} word @returns {boolean} */
+  const accept = (word) => {
+    const normalized = word.toLowerCase();
+    if (!selection.agent && !selection.model && !selection.effort && VALID_MODELS.includes(normalized)) {
+      selection.agent = normalized;
+      return true;
+    }
+    // Models of another agent are consumed too; resolveSelection() switches
+    // to the model's agent and warns.
+    if (!selection.model && !selection.effort && (
+      catalog.resolveModelWord(normalized, selection.agent)
+      || (selection.agent && catalog.resolveModelWord(normalized, null))
+    )) {
+      selection.model = normalized;
+      return true;
+    }
+    if (!selection.effort && (selection.agent || selection.model) && VALID_EFFORTS.includes(normalized)) {
+      selection.effort = normalized;
+      return true;
+    }
+    return false;
+  };
+
+  if (trigger[1]) accept(trigger[1]);
+
+  let rest = line.slice(selection.end);
+  const connector = rest.match(CONNECTOR_PATTERN);
+  if (connector && !selection.agent && !selection.model) {
+    const afterConnector = rest.slice(connector[0].length).match(SELECTOR_WORD_PATTERN);
+    if (afterConnector && (
+      VALID_MODELS.includes(afterConnector[1].toLowerCase())
+      || catalog.resolveModelWord(afterConnector[1], null)
+    )) {
+      selection.end += connector[0].length;
+      rest = rest.slice(connector[0].length);
+    }
+  }
+  for (;;) {
+    const word = rest.match(SELECTOR_WORD_PATTERN);
+    if (!word || !accept(word[1])) break;
+    selection.end += word[0].length;
+    rest = rest.slice(word[0].length);
+  }
+
+  const explicitModel = line.match(EXPLICIT_MODEL_PATTERN);
+  if (explicitModel) selection.model = explicitModel[1].toLowerCase();
+  const explicitEffort = line.match(EXPLICIT_EFFORT_PATTERN);
+  if (explicitEffort) selection.effort = explicitEffort[1].toLowerCase();
+  return selection;
+}
+
+/**
+ * Parse agent, model, and effort from the first @netlify mention line that
+ * names any of them. Mentions inside code spans and fences are ignored.
+ * @param {string | null | undefined} text
+ * @returns {MentionSelection | null}
+ */
+function parseSelection(text) {
+  if (!text) return null;
+  /** @type {MentionSelection | null} */
+  let first = null;
+  for (const line of stripMarkdownCode(text).split('\n')) {
+    const selection = parseMentionLine(line);
+    if (!selection) continue;
+    if (selection.agent || selection.model || selection.effort) return selection;
+    first = first || selection;
+  }
+  return first;
+}
+
+/**
+ * Extract the agent name from trigger text. A model alias implies its agent
+ * (e.g. "@netlify fable" selects claude). Falls back to `defaultModel`.
  * @param {string | null | undefined} text
  * @param {string} [defaultModel]
  * @returns {string}
  */
 function extractModel(text, defaultModel) {
-  if (!text) return defaultModel || DEFAULT_MODEL;
-  const match = text.match(MODEL_PATTERN);
-  return match ? match[1].toLowerCase() : (defaultModel || DEFAULT_MODEL);
+  const selection = parseSelection(text);
+  const model = selection?.model
+    ? catalog.resolveModelWord(selection.model, selection.agent)
+    : undefined;
+  return selection?.agent || model?.provider || defaultModel || DEFAULT_MODEL;
 }
 
 /**
@@ -133,46 +251,145 @@ function normalizeEffort(value) {
 }
 
 /**
- * Extract the effort level from the lines that mention @netlify, in order. On
- * each line an explicit `effort:<level>` token wins over the word directly
- * after the agent. Returns '' for backend Auto when nothing matches and no
- * valid default is given.
+ * Extract the effort word from trigger text, unvalidated against the model.
+ * Returns '' for backend Auto when nothing matches and no valid default is
+ * given.
  * @param {string | null | undefined} text
  * @param {string} [defaultEffort]
  * @returns {string}
  */
 function extractEffort(text, defaultEffort) {
-  const fallback = normalizeEffort(defaultEffort) || '';
-  if (!text) return fallback;
-  const lines = stripMarkdownCode(text)
-    .split('\n')
-    .filter((line) => TRIGGER_PATTERN.test(line));
-  for (const line of lines) {
-    const explicit = line.match(EXPLICIT_EFFORT_PATTERN);
-    if (explicit) return normalizeEffort(explicit[1]) || '';
-    const positional = line.match(EFFORT_AFTER_AGENT_PATTERN);
-    if (positional) return positional[1].toLowerCase();
-  }
-  return fallback;
+  const selection = parseSelection(text);
+  if (selection?.effort) return normalizeEffort(selection.effort) || '';
+  return normalizeEffort(defaultEffort) || '';
 }
 
 /**
- * Strip the @netlify mention, optional model/effort prefix, explicit effort
- * token, and ◌ markers from prompt text.
+ * @typedef {object} ResolvedSelection
+ * @property {string} agent Agent provider to run.
+ * @property {string} modelId Wire model ID; '' means backend Auto.
+ * @property {string} modelLabel Display label for the model ('' for Auto).
+ * @property {string} effort Wire effort; '' means backend Auto.
+ * @property {string[]} warnings Human-readable adjustments that were made.
+ */
+
+/**
+ * Resolve the final agent/model/effort from a parsed mention plus defaults.
+ * Mention values win over defaults. A catalog model implies its agent. Effort
+ * outside the resolved model's supported levels falls back to Auto with a
+ * warning, as does an unknown default.
+ *
+ * @param {MentionSelection | null} selection
+ * @param {{ defaultAgent?: string, defaultModelId?: string, defaultEffort?: string }} [defaults]
+ * @returns {ResolvedSelection}
+ */
+function resolveSelection(selection, defaults = {}) {
+  /** @type {string[]} */
+  const warnings = [];
+  const defaultAgent = String(defaults.defaultAgent || DEFAULT_MODEL).toLowerCase();
+  let agent = selection?.agent || '';
+
+  const defaultModelWord = String(defaults.defaultModelId || '').trim().toLowerCase();
+  let modelWord = selection?.model || '';
+  let modelFromDefault = false;
+  if (!modelWord && defaultModelWord && defaultModelWord !== 'auto') {
+    modelWord = defaultModelWord;
+    modelFromDefault = true;
+  }
+
+  // Defaults resolve against the whole catalog; a mention alias only within
+  // its named agent (or as a standalone alias).
+  let known = !modelWord ? undefined
+    : modelFromDefault ? catalog.resolveConfiguredModel(modelWord)
+      : catalog.resolveModelWord(modelWord, agent || null);
+  if (modelWord && !known && agent) {
+    // A model named after the "wrong" agent, e.g. "@netlify codex fable".
+    const elsewhere = catalog.resolveModelWord(modelWord, null);
+    if (elsewhere && !modelFromDefault) {
+      warnings.push(`Model ${elsewhere.label} runs on ${elsewhere.provider}, not ${agent}; using ${elsewhere.provider}.`);
+      known = elsewhere;
+      agent = elsewhere.provider;
+    }
+  }
+
+  let modelId = '';
+  let modelLabel = '';
+  if (known) {
+    if (modelFromDefault && agent && known.provider !== agent) {
+      // default-model-id belongs to another agent; the mention's agent wins.
+    } else {
+      if (agent && known.provider !== agent) {
+        warnings.push(`Model ${known.label} runs on ${known.provider}, not ${agent}; using ${known.provider}.`);
+      }
+      agent = known.provider;
+      modelId = known.id;
+      modelLabel = known.label;
+    }
+  } else if (modelWord && modelWord !== 'auto') {
+    if (/^[a-z0-9][a-z0-9._~\/-]{0,127}$/.test(modelWord)) {
+      warnings.push(`Model "${modelWord}" is not in the action's catalog; passing it through for Agent Runner to validate.`);
+      modelId = modelWord;
+      modelLabel = modelWord;
+    } else {
+      warnings.push('Ignoring an invalid model value; using Auto.');
+    }
+  }
+
+  agent = agent || defaultAgent;
+
+  let effort = selection?.effort ? normalizeEffort(selection.effort) : null;
+  if (effort === null || effort === undefined) {
+    const fallback = normalizeEffort(defaults.defaultEffort);
+    if (fallback === null) {
+      warnings.push(`Ignoring unsupported default-effort; using Auto (supported: ${VALID_EFFORTS.join(', ')}, auto).`);
+    }
+    effort = fallback || '';
+  }
+  if (effort) {
+    const knownForEffort = catalog.modelById(modelId);
+    const supported = knownForEffort
+      ? knownForEffort.efforts
+      : modelId ? null : catalog.AUTO_MODEL_EFFORTS;
+    if (supported && !supported.includes(effort)) {
+      const target = knownForEffort ? knownForEffort.label : `${agent} (Auto model)`;
+      warnings.push(`Effort "${effort}" is not supported by ${target} (supported: ${supported.join(', ')}); using Auto.`);
+      effort = '';
+    }
+  }
+
+  return { agent, modelId, modelLabel, effort, warnings };
+}
+
+/**
+ * Remove the first @netlify mention and its selector words from `text`,
+ * plus explicit model:/effort: tokens on that line.
+ * @param {string} text
+ * @returns {string}
+ */
+function stripSelection(text) {
+  const lines = text.split('\n');
+  for (let index = 0; index < lines.length; index += 1) {
+    const selection = parseMentionLine(lines[index]);
+    if (!selection) continue;
+    const line = lines[index];
+    const after = line.slice(selection.end).replace(/^[ \t]*[:,]?[ \t]*/, '');
+    lines[index] = (line.slice(0, selection.start) + after)
+      .replace(new RegExp(`[ \\t]*${EXPLICIT_MODEL_PATTERN.source}`, 'i'), '')
+      .replace(new RegExp(`[ \\t]*${EXPLICIT_EFFORT_PATTERN.source}`, 'i'), '');
+    break;
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Strip the @netlify mention, optional agent/model/effort selector words,
+ * explicit model:/effort: tokens, and ◌ markers from prompt text.
  * @param {string | null | undefined} text
  * @returns {string}
  */
 function cleanPrompt(text) {
   if (!text) return '';
-  return text
-    .replace(
-      new RegExp(
-        `${TRIGGER_PATTERN.source}\\s+(?:(?:with|using|use|via)\\s+)?(?:(?:${VALID_MODELS.join('|')})(?:[ \\t]+(?:${VALID_EFFORTS.join('|')})${EFFORT_BOUNDARY})?)?\\s*`,
-        'i'
-      ),
-      ''
-    )
-    .replace(new RegExp(`[ \\t]*${EXPLICIT_EFFORT_PATTERN.source}`, 'i'), '')
+  return stripSelection(text)
     .replace(/◌/g, 'via')
     .trim();
 }
@@ -296,7 +513,7 @@ function formatRunDate(dateStr) {
  * @param {InProgressCommentOptions} options
  * @returns {string}
  */
-function buildInProgressComment({ agentRunUrl, prompt, model, effort, runnerId, ghActionUrl }) {
+function buildInProgressComment({ agentRunUrl, prompt, model, modelLabel, effort, configWarnings, runnerId, ghActionUrl }) {
   const [flavor, emoji] = randomFlavor();
   const clean = cleanPrompt(prompt);
   const sourceUrlMatch = (prompt || '').match(/◌\s+(\S+)/);
@@ -307,9 +524,14 @@ function buildInProgressComment({ agentRunUrl, prompt, model, effort, runnerId, 
     : `### Netlify Agent Run Status\n\n`;
 
   body += `Netlify Agent Runners ${flavor} ${emoji}\n\n`;
-  body += effort
-    ? `**Agent:** \`${model}\` · **Effort:** \`${effort}\`\n\n`
-    : `**Agent:** \`${model}\`\n\n`;
+  const config = [`**Agent:** \`${model}\``];
+  if (modelLabel) config.push(`**Model:** ${modelLabel}`);
+  if (effort) config.push(`**Effort:** \`${effort}\``);
+  body += `${config.join(' · ')}\n\n`;
+  for (const warning of String(configWarnings || '').split('\n').filter(Boolean)) {
+    body += `> ⚠️ ${escapeMarkdownLinks(warning)}\n`;
+  }
+  if (configWarnings) body += '\n';
   if (clean) body += formatPromptBlock(clean, sourceUrl);
 
   /** @type {string[]} */
@@ -339,13 +561,16 @@ module.exports = {
   DEFAULT_MODEL,
   MODEL_PATTERN,
   VALID_EFFORTS,
-  EFFORT_AFTER_AGENT_PATTERN,
   EXPLICIT_EFFORT_PATTERN,
+  EXPLICIT_MODEL_PATTERN,
   FLAVOR_MESSAGES,
   matchesTrigger,
+  parseSelection,
+  resolveSelection,
   extractModel,
   normalizeEffort,
   extractEffort,
+  stripSelection,
   cleanPrompt,
   randomFlavor,
   ghContainsExpressions,

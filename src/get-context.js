@@ -1,11 +1,12 @@
 // Extract context information from the GitHub event.
 // Sets outputs: issue-number, pr-number, head-ref, base-ref, head-sha,
-//               is-pr, trigger-text, has-linked-pr, agent, model, effort,
-//               is-dry-run
+//               is-pr, trigger-text, has-linked-pr, agent, model, model-id,
+//               model-label, effort, config-warnings, is-dry-run
 
 /** @typedef {import('./types').ActionParams} ActionParams */
 
 const utils = require('./utils');
+const catalog = require('./agent-catalog');
 
 /**
  * @param {ActionParams} params
@@ -13,11 +14,8 @@ const utils = require('./utils');
  */
 module.exports = async function getContext({ github, context, core }) {
   const defaultAgent = process.env.DEFAULT_AGENT || process.env.DEFAULT_MODEL || 'codex';
-  let defaultEffort = utils.normalizeEffort(process.env.DEFAULT_EFFORT);
-  if (defaultEffort === null) {
-    console.log(`Ignoring unsupported default-effort "${process.env.DEFAULT_EFFORT}"; using Auto. Supported: ${utils.VALID_EFFORTS.join(', ')}, auto.`);
-    defaultEffort = '';
-  }
+  const defaultModelId = process.env.DEFAULT_MODEL_ID || '';
+  const defaultEffort = process.env.DEFAULT_EFFORT || '';
 
   /** @type {number | undefined} */
   let issueNumber;
@@ -33,8 +31,8 @@ module.exports = async function getContext({ github, context, core }) {
   let triggerText = '';
   let hasLinkedPR = false;
   let isPR = false;
-  // Text used to select agent and effort. Differs from triggerText only when
-  // an issue title's @netlify mention is stripped for display.
+  // Text used to select agent, model, and effort. Differs from triggerText
+  // only when an issue title's @netlify mention is stripped for display.
   let selectionText = '';
 
   const { payload } = context;
@@ -63,13 +61,9 @@ module.exports = async function getContext({ github, context, core }) {
     const issueBody = issue?.body || '';
     if (utils.matchesTrigger(issueTitle)) {
       selectionText = `${issueTitle}\n\n${issueBody}`;
-      // Strip @netlify mention from title only when the title itself contains the trigger
-      issueTitle = issueTitle
-        .replace(utils.TRIGGER_PATTERN, '')
-        .replace(new RegExp(`\\s+(?:with|using|use|via)\\s+(?:claude|codex|gemini)(?:[ \\t]+(?:${utils.VALID_EFFORTS.join('|')})(?=\\s|:|$))?\\s*`, 'i'), '')
-        .replace(new RegExp(`\\s+(?:claude|codex|gemini)(?:[ \\t]+(?:${utils.VALID_EFFORTS.join('|')})(?=\\s|:|$))?\\s*`, 'i'), '')
-        .replace(new RegExp(`\\s*${utils.EXPLICIT_EFFORT_PATTERN.source}`, 'i'), '')
-        .trim();
+      // Strip @netlify mention and selector words from the displayed title
+      // only when the title itself contains the trigger.
+      issueTitle = utils.stripSelection(issueTitle).replace(/\s{2,}/g, ' ').trim();
     }
     triggerText = `${issueTitle}\n\n${issueBody}`.trim();
 
@@ -114,22 +108,37 @@ module.exports = async function getContext({ github, context, core }) {
   const isDryRun = process.env.DRY_RUN === 'true' ||
     /\b(?:preview|dry[- ]?run)\b/i.test(triggerText.split('\n')[0] || '');
 
-  // Extract selected agent. `model` remains an output alias for compatibility.
-  let agent = defaultAgent;
-  const workflowDispatchAgent = payload.inputs?.agent || payload.inputs?.model;
-  if (context.eventName === 'workflow_dispatch' && workflowDispatchAgent) {
-    agent = workflowDispatchAgent.toLowerCase();
-  } else {
-    agent = utils.extractModel(selectionText, defaultAgent);
+  // Select agent, model, and effort. Mention words win over defaults; a
+  // workflow_dispatch input wins over both. `model` remains an output alias
+  // for the agent for compatibility; `model-id` is the actual model.
+  const inputs = context.eventName === 'workflow_dispatch' ? (payload.inputs || {}) : {};
+  const selection = utils.parseSelection(selectionText);
+  const dispatchAgent = String(inputs.agent || inputs.model || '').trim().toLowerCase();
+  const dispatchModelId = String(inputs.model_id || '').trim().toLowerCase();
+  const dispatchEffort = String(inputs.effort || '').trim().toLowerCase();
+  /** @type {import('./utils').MentionSelection} */
+  const merged = {
+    agent: selection?.agent || null,
+    model: selection?.model || null,
+    effort: selection?.effort || null,
+    start: 0,
+    end: 0,
+  };
+  if (dispatchModelId && dispatchModelId !== 'auto') {
+    merged.model = dispatchModelId;
+    // The dispatch agent choice defaults to codex, so let a catalog model
+    // pick its own agent instead of reporting a mismatch.
+    merged.agent = selection?.agent
+      || (catalog.resolveConfiguredModel(dispatchModelId) ? null : dispatchAgent || null);
+  } else if (dispatchAgent) {
+    merged.agent = dispatchAgent;
   }
+  if (dispatchEffort && dispatchEffort !== 'auto') merged.effort = dispatchEffort;
 
-  // Extract effort. Empty means omit it and let the backend choose (Auto).
-  let effort = defaultEffort;
-  const workflowDispatchEffort = utils.normalizeEffort(payload.inputs?.effort);
-  if (context.eventName === 'workflow_dispatch' && workflowDispatchEffort) {
-    effort = workflowDispatchEffort;
-  } else {
-    effort = utils.extractEffort(selectionText, defaultEffort);
+  const resolved = utils.resolveSelection(merged, { defaultAgent, defaultModelId, defaultEffort });
+  const { agent, modelId, modelLabel, effort, warnings } = resolved;
+  for (const warning of warnings) {
+    console.log(`::warning title=Agent configuration::${warning}`);
   }
 
   // Append source URL for back-linking
@@ -159,8 +168,11 @@ module.exports = async function getContext({ github, context, core }) {
   core.setOutput('linked-pr-number', linkedPrNumber);
   core.setOutput('agent', agent);
   core.setOutput('model', agent);
+  core.setOutput('model-id', modelId);
+  core.setOutput('model-label', modelLabel);
   core.setOutput('effort', effort);
+  core.setOutput('config-warnings', warnings.join('\n'));
   core.setOutput('is-dry-run', isDryRun.toString());
 
-  console.log(`Context: event=${context.eventName} issue=#${issueNumber} isPR=${isPR} agent=${agent} effort=${effort || 'auto'} dryRun=${isDryRun}`);
+  console.log(`Context: event=${context.eventName} issue=#${issueNumber} isPR=${isPR} agent=${agent} model=${modelId || 'auto'} effort=${effort || 'auto'} dryRun=${isDryRun}`);
 };

@@ -51,7 +51,7 @@
  * @typedef {object} EventPayload
  * @property {{login: string}} [sender]
  * @property {{full_name: string}} [repository]
- * @property {{trigger_text?: string, actor?: string, agent?: string, model?: string, effort?: string}} [inputs]
+ * @property {{trigger_text?: string, actor?: string, agent?: string, model?: string, model_id?: string, effort?: string}} [inputs]
  * @property {{number: number, body?: string, title?: string, html_url?: string, author_association?: string, pull_request?: {url?: string}}} [issue]
  * @property {{id: number, body?: string, html_url?: string, author_association?: string, user?: {login: string}}} [comment]
  * @property {{number: number, body?: string, html_url?: string, author_association?: string, head: {ref: string, sha: string, repo?: {full_name: string}}, base: {ref: string}}} [pull_request]
@@ -88,7 +88,9 @@
  * @property {string} [agentRunUrl]
  * @property {string} prompt
  * @property {string} model
+ * @property {string} [modelLabel]
  * @property {string} [effort]
+ * @property {string} [configWarnings] Newline-separated configuration warnings.
  * @property {string} [runnerId]
  * @property {string} [ghActionUrl]
  */

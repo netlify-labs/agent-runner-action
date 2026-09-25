@@ -313,11 +313,22 @@ describe('getContext', () => {
     it('uses the workflow_dispatch effort input', async () => {
       const context = {
         eventName: 'workflow_dispatch',
+        payload: { inputs: { trigger_text: 'Fix it', agent: 'claude', effort: 'high' } },
+        repo: { owner: 'o', repo: 'r' },
+      };
+      await getContext({ github: mockGithub(), context, core });
+      assert.equal(core.outputs.effort, 'high');
+    });
+
+    it('drops an effort the agent does not support, with a warning', async () => {
+      const context = {
+        eventName: 'workflow_dispatch',
         payload: { inputs: { trigger_text: 'Fix it', agent: 'claude', effort: 'xhigh' } },
         repo: { owner: 'o', repo: 'r' },
       };
       await getContext({ github: mockGithub(), context, core });
-      assert.equal(core.outputs.effort, 'xhigh');
+      assert.equal(core.outputs.effort, '');
+      assert.match(core.outputs['config-warnings'], /xhigh/);
     });
 
     it('treats workflow_dispatch effort auto as no override', async () => {
@@ -351,6 +362,78 @@ describe('getContext', () => {
         core.outputs['trigger-text'].startsWith('Build a page'),
         `Expected clean title but got: ${core.outputs['trigger-text'].split('\n')[0]}`
       );
+    });
+  });
+
+  describe('model', () => {
+    beforeEach(() => {
+      delete process.env.DEFAULT_EFFORT;
+      delete process.env.DEFAULT_MODEL_ID;
+    });
+
+    function commentContext(body) {
+      return {
+        eventName: 'issue_comment',
+        payload: {
+          issue: { number: 5 },
+          comment: { body, html_url: 'https://github.com/o/r/issues/5#c1' },
+        },
+        repo: { owner: 'o', repo: 'r' },
+      };
+    }
+
+    it('outputs agent, model ID, label, and effort from a model mention', async () => {
+      await getContext({ github: mockGithub(), context: commentContext('@netlify fable high Fix it'), core });
+      assert.equal(core.outputs.agent, 'claude');
+      assert.equal(core.outputs.model, 'claude');
+      assert.equal(core.outputs['model-id'], 'claude-fable-5');
+      assert.equal(core.outputs['model-label'], 'Fable 5');
+      assert.equal(core.outputs.effort, 'high');
+      assert.equal(core.outputs['config-warnings'], '');
+    });
+
+    it('outputs empty model ID (Auto) by default', async () => {
+      await getContext({ github: mockGithub(), context: commentContext('@netlify claude Fix it'), core });
+      assert.equal(core.outputs['model-id'], '');
+    });
+
+    it('applies default-model-id', async () => {
+      process.env.DEFAULT_MODEL_ID = 'fable';
+      await getContext({ github: mockGithub(), context: commentContext('@netlify Fix it'), core });
+      assert.equal(core.outputs.agent, 'claude');
+      assert.equal(core.outputs['model-id'], 'claude-fable-5');
+    });
+
+    it('uses the workflow_dispatch model_id and lets it pick the agent', async () => {
+      const context = {
+        eventName: 'workflow_dispatch',
+        payload: { inputs: { trigger_text: 'Fix it', agent: 'codex', model_id: 'claude-sonnet-5', effort: 'low' } },
+        repo: { owner: 'o', repo: 'r' },
+      };
+      await getContext({ github: mockGithub(), context, core });
+      assert.equal(core.outputs.agent, 'claude');
+      assert.equal(core.outputs['model-id'], 'claude-sonnet-5');
+      assert.equal(core.outputs.effort, 'low');
+      assert.equal(core.outputs['config-warnings'], '');
+    });
+
+    it('selects a model from an issue title and strips it', async () => {
+      const context = {
+        eventName: 'issues',
+        payload: {
+          issue: {
+            number: 10,
+            title: '@netlify-fable high Build a page',
+            body: 'Details',
+            html_url: 'https://github.com/o/r/issues/10',
+          },
+        },
+        repo: { owner: 'o', repo: 'r' },
+      };
+      await getContext({ github: mockGithub(), context, core });
+      assert.equal(core.outputs.agent, 'claude');
+      assert.equal(core.outputs['model-id'], 'claude-fable-5');
+      assert.ok(core.outputs['trigger-text'].startsWith('Build a page'), core.outputs['trigger-text']);
     });
   });
 });

@@ -27,6 +27,7 @@ const {
 const RUNNER_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const AGENT_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const EFFORT_PATTERN = /^[a-z]{1,32}$/;
+const MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._~\/-]{0,127}$/;
 const MAX_TIMEOUT_MINUTES = 24 * 60;
 const POLL_INTERVAL_MS = 15_000;
 const CHECKPOINT_FILE_PREFIX = 'agent-runner-sdk-handle-';
@@ -49,6 +50,7 @@ class ReportedActionError extends Error {
  * @property {string} siteId
  * @property {string} prompt
  * @property {string} agent
+ * @property {string} model Model ID; empty string requests backend Auto.
  * @property {string} effort Empty string requests backend Auto.
  * @property {string} branch
  * @property {string} existingRunnerId
@@ -112,6 +114,10 @@ function readActionInput(env) {
   if (!AGENT_PATTERN.test(agent)) {
     throw new Error('NETLIFY_AGENT contains unsupported characters.');
   }
+  const model = String(env.NETLIFY_MODEL || '').trim().toLowerCase();
+  if (model && !MODEL_ID_PATTERN.test(model)) {
+    throw new Error('NETLIFY_MODEL contains unsupported characters.');
+  }
   const effort = String(env.NETLIFY_EFFORT || '').trim().toLowerCase();
   if (effort && !EFFORT_PATTERN.test(effort)) {
     throw new Error('NETLIFY_EFFORT contains unsupported characters.');
@@ -145,6 +151,7 @@ function readActionInput(env) {
     siteId,
     prompt,
     agent,
+    model,
     effort,
     branch,
     existingRunnerId,
@@ -591,6 +598,7 @@ async function runAgentAction(options = {}) {
         {
           prompt: input.prompt,
           agent: input.agent,
+          ...(input.model ? { model: input.model } : {}),
           ...(input.effort ? { effort: input.effort } : {}),
         },
         requestOptions,
@@ -602,6 +610,7 @@ async function runAgentAction(options = {}) {
         siteId: input.siteId,
         prompt: input.prompt,
         agent: input.agent,
+        ...(input.model ? { model: input.model } : {}),
         ...(input.effort ? { effort: input.effort } : {}),
         ...(input.branch ? { branch: input.branch } : {}),
         land: landing,

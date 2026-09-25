@@ -27,17 +27,38 @@ session to an existing agent PR, but it never merges the PR automatically.
 
 The default agent is `codex`. Specify `claude`, `codex`, or `gemini` after `@netlify` to choose an agent.
 
-### Effort level
+### Choosing a model and effort
 
-Add an effort level directly after the agent: `low`, `medium`, `high`, `xhigh`, or `max`. Without one, the backend chooses (Auto), unless you set `default-effort`.
+After `@netlify`, you can name an agent, a model, and an effort level, in that order. Each one is optional:
 
 ```
-@netlify claude high Refactor the checkout flow
-@netlify codex low: Fix the typo in the footer
-@netlify Add pagination to the blog effort:medium
+@netlify fable high Refactor the checkout flow          # claude + Fable 5, high effort
+@netlify claude fable high Refactor the checkout flow   # same thing
+@netlify-fable high Refactor the checkout flow          # same thing
+@netlify codex sol medium Add retry logic               # codex + GPT 5.6 Sol
+@netlify claude high Fix the header                     # claude, model Auto, high effort
+@netlify gemini flash Summarize the changelog           # gemini + Gemini 3.6 Flash
 ```
 
-The effort word only counts when it comes right after the agent and is followed by a space, `:`, or the end of the line. That means `@netlify codex low-hanging fixes` leaves effort on Auto. A prompt that starts with an effort word, like `@netlify claude high priority: ...`, is read as `high`. To avoid that, write `effort:<level>` (or `effort=<level>`) anywhere on the `@netlify` line; it takes precedence. `effort:auto` forces Auto. A follow-up comment on a PR only changes effort when it names one.
+A model picks its own agent, so `fable` means Claude. If you name a model from a different agent (`@netlify codex fable`), the model wins and the status comment says so. Anything you leave out is chosen by the backend (Auto), unless you set `default-model-id` or `default-effort`.
+
+| Agent | Model | Say |
+|---|---|---|
+| claude | `claude-fable-5` (Fable 5) | `fable` |
+| claude | `claude-opus-5` (Opus 5) | `opus` |
+| claude | `claude-opus-4-8` (Opus 4.8) | `opus-4.8` |
+| claude | `claude-sonnet-5` (Sonnet 5) | `sonnet` |
+| claude | `claude-haiku-4-5` (Haiku 4.5) | `haiku` |
+| codex | `gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` | `codex sol` / `codex terra` / `codex luna` |
+| codex | `gpt-5.4-mini` | `codex mini` |
+| gemini | `gemini-3.1-pro-preview` | `gemini pro` |
+| gemini | `gemini-3.6-flash` / `gemini-3.5-flash-lite` | `gemini flash` / `gemini flash-lite` |
+
+The Claude names (`fable`, `opus`, `sonnet`, `haiku`) work on their own and as `@netlify-fable`-style mentions. The shorter Codex and Gemini names need the agent in front, so a prompt starting with "pro tip" isn't read as a model. Exact model IDs always work, and `model:<id>` anywhere on the `@netlify` line requests any model, including ones missing from this list. Those are passed through for Agent Runner to validate.
+
+Effort levels are `low`, `medium`, and `high`, and they go after an agent or model. A level only counts when a space, `:`, `,`, or the end of the line follows it, so `@netlify codex low-hanging fixes` leaves effort on Auto. `effort:<level>` anywhere on the line overrides the positional word (use it for prompts like `@netlify claude high priority: ...`), and `effort:auto` forces Auto. If a level isn't supported for the chosen model, the action falls back to Auto and posts a warning in the status comment. A follow-up comment on a PR only changes the model or effort when it names one.
+
+The model list mirrors the Netlify UI's model picker as of 2026-08-06 (`src/agent-catalog.js`).
 
 Aliases like `@netlify-agent` and `@netlify-ai` work too, and common typos are recognised (`@nelify`, `@netlfy`, `@netify`, `@netlif`, `@netfly`). Mentions inside fenced code blocks or inline code spans are ignored, so you can quote `@netlify` in a comment without triggering a run.
 
@@ -146,7 +167,8 @@ Or comment `@netlify make it blue` on an existing PR.
 | `allowed-users` | No | `''` | Comma-separated usernames allowed to trigger (empty = repo collaborators) |
 | `default-agent` | No | `codex` | Default agent (`claude`, `codex`, or `gemini`) |
 | `default-model` | No | `codex` | Backward-compatible alias for `default-agent` |
-| `default-effort` | No | `''` | Default effort level (`low`, `medium`, `high`, `xhigh`, `max`). Empty or `auto` lets the backend choose |
+| `default-model-id` | No | `''` | Default model ID or alias (e.g. `claude-fable-5`, `fable`). Empty or `auto` lets the backend choose. Ignored when a mention names a different agent |
+| `default-effort` | No | `''` | Default effort level (`low`, `medium`, `high`). Empty or `auto` lets the backend choose |
 | `manage-labels` | No | `false` | Auto-create and apply labels on agent runs |
 | `dry-run` | No | `false` | Start an agent run but skip commit/PR creation |
 | `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent run |
@@ -202,6 +224,7 @@ Use these outputs in subsequent workflow steps for custom automation:
 | `agent-deploy-url` | Deploy preview URL |
 | `agent` | Agent that was used |
 | `model` | Backward-compatible alias for `agent` |
+| `model-id` | Model ID that was requested (empty when the backend chose Auto) |
 | `effort` | Effort level that was requested (empty when the backend chose Auto) |
 | `trigger-text` | Cleaned trigger text / prompt |
 | `is-pr` | Whether triggered from a PR (`true`/`false`) |

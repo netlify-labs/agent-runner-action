@@ -314,6 +314,7 @@ describe('effort forwarding', () => {
         calls.createRunner.push(input);
         current.prompt = input.prompt;
         if (input.effort !== undefined) current.effort = input.effort;
+        if (input.model !== undefined) current.model = input.model;
         sessions.push(current);
         return runner;
       },
@@ -325,6 +326,7 @@ describe('effort forwarding', () => {
           runnerId,
           prompt: input.prompt,
           ...(input.effort === undefined ? {} : { effort: input.effort }),
+          ...(input.model === undefined ? {} : { model: input.model }),
         };
         sessions.push(current);
         return current;
@@ -402,6 +404,39 @@ describe('effort forwarding', () => {
     const withoutEffort = await runWith(followUp);
     assert.equal(withoutEffort.createSession.length, 1);
     assert.equal('effort' in withoutEffort.createSession[0], false);
+  });
+
+  it('forwards an explicit model with effort when creating a runner', async () => {
+    const calls = await runWith({ NETLIFY_AGENT: 'claude', NETLIFY_MODEL: 'claude-fable-5', NETLIFY_EFFORT: 'high' });
+    assert.equal(calls.createRunner.length, 1);
+    assert.equal(calls.createRunner[0].agent, 'claude');
+    assert.equal(calls.createRunner[0].model, 'claude-fable-5');
+    assert.equal(calls.createRunner[0].effort, 'high');
+  });
+
+  it('omits model for backend Auto when none is selected', async () => {
+    const calls = await runWith({ NETLIFY_MODEL: '' });
+    assert.equal('model' in calls.createRunner[0], false);
+  });
+
+  it('forwards model on follow-ups only when one is given', async () => {
+    const followUp = {
+      EXISTING_RUNNER_ID: fixture.runner.runnerId,
+      SESSION_DATA_MAP: JSON.stringify({ 'known-session': {} }),
+    };
+    const withModel = await runWith({ ...followUp, NETLIFY_AGENT: 'claude', NETLIFY_MODEL: 'claude-sonnet-5' });
+    assert.equal(withModel.createSession[0].model, 'claude-sonnet-5');
+    const withoutModel = await runWith(followUp);
+    assert.equal('model' in withoutModel.createSession[0], false);
+  });
+
+  it('rejects malformed model values before any SDK call', async () => {
+    const calls = { createRunner: [], createSession: [] };
+    await assert.rejects(
+      runWith({ NETLIFY_MODEL: 'fable; echo' }, calls),
+      ReportedActionError,
+    );
+    assert.equal(calls.createRunner.length, 0);
   });
 
   it('rejects malformed effort values before any SDK call', async () => {
