@@ -374,6 +374,12 @@ jobs:
     run: echo "PR created at ${{ steps.agent.outputs.agent-pr-url }}"</code></pre>
 </section>
 
+<section id="versioning">
+  <h2>Versioning</h2>
+  <p>Releases are tagged <code>vX.Y.Z</code>, and <code>v1</code> always points at the latest <code>v1.Y.Z</code> release. Use <code>@v1</code> to follow minor and patch releases automatically, or pin a release commit with a version comment (<code>@&lt;sha&gt; # v1.2.0</code>) and let Dependabot's <code>github-actions</code> updates propose upgrades.</p>
+  <p>Breaking changes (removed or renamed inputs and outputs, incompatible comment markers, or mention syntax that selects something different) only ship in a new major version. Release notes call out behavior changes and any workflow-file updates needed to use new features.</p>
+</section>
+
 <section id="how-it-works">
   <h2>How it Works</h2>
   <ol>

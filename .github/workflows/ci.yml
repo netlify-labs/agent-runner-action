@@ -17,3 +17,13 @@ jobs:
       - run: bun test src/*.test.js
       - run: bun run docs:check
       - run: bunx tsc --noEmit
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install actionlint 1.7.7
+        run: bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+      - name: Lint workflows and templates
+        # shellcheck is preinstalled on ubuntu runners, so run: blocks are checked too.
+        run: ./actionlint -color .github/workflows/*.yml workflow-templates/*.yml example-workflow.yml

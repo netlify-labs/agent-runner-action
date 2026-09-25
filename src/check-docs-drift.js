@@ -360,6 +360,11 @@ function checkDocsDrift(options = {}) {
         errors.push(`${file}:${lineForNeedle(body, badSlug)} Disallowed slug found: ${badSlug}`);
       }
     }
+    // Consumer-facing snippets use @v1; hard-coded commit pins go stale.
+    const shaPin = body.match(/netlify-labs\/agent-runner-action@[0-9a-f]{7,40}\b/);
+    if (shaPin) {
+      errors.push(`${file}:${lineNumberFromIndex(body, shaPin.index || 0)} Commit SHA pin found (${shaPin[0]}); public examples must use ${CANONICAL_SLUG}`);
+    }
   }
 
   const declaredInputNames = new Set(actionInputs.keys());
