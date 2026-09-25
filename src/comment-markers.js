@@ -5,6 +5,7 @@ const HISTORY_COMMENT_MARKER = '<!-- netlify-agent-run-history -->';
 const RUNNER_ID_MARKER_PREFIX = '<!-- netlify-agent-runner-id:';
 const SESSION_DATA_MARKER_PREFIX = '<!-- netlify-agent-session-data:';
 const RESULT_COMMENT_MARKER_PREFIX = '<!-- netlify-agent-run-result:';
+const CHECKPOINT_MARKER_PREFIX = '<!-- netlify-agent-run-checkpoint:';
 const RESULT_COMMENT_MARKER_NAME = 'netlify-agent-run-result';
 const MARKER_SUFFIX = '-->';
 
@@ -17,7 +18,7 @@ const RUNNER_ID_FORMAT = /^[A-Za-z0-9_-]{1,128}$/;
 // found in user-influenced content is stripped before parsing/rendering, so
 // outsiders cannot smuggle fake markers and bot comments cannot accidentally
 // reflect attacker-supplied markers from echoed user content.
-const ALLOWED_MARKER_INNER = /^\s*netlify-agent-(?:run-status|run-history|run-result(?::|\s|$)|runner-id:|session-data:|scope:)/;
+const ALLOWED_MARKER_INNER = /^\s*netlify-agent-(?:run-status|run-history|run-result(?::|\s|$)|runner-id:|session-data:|scope:|run-checkpoint:)/;
 
 // Allowlist for URL-bearing fields in session-data entries. These URLs flow
 // into bot-rendered Markdown links; anything outside these patterns gets
@@ -31,6 +32,21 @@ const AGENT_RUN_URL_PATTERN = /https:\/\/app\.netlify\.com\/projects\/([A-Za-z0-
 // 4 covers git's minimum unique-prefix display; 64 covers full SHA-256.
 const COMMIT_SHA_FORMAT = /^[0-9a-f]{4,64}$/i;
 const SESSION_FIELD_MAX_LENGTH = 2048;
+
+/**
+ * Requested run configuration stored per session (the backend doesn't echo
+ * effort on follow-up sessions, so we record what was requested).
+ * @param {'agent' | 'model' | 'effort' | 'mode'} key
+ * @param {string} value
+ * @returns {boolean}
+ */
+function sessionConfigFieldValid(key, value) {
+  const { MODEL_ID_PATTERN, EFFORT_WORDS, PROVIDERS } = require('./agent-catalog');
+  if (key === 'agent') return PROVIDERS.includes(value);
+  if (key === 'model') return MODEL_ID_PATTERN.test(value);
+  if (key === 'effort') return EFFORT_WORDS.includes(value);
+  return value === 'normal' || value === 'ask';
+}
 
 /**
  * Drop URL/sha fields that don't match their format. Mutates a copy.
@@ -54,6 +70,8 @@ function sanitizeSessionEntry(entry) {
       if (!allowlist[key].test(value)) continue;
     } else if (key === 'commit_sha') {
       if (!COMMIT_SHA_FORMAT.test(value)) continue;
+    } else if (key === 'agent' || key === 'model' || key === 'effort' || key === 'mode') {
+      if (!sessionConfigFieldValid(key, value)) continue;
     }
     out[key] = value;
   }
@@ -296,7 +314,8 @@ function containsStateMarker(body) {
   return text.includes(STATUS_COMMENT_MARKER) ||
     text.includes(HISTORY_COMMENT_MARKER) ||
     text.includes(RUNNER_ID_MARKER_PREFIX) ||
-    text.includes(SESSION_DATA_MARKER_PREFIX);
+    text.includes(SESSION_DATA_MARKER_PREFIX) ||
+    text.includes(CHECKPOINT_MARKER_PREFIX);
 }
 
 /**
@@ -417,6 +436,122 @@ function stripAllHtmlComments(body) {
   return text.replace(/<!--[\s\S]*?-->/g, '');
 }
 
+// ---------------------------------------------------------------------------
+// Run checkpoint marker (status comment). Public fields are identifiers and
+// small enums only; the full SDK handle is sealed (see checkpoint-crypto.js).
+// ---------------------------------------------------------------------------
+
+const CHECKPOINT_STATES = ['running', 'stop-pending', 'recovering', 'finalized', 'stopped'];
+const GITHUB_LOGIN_FORMAT = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const SEALED_FORMAT = /^[A-Za-z0-9_-]{1,40000}$/;
+const MAX_COMMITTED_SESSIONS = 50;
+
+/**
+ * @typedef {object} RunCheckpoint
+ * @property {1} v
+ * @property {'running'|'stop-pending'|'recovering'|'finalized'|'stopped'} state
+ * @property {string} runnerId
+ * @property {string} sessionId
+ * @property {'run'|'session'} kind
+ * @property {string} agent
+ * @property {string} [model]
+ * @property {string} [effort]
+ * @property {'normal'|'ask'} mode
+ * @property {'pr'|'none'} landing
+ * @property {number} deadlineAt
+ * @property {number} startedAt
+ * @property {number} ghRunId
+ * @property {number} ghRunAttempt
+ * @property {string} requester
+ * @property {string} [prHeadSha]
+ * @property {string} [prUrl]
+ * @property {string[]} [committedSessionIds]
+ * @property {1} kv
+ * @property {string} [handle]
+ */
+
+/**
+ * Validate a checkpoint object. Returns null when any required field is
+ * missing or invalid, so a partly tampered checkpoint is never used.
+ * @param {unknown} value
+ * @returns {RunCheckpoint | null}
+ */
+function validateCheckpoint(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = /** @type {Record<string, unknown>} */ (value);
+  const { MODEL_ID_PATTERN, EFFORT_WORDS, PROVIDERS } = require('./agent-catalog');
+  const isInt = (/** @type {unknown} */ n) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
+  if (raw.v !== 1 || raw.kv !== 1) return null;
+  if (!CHECKPOINT_STATES.includes(String(raw.state))) return null;
+  if (!RUNNER_ID_FORMAT.test(String(raw.runnerId)) || !RUNNER_ID_FORMAT.test(String(raw.sessionId))) return null;
+  if (raw.kind !== 'run' && raw.kind !== 'session') return null;
+  if (!PROVIDERS.includes(String(raw.agent))) return null;
+  if (raw.model !== undefined && !MODEL_ID_PATTERN.test(String(raw.model))) return null;
+  if (raw.effort !== undefined && !EFFORT_WORDS.includes(String(raw.effort))) return null;
+  if (raw.mode !== 'normal' && raw.mode !== 'ask') return null;
+  if (raw.landing !== 'pr' && raw.landing !== 'none') return null;
+  for (const field of ['deadlineAt', 'startedAt', 'ghRunId', 'ghRunAttempt']) {
+    if (!isInt(raw[field])) return null;
+  }
+  if (!GITHUB_LOGIN_FORMAT.test(String(raw.requester))) return null;
+  if (raw.prHeadSha !== undefined && !COMMIT_SHA_FORMAT.test(String(raw.prHeadSha))) return null;
+  if (raw.prUrl !== undefined && !SESSION_URL_ALLOWLIST.pr_url.test(String(raw.prUrl))) return null;
+  if (raw.committedSessionIds !== undefined) {
+    if (!Array.isArray(raw.committedSessionIds) || raw.committedSessionIds.length > MAX_COMMITTED_SESSIONS) return null;
+    if (!raw.committedSessionIds.every((id) => RUNNER_ID_FORMAT.test(String(id)))) return null;
+  }
+  if (raw.handle !== undefined && !SEALED_FORMAT.test(String(raw.handle))) return null;
+
+  /** @type {RunCheckpoint} */
+  const checkpoint = {
+    v: 1,
+    state: /** @type {RunCheckpoint['state']} */ (raw.state),
+    runnerId: String(raw.runnerId),
+    sessionId: String(raw.sessionId),
+    kind: /** @type {RunCheckpoint['kind']} */ (raw.kind),
+    agent: String(raw.agent),
+    mode: /** @type {RunCheckpoint['mode']} */ (raw.mode),
+    landing: /** @type {RunCheckpoint['landing']} */ (raw.landing),
+    deadlineAt: /** @type {number} */ (raw.deadlineAt),
+    startedAt: /** @type {number} */ (raw.startedAt),
+    ghRunId: /** @type {number} */ (raw.ghRunId),
+    ghRunAttempt: /** @type {number} */ (raw.ghRunAttempt),
+    requester: String(raw.requester),
+    kv: 1,
+  };
+  if (raw.model !== undefined) checkpoint.model = String(raw.model);
+  if (raw.effort !== undefined) checkpoint.effort = String(raw.effort);
+  if (raw.prHeadSha !== undefined) checkpoint.prHeadSha = String(raw.prHeadSha);
+  if (raw.prUrl !== undefined) checkpoint.prUrl = String(raw.prUrl);
+  if (raw.committedSessionIds !== undefined) checkpoint.committedSessionIds = /** @type {string[]} */ (raw.committedSessionIds).map(String);
+  if (raw.handle !== undefined) checkpoint.handle = String(raw.handle);
+  return checkpoint;
+}
+
+/**
+ * @param {RunCheckpoint} checkpoint
+ * @returns {string} the marker, or '' if the checkpoint is invalid
+ */
+function renderCheckpointMarker(checkpoint) {
+  const valid = validateCheckpoint(checkpoint);
+  if (!valid) return '';
+  return renderMarker(`${CHECKPOINT_MARKER_PREFIX}${JSON.stringify(valid)}`);
+}
+
+/**
+ * @param {unknown} body
+ * @returns {RunCheckpoint | null}
+ */
+function parseCheckpoint(body) {
+  const rawValue = readMarkerValue(body, CHECKPOINT_MARKER_PREFIX);
+  if (!rawValue) return null;
+  try {
+    return validateCheckpoint(JSON.parse(rawValue));
+  } catch (_) {
+    return null;
+  }
+}
+
 module.exports = {
   STATUS_COMMENT_MARKER,
   HISTORY_COMMENT_MARKER,
@@ -424,7 +559,12 @@ module.exports = {
   SESSION_DATA_MARKER_PREFIX,
   RESULT_COMMENT_MARKER_PREFIX,
   RESULT_COMMENT_MARKER_NAME,
+  CHECKPOINT_MARKER_PREFIX,
+  CHECKPOINT_STATES,
   RUNNER_ID_FORMAT,
+  validateCheckpoint,
+  renderCheckpointMarker,
+  parseCheckpoint,
   normalizeResultUsage,
   formatAgentRunUrl,
   renderRunnerIdMarker,

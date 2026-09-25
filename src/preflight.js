@@ -16,6 +16,7 @@ const DEFAULT_MODEL = 'codex';
  *   defaultAgent: string,
  *   defaultModel: string,
  *   timeoutMinutes: number,
+ *   jobTimeoutMinutes: string,
  *   triggerText: string,
  *   issueNumber: string,
  *   eventName: string,
@@ -109,6 +110,7 @@ function normalizePreflightInput(source = {}) {
       || DEFAULT_MODEL
     ),
     timeoutMinutes: toInt(source.timeoutMinutes ?? source.TIMEOUT_MINUTES ?? source['timeout-minutes']),
+    jobTimeoutMinutes: toText(source.jobTimeoutMinutes ?? source.JOB_TIMEOUT_MINUTES ?? source['job-timeout-minutes']).trim(),
     triggerText: pickText(source, ['triggerText', 'TRIGGER_TEXT', 'prompt', 'PROMPT']),
     issueNumber: pickText(source, ['issueNumber', 'ISSUE_NUMBER', 'issue', 'ISSUE_NUM']),
     eventName,
@@ -195,7 +197,7 @@ async function runRuntimeCheck(checks, warnings, failureDetails, id, runtimeChec
  * Validate static + runtime preflight checks.
  * @param {Record<string, unknown>} source
  * @param {RuntimeChecks} [runtimeChecks]
- * @returns {Promise<import('./contracts').PreflightResult & {failureDetails: FailureClassification[]}>}
+ * @returns {Promise<import('./contracts').PreflightResult & {failureDetails: FailureClassification[], effectiveTimeoutMinutes: number}>}
  */
 async function runPreflight(source = {}, runtimeChecks = {}) {
   const input = normalizePreflightInput(source);
@@ -244,6 +246,10 @@ async function runPreflight(source = {}, runtimeChecks = {}) {
   );
 
   const validTimeout = Number.isInteger(input.timeoutMinutes) && input.timeoutMinutes > 0;
+  const jobTimeout = resolveEffectiveTimeout({ timeoutMinutes: input.timeoutMinutes, jobTimeoutMinutes: input.jobTimeoutMinutes });
+  if (jobTimeout.check) {
+    pushCheck(checks, warnings, failureDetails, 'job-timeout', jobTimeout.check.status, jobTimeout.check.message, null);
+  }
   pushCheck(
     checks,
     warnings,
@@ -351,11 +357,48 @@ async function runPreflight(source = {}, runtimeChecks = {}) {
   return {
     ...result,
     failureDetails,
+    effectiveTimeoutMinutes: jobTimeout.effectiveTimeoutMinutes,
+  };
+}
+
+const JOB_SETUP_MARGIN_MINUTES = 5;
+
+/**
+ * Keep the agent's limit inside the job's timeout. When GitHub cancels a job
+ * at its timeout-minutes, cleanup can't tell that from a human cancel (which
+ * stops the agent), so the agent's own deadline must fire first.
+ * @param {{ timeoutMinutes: number, jobTimeoutMinutes: string }} input
+ * @returns {{ effectiveTimeoutMinutes: number, check: { status: 'pass' | 'warn', message: string } | null }}
+ */
+function resolveEffectiveTimeout({ timeoutMinutes, jobTimeoutMinutes }) {
+  if (!jobTimeoutMinutes) return { effectiveTimeoutMinutes: timeoutMinutes, check: null };
+  const job = /^\d+$/.test(jobTimeoutMinutes) ? Number(jobTimeoutMinutes) : NaN;
+  if (!Number.isInteger(job) || job <= 0) {
+    return {
+      effectiveTimeoutMinutes: timeoutMinutes,
+      check: { status: 'warn', message: `Ignoring job-timeout-minutes "${jobTimeoutMinutes}": expected a positive whole number of minutes.` },
+    };
+  }
+  if (timeoutMinutes + JOB_SETUP_MARGIN_MINUTES <= job) {
+    return {
+      effectiveTimeoutMinutes: timeoutMinutes,
+      check: { status: 'pass', message: `Agent limit (${timeoutMinutes} min) fits the job timeout (${job} min) with ${JOB_SETUP_MARGIN_MINUTES} min for setup.` },
+    };
+  }
+  const effective = Math.max(1, job - JOB_SETUP_MARGIN_MINUTES);
+  return {
+    effectiveTimeoutMinutes: effective,
+    check: {
+      status: 'warn',
+      message: `timeout-minutes (${timeoutMinutes}) plus ${JOB_SETUP_MARGIN_MINUTES} min of setup exceeds job-timeout-minutes (${job}); using ${effective} min for this run so the agent's own timeout fires before GitHub cancels the job.`,
+    },
   };
 }
 
 module.exports = {
   VALID_MODELS,
+  JOB_SETUP_MARGIN_MINUTES,
+  resolveEffectiveTimeout,
   normalizePreflightInput,
   runPreflight,
 };

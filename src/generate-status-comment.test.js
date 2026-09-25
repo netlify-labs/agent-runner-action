@@ -169,3 +169,76 @@ describe('renderStatusComment scope line', () => {
     assert.doesNotMatch(body, /outside the usual scope/);
   });
 });
+
+describe('final status checkpoint merge', () => {
+  const { mergeFinalCheckpoint, readLiveCheckpoint } = require('./generate-status-comment');
+  const { renderCheckpointMarker, parseCheckpoint } = require('./comment-markers');
+  const base = /** @type {any} */ ({
+    v: 1, state: 'running', runnerId: 'runner_1', sessionId: 'session_1', kind: 'run', agent: 'codex', mode: 'normal',
+    landing: 'pr', deadlineAt: 1, startedAt: 1, ghRunId: 1, ghRunAttempt: 1, requester: 'DavidWells', kv: 1, handle: 'abc',
+  });
+
+  it('finalizes a running checkpoint and never regresses stopped or finalized', () => {
+    assert.equal(mergeFinalCheckpoint(base, 'runner_1')?.state, 'finalized');
+    assert.equal(mergeFinalCheckpoint({ ...base, state: 'stop-pending' }, 'runner_1')?.state, 'finalized');
+    assert.equal(mergeFinalCheckpoint({ ...base, state: 'stopped' }, 'runner_1')?.state, 'stopped');
+    assert.equal(mergeFinalCheckpoint({ ...base, state: 'finalized' }, 'runner_1')?.state, 'finalized');
+  });
+
+  it('leaves a checkpoint for a different runner untouched and handles none', () => {
+    assert.equal(mergeFinalCheckpoint(base, 'runner_other')?.state, 'running');
+    assert.equal(mergeFinalCheckpoint(null, 'runner_1'), null);
+  });
+
+  it('keeps the sealed handle when merging', () => {
+    assert.equal(mergeFinalCheckpoint(base, 'runner_1')?.handle, 'abc');
+  });
+
+  it('reads the live checkpoint from the status comment, tolerating API errors', async () => {
+    const body = `x\n${renderCheckpointMarker(base)}`;
+    const ok = { rest: { issues: { getComment: async () => ({ data: { body } }) } } };
+    assert.equal((await readLiveCheckpoint(ok, context(), '42'))?.runnerId, 'runner_1');
+    const failing = { rest: { issues: { getComment: async () => { throw new Error('boom'); } } } };
+    assert.equal(await readLiveCheckpoint(failing, context(), '42'), null);
+    assert.equal(await readLiveCheckpoint(ok, context(), ''), null);
+  });
+
+  it('renders the merged checkpoint marker in the final status body', () => {
+    const body = renderStatusComment({
+      env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site', AGENT_OUTCOME: 'success', AGENT_ID: 'runner_1' },
+      context: context(),
+      checkpoint: mergeFinalCheckpoint(base, 'runner_1'),
+    }).statusBody;
+    assert.equal(parseCheckpoint(body)?.state, 'finalized');
+  });
+
+  it('renders no checkpoint marker for old comments without one', () => {
+    const body = renderStatusComment({ env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site' }, context: context() }).statusBody;
+    assert.equal(parseCheckpoint(body), null);
+  });
+});
+
+describe('stopped runs', () => {
+  const stoppedCheckpoint = /** @type {any} */ ({
+    v: 1, state: 'stopped', runnerId: 'runner_1', sessionId: 'session_1', kind: 'run', agent: 'codex', mode: 'normal',
+    landing: 'pr', deadlineAt: 1, startedAt: 1, ghRunId: 1, ghRunAttempt: 1, requester: 'DavidWells', kv: 1,
+  });
+
+  it('shows the cancel message instead of a failure when the checkpoint is stopped', () => {
+    const body = renderStatusComment({ env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site', AGENT_STEP_OUTCOME: 'failure' }, context: context(), checkpoint: stoppedCheckpoint }).statusBody;
+    assert.match(body, /⏹/);
+    assert.match(body, /The workflow was cancelled, so the agent run was stopped\./);
+    assert.doesNotMatch(body, /Netlify Agent Run failed|Failure summary/);
+    assert.match(body, /\| stopped at /);
+  });
+
+  it('names who stopped it when a stop request exists', () => {
+    const body = renderStatusComment({ env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site', STOP_REQUESTED_BY: 'DavidWells' }, context: context(), checkpoint: stoppedCheckpoint }).statusBody;
+    assert.match(body, /Stopped by @DavidWells\./);
+  });
+
+  it('still reports success if the run finished before the stop took effect', () => {
+    const body = renderStatusComment({ env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site', AGENT_OUTCOME: 'success' }, context: context(), checkpoint: stoppedCheckpoint }).statusBody;
+    assert.match(body, /Netlify Agent Run completed\./);
+  });
+});

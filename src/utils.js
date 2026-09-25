@@ -399,6 +399,24 @@ function stripSelection(text) {
   return lines.join('\n');
 }
 
+/**
+ * Header segment describing a run's configuration, e.g. "claude · Fable 5 · high".
+ * Uses the catalog label for known models and shows the user-facing effort
+ * level (GLM 5.2's wire "xhigh" is shown as "max").
+ * @param {{ agent?: string | null, model?: string | null, effort?: string | null }} config
+ * @returns {string}
+ */
+function describeRunConfig({ agent, model, effort }) {
+  const parts = [String(agent || 'codex')];
+  const known = model ? catalog.modelById(model) : undefined;
+  if (model) parts.push(known ? known.label : String(model));
+  if (effort) {
+    const level = known ? catalog.findEffort(known.efforts, String(effort)) : undefined;
+    parts.push(level ? level.id : String(effort));
+  }
+  return parts.join(' · ').replace(/\|/g, '/');
+}
+
 // ---------------------------------------------------------------------------
 // Scope guidance appended to agent prompts (scope-instructions input)
 // ---------------------------------------------------------------------------
@@ -622,6 +640,7 @@ module.exports = {
   normalizeEffort,
   extractEffort,
   stripSelection,
+  describeRunConfig,
   SCOPE_BLOCK_HEADER,
   DEFAULT_SCOPE_GUIDANCE,
   buildScopeBlock,

@@ -183,3 +183,41 @@ describe('runPreflight', () => {
     assert.ok(result.failures.includes('site-lookup-failed') === false);
   });
 });
+
+describe('job-timeout-minutes', () => {
+  const { resolveEffectiveTimeout } = require('./preflight');
+  const base = {
+    netlifyAuthToken: 'token', netlifySiteId: 'site-id', githubToken: 'gh-token', defaultAgent: 'codex',
+    triggerText: '@netlify fix it', issueNumber: '88', commentsRequired: true,
+  };
+
+  it('keeps the limit when unset and adds no check', async () => {
+    const result = await runPreflight({ ...base, timeoutMinutes: 10 });
+    assert.equal(result.effectiveTimeoutMinutes, 10);
+    assert.equal(result.checks.find((check) => check.id === 'job-timeout'), undefined);
+  });
+
+  it('passes when the agent limit plus setup fits', async () => {
+    const result = await runPreflight({ ...base, timeoutMinutes: 30, jobTimeoutMinutes: '35' });
+    assert.equal(result.effectiveTimeoutMinutes, 30);
+    assert.equal(result.checks.find((check) => check.id === 'job-timeout').status, 'pass');
+  });
+
+  it('warns and shortens when the agent limit is too close to the job timeout', async () => {
+    const result = await runPreflight({ ...base, timeoutMinutes: 25, jobTimeoutMinutes: '25' });
+    assert.equal(result.effectiveTimeoutMinutes, 20);
+    const check = result.checks.find((entry) => entry.id === 'job-timeout');
+    assert.equal(check.status, 'warn');
+    assert.match(check.message, /using 20 min for this run/);
+    assert.equal(result.ok, true, 'a warning never fails preflight');
+  });
+
+  it('never shortens below one minute and ignores invalid values', () => {
+    assert.equal(resolveEffectiveTimeout({ timeoutMinutes: 10, jobTimeoutMinutes: '3' }).effectiveTimeoutMinutes, 1);
+    for (const bad of ['abc', '0', '-5', '2.5']) {
+      const result = resolveEffectiveTimeout({ timeoutMinutes: 10, jobTimeoutMinutes: bad });
+      assert.equal(result.effectiveTimeoutMinutes, 10, bad);
+      assert.match(result.check?.message || '', /Ignoring job-timeout-minutes/, bad);
+    }
+  });
+});

@@ -156,11 +156,13 @@ describe('action.yml run-agent crash fallback', () => {
 });
 
 describe('action.yml scope guard wiring', () => {
-  it('runs Check run scope right after the agent step, only on success, never failing the job', () => {
+  it('runs Check run scope after the agent step, only on success, never failing the job', () => {
     const all = steps();
     const agentIndex = all.findIndex((step) => step.name === 'Run Netlify Agent Runners');
-    const scope = all[agentIndex + 1];
-    assert.equal(scope.name, 'Check run scope');
+    const scopeIndex = all.findIndex((step) => step.name === 'Check run scope');
+    const finalizeIndex = all.findIndex((step) => step.name === 'Finalize Agent Runner pull request metadata');
+    assert.ok(agentIndex < scopeIndex && scopeIndex < finalizeIndex, 'after the agent step, before PR finalization');
+    const scope = all[scopeIndex];
     assert.match(scope.text, /id: check-scope/);
     assert.match(scope.text, /steps\.netlify-agent\.outputs\.outcome == 'success'/);
     assert.match(scope.text, /continue-on-error: true/);
@@ -190,5 +192,58 @@ describe('action.yml scope guard wiring', () => {
     } finally {
       fs.rmSync(temp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('action.yml agent time limit', () => {
+  it('uses the preflight effective timeout for the agent step', () => {
+    const step = steps().find((entry) => entry.name === 'Run Netlify Agent Runners');
+    assert.match(step?.text || '', /MAX_WAIT_MINUTES: \$\{\{ steps\.preflight\.outputs\.effective-timeout-minutes \|\| inputs\.timeout-minutes \}\}/);
+  });
+
+  it('passes job-timeout-minutes to preflight', () => {
+    const step = steps().find((entry) => entry.name === 'Run preflight checks');
+    assert.match(step?.text || '', /JOB_TIMEOUT_MINUTES: \$\{\{ inputs\.job-timeout-minutes \}\}/);
+    assert.match(step?.text || '', /core\.setOutput\('effective-timeout-minutes'/);
+  });
+});
+
+describe('action.yml run checkpoints', () => {
+  it('removes the old in-progress step and passes checkpoint inputs to the agent step', () => {
+    assert.equal(steps().some((entry) => entry.name === 'Update status to in-progress'), false);
+    const step = steps().find((entry) => entry.name === 'Run Netlify Agent Runners');
+    for (const name of ['STATUS_COMMENT_ID', 'ISSUE_NUMBER', 'REQUESTER', 'SITE_NAME', 'PR_HEAD_SHA', 'SIMULATE_ORPHAN']) {
+      assert.match(step?.text || '', new RegExp(`\\n        ${name}: `), name);
+    }
+  });
+
+  it('guards every comment-writing step after the agent step against simulated orphans', () => {
+    const all = steps();
+    const agentIndex = all.findIndex((step) => step.name === 'Run Netlify Agent Runners');
+    const commentWriters = ['Generate error comment', 'Post result comment', 'Generate status comment', 'Post or update status comment', 'Generate history comment', 'Post or update history comment', 'Cross-post to PR and update issue', 'Fallback status update', 'Update reaction on completion'];
+    for (const name of commentWriters) {
+      const step = all.slice(agentIndex + 1).find((entry) => entry.name === name);
+      assert.ok(step, name);
+      assert.match(step.text, /steps\.netlify-agent\.outputs\.simulated-orphan != 'true'/, name);
+    }
+  });
+});
+
+describe('action.yml stop on cancel', () => {
+  it('runs only when the job is cancelled, is best-effort, and loads the staged module', () => {
+    const step = steps().find((entry) => entry.name === 'Stop agent on cancel');
+    assert.ok(step);
+    assert.match(step.text, /if: cancelled\(\) && steps\.install-deps\.outputs\.action-dir != ''/);
+    assert.match(step.text, /continue-on-error: true/);
+    assert.match(step.text, /src\/stop-on-cancel\.js/);
+    const all = steps();
+    assert.ok(all.findIndex((entry) => entry.name === 'Stop agent on cancel') > all.findIndex((entry) => entry.name === 'Run Netlify Agent Runners'));
+  });
+});
+
+describe('action.yml cancelled jobs', () => {
+  it('skips the error result comment for cancelled jobs (the status comment explains the stop)', () => {
+    const step = steps().find((entry) => entry.name === 'Generate error comment');
+    assert.match(step?.text || '', /!cancelled\(\)/);
   });
 });

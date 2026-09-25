@@ -180,8 +180,10 @@ Or comment `@netlify make it blue` on an existing PR.
 | `flag-new-top-level` | No | `true` | Also flag files added at the repository root and new top-level folders |
 | `protected-paths-action` | No | `comment` | `comment` (always on), plus optionally `label` and/or `draft` |
 | `scope-instructions` | No | `default` | Guidance appended to every agent prompt; `default` = report unrelated build/deploy failures instead of working around them, `none` disables |
+| `simulate-orphan` | No | `false` | Test-only (used by the canary): exit right after the run checkpoint is written, as if the runner were lost. Never set this in real workflows |
 | `dry-run` | No | `false` | Start an agent run but skip commit/PR creation |
 | `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent run |
+| `job-timeout-minutes` | No | `''` | The job's `timeout-minutes`. When set, the agent limit is shortened to leave 5 minutes for setup, so the agent times out cleanly before GitHub cancels the job |
 | `timeout-minutes` | No | `10` | Max minutes to wait for agent completion |
 | `netlify-cli-version` | No | `24.8.1` | Netlify CLI version to install |
 | `debug` | No | `false` | Enable debug logging of API responses |
@@ -300,6 +302,23 @@ Configure it with `protected-paths`:
 > Only modify files needed for this task. If a build or deploy fails for reasons unrelated to your task, do not change build, deploy, or workspace configuration to work around it; finish the task and describe the failure in your result.
 
 The block is hidden from the prompt shown in comments. Set your own text to replace it, or `none` to turn it off.
+
+## Run checkpoints and stopping
+
+As soon as an agent run starts, the status comment shows **View the in progress agent run** and stores a hidden checkpoint for it. The checkpoint holds the runner and session IDs, the requested agent, model and effort, the time limit, and the SDK's resumable run handle. The handle is **encrypted**:
+- It's sealed with AES-256-GCM under a key derived from your `NETLIFY_AUTH_TOKEN`.
+- It's bound to this repository, thread, and runner, so a copy pasted into another thread fails to open.
+- The prompt and site ID never appear in the comment in plain text.
+
+**Cancelling the workflow stops the agent.** If you cancel the workflow run (from the Actions tab), the action stops the agent run and the status comment says "⏹ The workflow was cancelled, so the agent run was stopped." This is best-effort: GitHub gives cancelled jobs only a short grace period.
+
+**Set `job-timeout-minutes`.** GitHub also cancels a job when it hits its own `timeout-minutes`, and that looks the same as a human cancel. Set `job-timeout-minutes` to your job's `timeout-minutes`. The action then shortens the agent's limit, leaving 5 minutes for setup, so the agent times out cleanly first. The templates already do this.
+
+**Polling is resilient.** Rate limits and other transient API errors while waiting for the agent are retried with backoff until the run's time limit, instead of failing the job while the agent keeps working.
+
+Result and status headers show what each run used, for example `Run #3 | claude · Fable 5 · high`. For follow-ups, the effort you requested is shown even though Netlify doesn't report it back.
+
+**Trust model.** The action reads checkpoints only from comments written by its own bot identity. GitHub lets anyone with write access edit comments, and repository write access already allows starting and steering runs. Given that, a tampered checkpoint can at most point the action at another run on the same Netlify site: the sealed handle is authenticated, and its IDs are checked against the public fields and your configured site.
 
 ## Versioning
 

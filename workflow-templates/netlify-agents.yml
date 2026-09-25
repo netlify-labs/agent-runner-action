@@ -94,6 +94,7 @@ jobs:
         with:
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
+          job-timeout-minutes: '25'       # Keep equal to this job's timeout-minutes above
           # Optional settings:
           # default-agent: 'codex'        # Default agent (claude, codex, gemini, opencode)
           # default-model-id: ''          # Default model (e.g. claude-fable-5 or fable); empty = Auto

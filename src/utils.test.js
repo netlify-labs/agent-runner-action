@@ -599,3 +599,14 @@ describe('scope block', () => {
     assert.equal(utils.cleanPrompt(prompt), 'write docs\n\n---\nKeep this part');
   });
 });
+
+describe('describeRunConfig', () => {
+  it('uses catalog labels and user-facing effort levels', () => {
+    assert.equal(utils.describeRunConfig({ agent: 'claude', model: 'claude-fable-5', effort: 'high' }), 'claude · Fable 5 · high');
+    assert.equal(utils.describeRunConfig({ agent: 'opencode', model: 'z-ai/glm-5.2', effort: 'xhigh' }), 'opencode · GLM 5.2 · max');
+    assert.equal(utils.describeRunConfig({ agent: 'codex' }), 'codex');
+    assert.equal(utils.describeRunConfig({ agent: 'claude', effort: 'high' }), 'claude · high');
+    assert.equal(utils.describeRunConfig({ agent: 'opencode', model: 'vendor/new-model', effort: 'max' }), 'opencode · vendor/new-model · max');
+    assert.equal(utils.describeRunConfig({}), 'codex');
+  });
+});

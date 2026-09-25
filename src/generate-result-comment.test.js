@@ -230,3 +230,33 @@ describe('renderResultComment scope section', () => {
     assert.doesNotMatch(malformed.resultBody, /Review these changes/);
   });
 });
+
+describe('renderResultComment run configuration header', () => {
+  it('shows agent, model label, and effort from the session agent_config', () => {
+    writeSessions('runner_c', [{ id: 'session_c', prompt: '@netlify fable high fix', result: 'Done.', agent_config: { agent: 'claude', model: 'claude-fable-5', effort: 'high' } }]);
+    const { resultBody } = renderResultComment({ context: context(), env: { RUNNER_TEMP: tempDir, AGENT_ID: 'runner_c', SITE_NAME: 'site' } });
+    assert.ok(resultBody.startsWith('### [Run #1 | claude · Fable 5 · high | Agent Run completed]'), resultBody.split('\n')[0]);
+  });
+
+  it('falls back to the requested effort when the backend does not echo it (follow-ups)', () => {
+    writeSessions('runner_f', [
+      { id: 'session_1', prompt: 'first', agent_config: { agent: 'opencode', model: 'z-ai/glm-5.2', effort: 'xhigh' } },
+      { id: 'session_2', prompt: 'second', result: 'Done.', agent_config: { agent: 'opencode', model: 'z-ai/glm-5.2' } },
+    ]);
+    const { resultBody, sessionDataMap } = renderResultComment({
+      context: context(),
+      env: { RUNNER_TEMP: tempDir, AGENT_ID: 'runner_f', SITE_NAME: 'site', REQUESTED_AGENT: 'opencode', REQUESTED_MODEL_ID: 'z-ai/glm-5.2', REQUESTED_EFFORT: 'xhigh', REQUESTED_MODE: 'normal' },
+    });
+    assert.ok(resultBody.startsWith('### [Run #2 | opencode · GLM 5.2 · max | Agent Run completed]'), resultBody.split('\n')[0]);
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(/** @type {any} */ (sessionDataMap).session_2).filter(([key]) => ['agent', 'model', 'effort', 'mode'].includes(key))),
+      { agent: 'opencode', model: 'z-ai/glm-5.2', effort: 'xhigh', mode: 'normal' },
+    );
+  });
+
+  it('keeps the agent-only header when no model was chosen', () => {
+    writeSessions('runner_a', [{ id: 'session_a', prompt: 'x', result: 'Done.', agent_config: { agent: 'codex' } }]);
+    const { resultBody } = renderResultComment({ context: context(), env: { RUNNER_TEMP: tempDir, AGENT_ID: 'runner_a', SITE_NAME: 'site' } });
+    assert.ok(resultBody.startsWith('### [Run #1 | codex | Agent Run completed]'));
+  });
+});

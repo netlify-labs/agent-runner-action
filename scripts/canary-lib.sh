@@ -150,6 +150,75 @@ run_issue_case() {
   return 0
 }
 
+status_comment_body() {
+  # status_comment_body <issue number>: newest comment carrying the status marker.
+  gh api "repos/${CANARY_REPO}/issues/$1/comments?per_page=100" \
+    --jq '[.[] | select(.body | contains("<!-- netlify-agent-run-status -->"))] | last | .body // ""'
+}
+
+checkpoint_runner_from_body() {
+  # Reads a status comment body on stdin; prints the checkpoint runnerId or "".
+  perl -0ne 'if (/<!-- netlify-agent-run-checkpoint:(\{.*?\}) -->/s) { my $j = $1; if ($j =~ /"runnerId"\s*:\s*"([A-Za-z0-9_-]+)"/) { print "$1\n" } }'
+}
+
+backend_session_states() {
+  # backend_session_states <runner id>: prints each session state (needs NETLIFY_AUTH_TOKEN).
+  if [ -z "${NETLIFY_AUTH_TOKEN:-}" ]; then
+    echo "unknown"
+    return 0
+  fi
+  curl -fsS -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
+    "https://api.netlify.com/api/v1/agent_runners/$1/sessions" | jq -r '.[].state'
+}
+
+# start_issue_case <case> <prompt>: create the issue and wait until the
+# downstream run starts. Sets CASE_ISSUE_NUMBER CASE_ISSUE_URL CASE_RUN_ID CASE_RUN_URL.
+start_issue_case() {
+  local case_name="$1" prompt="$2"
+  local title="Agent Runners canary ${case_name} ${RUN_MARKER}"
+  local start=$SECONDS
+  local body
+  body=$(printf '%s\n\nCanary metadata:\n- action_ref: %s\n- marker: %s\n- case: %s\n' "$prompt" "$ACTION_REF" "$RUN_MARKER" "$case_name")
+  CASE_ISSUE_URL=$(gh issue create --repo "$CANARY_REPO" --title "$title" --body "$body")
+  CASE_ISSUE_NUMBER="${CASE_ISSUE_URL##*/}"
+  log "[$case_name] created issue ${CASE_ISSUE_URL}"
+  CASE_RUN_ID=""
+  while [ -z "$CASE_RUN_ID" ]; do
+    if [ $((SECONDS - start)) -gt 600 ]; then
+      record_check "$case_name" "downstream run starts" "timed out" fail
+      return 1
+    fi
+    CASE_RUN_ID=$(gh run list --repo "$CANARY_REPO" --workflow "$CANARY_WORKFLOW_NAME" --event issues --limit 20 \
+      --json databaseId,displayTitle --jq ".[] | select(.displayTitle == \"${title}\") | .databaseId" | head -n 1)
+    [ -z "$CASE_RUN_ID" ] && sleep 10
+  done
+  CASE_RUN_URL="https://github.com/${CANARY_REPO}/actions/runs/${CASE_RUN_ID}"
+  log "[$case_name] downstream run ${CASE_RUN_URL}"
+}
+
+wait_run_completed() {
+  # wait_run_completed <run id> <timeout seconds>
+  local start=$SECONDS
+  while [ "$(gh run view "$1" --repo "$CANARY_REPO" --json status --jq .status)" != "completed" ]; do
+    if [ $((SECONDS - start)) -gt "$2" ]; then return 1; fi
+    sleep 15
+  done
+}
+
+wait_checkpoint_state() {
+  # wait_checkpoint_state <issue> <state> <timeout seconds>: echo the body when reached.
+  local start=$SECONDS body
+  while true; do
+    body=$(status_comment_body "$1")
+    if [ "$(printf '%s' "$body" | checkpoint_state_from_body)" = "$2" ]; then
+      printf '%s' "$body"
+      return 0
+    fi
+    if [ $((SECONDS - start)) -gt "$3" ]; then return 1; fi
+    sleep 10
+  done
+}
+
 pr_comments() {
   gh pr view "$1" --repo "$CANARY_REPO" --json comments --jq '[.comments[].body] | join("\n")'
 }
@@ -206,7 +275,42 @@ not_implemented() {
   record_check "$1" "scenario is implemented" "not implemented yet" fail
   return 1
 }
-scenario_cancel_stops() { not_implemented cancel-stops; }
+scenario_cancel_stops() {
+  start_issue_case cancel-stops "@netlify codex mini low Create docs/canary-cancel-${RUN_MARKER}.md with a numbered list of 200 short, distinct facts about static site hosting, one per line. Do not edit other files." || return 1
+  output issue-url "$CASE_ISSUE_URL"
+  output run-url "$CASE_RUN_URL"
+  local body runner
+  if ! body=$(wait_checkpoint_state "$CASE_ISSUE_NUMBER" running 600); then
+    record_check cancel-stops "checkpoint reaches running" "never seen" fail
+    return 1
+  fi
+  runner=$(printf '%s' "$body" | checkpoint_runner_from_body)
+  record_check cancel-stops "checkpoint reaches running" "runner ${runner}" pass
+  log "[cancel-stops] cancelling downstream run ${CASE_RUN_ID}"
+  gh run cancel "$CASE_RUN_ID" --repo "$CANARY_REPO"
+  if ! wait_run_completed "$CASE_RUN_ID" 300; then
+    record_check cancel-stops "downstream run completes after cancel" "timed out" fail
+    return 1
+  fi
+  expect_equal cancel-stops "downstream run conclusion" "$(gh run view "$CASE_RUN_ID" --repo "$CANARY_REPO" --json conclusion --jq .conclusion)" cancelled
+  body=$(status_comment_body "$CASE_ISSUE_NUMBER")
+  expect_equal cancel-stops "checkpoint state" "$(printf '%s' "$body" | checkpoint_state_from_body)" stopped
+  expect_contains cancel-stops "status comment" "$body" "The workflow was cancelled, so the agent run was stopped."
+  local states
+  states=$(backend_session_states "$runner" | tr '\n' ' ')
+  if printf '%s' "$states" | grep -Eq 'running|pending|queued'; then
+    record_check cancel-stops "backend session no longer running" "$states" fail
+  else
+    record_check cancel-stops "backend session no longer running" "${states:-none}" pass
+  fi
+  local comments
+  comments=$(gh issue view "$CASE_ISSUE_NUMBER" --repo "$CANARY_REPO" --json comments --jq '[.comments[].body] | join("\n")')
+  if [ -z "$(printf '%s\n' "$comments" | pr_number_from_comments || true)" ]; then
+    record_check cancel-stops "no PR was opened" "none" pass
+  else
+    record_check cancel-stops "no PR was opened" "a PR is linked" fail
+  fi
+}
 scenario_orphan_recovery() { not_implemented orphan-recovery; }
 scenario_stop_command() { not_implemented stop-command; }
 scenario_ask() { not_implemented ask; }

@@ -8,6 +8,8 @@ const {
   formatAgentRunUrl,
   renderRunnerIdMarker,
   renderSessionDataMarker,
+  renderCheckpointMarker,
+  parseCheckpoint,
   stripAllHtmlComments,
 } = require('./comment-markers');
 const { assembleStatusBody } = require('./comment-truncation');
@@ -53,6 +55,10 @@ function buildSessionDataMap(env, sessions) {
   if (env.GH_ACTION_URL) entry.gh_action_url = env.GH_ACTION_URL;
   if (env.AGENT_COMMIT_SHA) entry.commit_sha = env.AGENT_COMMIT_SHA;
   if (env.AGENT_PR_URL) entry.pr_url = env.AGENT_PR_URL;
+  if (env.REQUESTED_AGENT) entry.agent = env.REQUESTED_AGENT;
+  if (env.REQUESTED_MODEL_ID) entry.model = env.REQUESTED_MODEL_ID;
+  if (env.REQUESTED_EFFORT) entry.effort = env.REQUESTED_EFFORT;
+  if (env.REQUESTED_MODE) entry.mode = env.REQUESTED_MODE;
   sessionDataMap[latestSession.id] = entry;
   return sessionDataMap;
 }
@@ -116,10 +122,11 @@ function inferFailure(env) {
  *   env?: Record<string, string | undefined>,
  *   context: import('./types').ActionContext,
  *   outcome?: 'success' | 'failure',
+ *   checkpoint?: import('./comment-markers').RunCheckpoint | null,
  * }} params
  * @returns {{statusBody: string, sessionDataMap: Record<string, unknown>}}
  */
-function renderStatusComment({ env = process.env, context, outcome }) {
+function renderStatusComment({ env = process.env, context, outcome, checkpoint = null }) {
   const agentId = env.AGENT_ID || env.RUNNER_ID || '';
   const sessions = readSessions(agentId, env.RUNNER_TEMP);
   const latestSession = sessions.length > 0 ? sessions[sessions.length - 1] : null;
@@ -129,24 +136,36 @@ function renderStatusComment({ env = process.env, context, outcome }) {
   const agentRunUrl = formatAgentRunUrl(siteName, agentId, sessionId);
   const isFailure = outcome ? outcome === 'failure' : inferFailure(env);
   const isDryRun = env.IS_DRY_RUN === 'true';
-  const model = (latestSession && latestSession.agent_config && latestSession.agent_config.agent) || env.AGENT_MODEL || 'codex';
+  const config = (latestSession && latestSession.agent_config) || {};
+  const requested = /** @type {Record<string, string | undefined>} */ ((latestSession && sessionDataMap[latestSession.id]) || {});
+  const model = utils.describeRunConfig({
+    agent: config.agent || requested.agent || env.AGENT_MODEL || 'codex',
+    model: config.model || requested.model,
+    effort: config.effort || requested.effort,
+  });
   const runNumber = sessions.length || 1;
   const timestamp = new Date().toISOString();
   const title = cleanInline((latestSession && latestSession.title) || env.AGENT_TITLE || '');
   const resultUrl = env.RESULT_COMMENT_URL ||
     (env.RESULT_COMMENT_ID ? `#issuecomment-${env.RESULT_COMMENT_ID}` : '');
 
-  const statusIcon = isFailure ? '❌' : '✅';
-  const statusLine = isFailure
-    ? 'Netlify Agent Run failed.'
-    : isDryRun
-      ? 'Netlify Agent Run completed (preview).'
-      : 'Netlify Agent Run completed.';
+  // A run stopped on purpose (workflow cancelled, or @netlify stop) is not a
+  // failure; show why it stopped instead.
+  const stopped = Boolean(checkpoint && checkpoint.state === 'stopped' && env.AGENT_OUTCOME !== 'success');
+  const stoppedBy = String(env.STOP_REQUESTED_BY || '').replace(/[^A-Za-z0-9-]/g, '');
+  const statusIcon = stopped ? '⏹' : isFailure ? '❌' : '✅';
+  const statusLine = stopped
+    ? (stoppedBy ? `Stopped by @${stoppedBy}.` : 'The workflow was cancelled, so the agent run was stopped.')
+    : isFailure
+      ? 'Netlify Agent Run failed.'
+      : isDryRun
+        ? 'Netlify Agent Run completed (preview).'
+        : 'Netlify Agent Run completed.';
   const header = agentRunUrl
     ? `### [Netlify Agent Run Status](${agentRunUrl}) ${statusIcon}`
     : `### Netlify Agent Run Status ${statusIcon}`;
   const subtitle = statusLine;
-  const runLine = `Run #${runNumber} | ${model} | ${isFailure ? 'failed' : 'completed'} at ${timestamp}`;
+  const runLine = `Run #${runNumber} | ${model} | ${stopped ? 'stopped' : isFailure ? 'failed' : 'completed'} at ${timestamp}`;
 
   const deployUrl = utils.safeHttpUrl(env.AGENT_DEPLOY_URL || (latestSession && latestSession.deploy_url) || '');
   const screenshotUrl = utils.safeHttpUrl(env.AGENT_SCREENSHOT_URL || '');
@@ -158,7 +177,7 @@ function renderStatusComment({ env = process.env, context, outcome }) {
   const scope = isFailure ? null : readScopeResult(env, agentId);
   const scopeLine = scope ? renderScopeStatusLine(scope) : '';
   if (scopeLine) statusTitle = `${statusTitle}\n\n${scopeLine}`;
-  if (isFailure) {
+  if (isFailure && !stopped) {
     const failure = classifyFailure({
       category: env.FAILURE_CATEGORY || env.AGENT_FAILURE_CATEGORY || '',
       stage: env.FAILURE_STAGE || env.AGENT_FAILURE_STAGE || '',
@@ -171,6 +190,7 @@ function renderStatusComment({ env = process.env, context, outcome }) {
   const markers = [
     renderSessionDataMarker(sessionDataMap),
     agentId ? renderRunnerIdMarker(agentId) : '',
+    checkpoint ? renderCheckpointMarker(checkpoint) : '',
     STATUS_COMMENT_MARKER,
   ].filter(Boolean);
 
@@ -189,16 +209,54 @@ function renderStatusComment({ env = process.env, context, outcome }) {
 }
 
 /**
- * @param {{context: import('./types').ActionContext, core: import('./types').ActionCore}} params
+ * Carry the run checkpoint forward into the final status comment. Never
+ * regress a terminal state: a run stopped by the cancel step or by
+ * `@netlify stop` stays "stopped"; everything else becomes "finalized".
+ * Checkpoints for a different runner (an older run) are left untouched.
+ * @param {import('./comment-markers').RunCheckpoint | null} current
+ * @param {string} runnerId
+ * @returns {import('./comment-markers').RunCheckpoint | null}
+ */
+function mergeFinalCheckpoint(current, runnerId) {
+  if (!current) return null;
+  if (runnerId && current.runnerId !== runnerId) return current;
+  if (current.state === 'stopped' || current.state === 'finalized') return current;
+  return { ...current, state: 'finalized' };
+}
+
+/**
+ * Re-read the live status comment so a checkpoint written during the run (or
+ * a stop recorded by another job) is merged rather than overwritten.
+ * @param {any} github
+ * @param {import('./types').ActionContext} context
+ * @param {string | undefined} commentId
+ * @returns {Promise<import('./comment-markers').RunCheckpoint | null>}
+ */
+async function readLiveCheckpoint(github, context, commentId) {
+  if (!github || !commentId || !/^\d+$/.test(String(commentId))) return null;
+  try {
+    const { data } = await github.rest.issues.getComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: Number(commentId) });
+    return parseCheckpoint(data && data.body);
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * @param {{ github?: any, context: import('./types').ActionContext, core: import('./types').ActionCore }} params
  * @returns {Promise<void>}
  */
-module.exports = async function generateStatusComment({ context, core }) {
-  const rendered = renderStatusComment({ context });
+module.exports = async function generateStatusComment({ github, context, core }) {
+  const live = await readLiveCheckpoint(github, context, process.env.STATUS_COMMENT_ID);
+  const checkpoint = mergeFinalCheckpoint(live, process.env.AGENT_ID || process.env.RUNNER_ID || '');
+  const rendered = renderStatusComment({ context, checkpoint });
   core.setOutput('status-body', rendered.statusBody);
   core.setOutput('comment-body', rendered.statusBody);
   core.setOutput('session-data-map', JSON.stringify(rendered.sessionDataMap));
 };
 
 module.exports.renderStatusComment = renderStatusComment;
+module.exports.mergeFinalCheckpoint = mergeFinalCheckpoint;
+module.exports.readLiveCheckpoint = readLiveCheckpoint;
 module.exports.inferFailure = inferFailure;
 module.exports.resultCommentLink = resultCommentLink;

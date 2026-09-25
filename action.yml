@@ -46,6 +46,10 @@ inputs:
     description: 'Automatically create and apply labels on agent runs (opt-in)'
     required: false
     default: 'false'
+  job-timeout-minutes:
+    description: "The workflow job's timeout-minutes. When set, the agent limit is shortened to leave 5 minutes for setup, so the agent times out cleanly before GitHub cancels the job (a cancel stops the agent)."
+    required: false
+    default: ''
   timeout-minutes:
     description: 'Maximum minutes to wait for the agent to complete'
     required: false
@@ -70,6 +74,10 @@ inputs:
     description: 'Guidance appended to every agent prompt. "default" asks agents to report unrelated build or deploy failures instead of working around them; any other text replaces it; "none" (or an empty string) turns it off.'
     required: false
     default: 'default'
+  simulate-orphan:
+    description: 'Test-only (canary): exit right after the run checkpoint is written, leaving the run as a lost runner would. Never set this in real workflows.'
+    required: false
+    default: 'false'
   dry-run:
     description: 'Preview mode — start an agent run but skip PR creation and commits'
     required: false
@@ -370,6 +378,7 @@ runs:
         DEFAULT_AGENT: ${{ inputs.default-agent || inputs.default-model }}
         DEFAULT_MODEL: ${{ inputs.default-model || inputs.default-agent }}
         TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+        JOB_TIMEOUT_MINUTES: ${{ inputs.job-timeout-minutes }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
         ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
         PREFLIGHT_ONLY: ${{ inputs.preflight-only }}
@@ -391,6 +400,7 @@ runs:
               defaultAgent: process.env.DEFAULT_AGENT,
               defaultModel: process.env.DEFAULT_MODEL,
               timeoutMinutes: process.env.TIMEOUT_MINUTES,
+              jobTimeoutMinutes: process.env.JOB_TIMEOUT_MINUTES,
               triggerText: process.env.TRIGGER_TEXT,
               issueNumber: process.env.ISSUE_NUMBER,
               eventName,
@@ -410,12 +420,15 @@ runs:
                 }
 
                 const siteId = encodeURIComponent(input.netlifySiteId);
-                const response = await fetch(`https://api.netlify.com/api/v1/sites/${siteId}`, {
+                // Retries rate limits (429) and gateway errors so one transient
+                // response doesn't fail the whole run.
+                const { fetchWithRetry } = require(`${process.env.ACTION_DIR}/src/fetch-retry.js`);
+                const response = await fetchWithRetry(`https://api.netlify.com/api/v1/sites/${siteId}`, {
                   headers: {
                     Authorization: `Bearer ${input.netlifyAuthToken}`,
                     'User-Agent': 'netlify-agent-runner-action',
                   },
-                });
+                }, { log: (message) => core.info(`Netlify site check: ${message}`) });
 
                 if (response.ok) {
                   return { ok: true, message: 'Netlify site access confirmed.' };
@@ -482,6 +495,12 @@ runs:
             : `Preflight failed: ${failedChecks.join(', ') || 'unknown checks failed'}`;
 
           core.setOutput('preflight-ok', preflightOk ? 'true' : 'false');
+          core.setOutput('effective-timeout-minutes', String(result.effectiveTimeoutMinutes || ''));
+          const jobTimeoutCheck = result.checks.find((check) => check.id === 'job-timeout');
+          if (jobTimeoutCheck && jobTimeoutCheck.status === 'warn') core.warning(jobTimeoutCheck.message, { title: 'Agent time limit' });
+          if (!process.env.JOB_TIMEOUT_MINUTES) {
+            await core.summary.addRaw('Tip: set `job-timeout-minutes` to your job\'s `timeout-minutes` so the agent limit always fits inside the job.\n').write();
+          }
           core.setOutput('preflight-json', JSON.stringify(result));
           core.setOutput('preflight-summary', summary);
           core.setOutput('failure-category', firstFailureCategory);
@@ -894,38 +913,6 @@ runs:
     # -----------------------------------------------------------------------
     # 12. Update status comment for follow-up runs
     # -----------------------------------------------------------------------
-    - name: Update status to in-progress
-      if: >-
-        steps.trigger-check.outputs.should-run == 'true'
-        && steps.should-continue.outputs.should-continue == 'true'
-        && (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) != ''
-        && steps.extract-agent-id.outputs.agent-runner-id != ''
-      uses: actions/github-script@v8
-      env:
-        ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
-      with:
-        github-token: ${{ inputs.github-token }}
-        script: |
-          const utils = require(`${process.env.ACTION_DIR}/src/utils.js`);
-          const model = ${{ toJSON(steps.context-info.outputs.agent || steps.context-info.outputs.model) }} || 'codex';
-          const runnerId = ${{ toJSON(steps.extract-agent-id.outputs.agent-runner-id) }};
-          const commentId = ${{ toJSON(steps.find_comment.outputs.comment-id) }} || ${{ toJSON(steps.create_comment.outputs.comment-id) }};
-          const siteName = ${{ toJSON(steps.resolve-site-name.outputs.site-name) }} || 'unknown';
-          const triggerText = ${{ toJSON(steps.context-info.outputs.trigger-text) }} || '';
-          const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${runnerId}`;
-          const ghActionUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-          const modelLabel = ${{ toJSON(steps.context-info.outputs.model-label) }} || '';
-          const effort = ${{ toJSON(steps.context-info.outputs.effort) }} || '';
-          const effortLabel = ${{ toJSON(steps.context-info.outputs.effort-label) }} || '';
-          const configWarnings = ${{ toJSON(steps.context-info.outputs.config-warnings) }} || '';
-          const body = utils.buildInProgressComment({
-            agentRunUrl, prompt: triggerText, model, modelLabel, effort, effortLabel, configWarnings, runnerId, ghActionUrl
-          });
-          await github.rest.issues.updateComment({
-            owner: context.repo.owner, repo: context.repo.repo,
-            comment_id: parseInt(commentId), body
-          });
-
     # -----------------------------------------------------------------------
     # 13. Run Netlify Agent Runners through nax-agent-runner-sdk.
     #     Landing is PR-only; dry-run mode skips landing.
@@ -944,11 +931,21 @@ runs:
         NETLIFY_MODEL: ${{ steps.context-info.outputs.model-id }}
         NETLIFY_EFFORT: ${{ steps.context-info.outputs.effort }}
         SCOPE_BLOCK: ${{ steps.context-info.outputs.scope-block }}
+        # Checkpoint written to the status comment right after the run starts.
+        STATUS_COMMENT_ID: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
+        ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+        REQUESTER: ${{ github.event.sender.login || github.actor }}
+        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
+        MODEL_LABEL: ${{ steps.context-info.outputs.model-label }}
+        EFFORT_LABEL: ${{ steps.context-info.outputs.effort-label }}
+        CONFIG_WARNINGS: ${{ steps.context-info.outputs.config-warnings }}
+        PR_HEAD_SHA: ${{ steps.context-info.outputs.is-pr == 'true' && steps.context-info.outputs.head-sha || '' }}
+        SIMULATE_ORPHAN: ${{ inputs.simulate-orphan }}
         EXISTING_RUNNER_ID: ${{ steps.extract-agent-id.outputs.agent-runner-id }}
         SESSION_DATA_MAP: ${{ steps.extract-agent-id.outputs.session-data-map }}
         HEAD_BRANCH: ${{ steps.context-info.outputs.head-ref }}
         REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        MAX_WAIT_MINUTES: ${{ inputs.timeout-minutes }}
+        MAX_WAIT_MINUTES: ${{ steps.preflight.outputs.effective-timeout-minutes || inputs.timeout-minutes }}
         IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
       # run-agent.js reports its own outcome. If it exits non-zero without one
@@ -972,6 +969,24 @@ runs:
           fi
         fi
         exit "$status"
+
+    # Cancelling the workflow means "stop this work". Best-effort: GitHub gives
+    # cancelled jobs a short grace period, and recovery also treats an owner
+    # run that ended "cancelled" as a stop request.
+    - name: Stop agent on cancel
+      if: cancelled() && steps.install-deps.outputs.action-dir != ''
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
+        NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
+        STATUS_COMMENT_ID: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
+        SITE_NAME: ${{ steps.resolve-site-name.outputs.site-name }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const stopOnCancel = require(`${process.env.ACTION_DIR}/src/stop-on-cancel.js`);
+          await stopOnCancel({ github, context, core });
 
     - name: Check run scope
       id: check-scope
@@ -1056,6 +1071,10 @@ runs:
       continue-on-error: true
       uses: actions/github-script@v8
       env:
+        REQUESTED_AGENT: ${{ steps.context-info.outputs.agent }}
+        REQUESTED_MODEL_ID: ${{ steps.context-info.outputs.model-id }}
+        REQUESTED_EFFORT: ${{ steps.context-info.outputs.effort }}
+        REQUESTED_MODE: normal
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
         AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
@@ -1081,7 +1100,8 @@ runs:
     - name: Generate error comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true'
+        && !cancelled()
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
         && steps.should-continue.outputs.should-continue == 'true'
         && steps.netlify-agent.outputs.outcome != 'success'
         && steps.context-info.outputs.issue-number != ''
@@ -1089,6 +1109,10 @@ runs:
       continue-on-error: true
       uses: actions/github-script@v8
       env:
+        REQUESTED_AGENT: ${{ steps.context-info.outputs.agent }}
+        REQUESTED_MODEL_ID: ${{ steps.context-info.outputs.model-id }}
+        REQUESTED_EFFORT: ${{ steps.context-info.outputs.effort }}
+        REQUESTED_MODE: normal
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
         AGENT_ERROR: ${{ steps.netlify-agent.outputs.agent-error }}
         FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.trigger-text-size.outputs.failure-category || steps.preflight.outputs.failure-category }}
@@ -1118,7 +1142,7 @@ runs:
     - name: Post result comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
         && (steps.generate_success_comment.outputs.result-body || steps.generate_error_comment.outputs.result-body)
         && steps.context-info.outputs.issue-number != ''
       id: post_result_comment
@@ -1137,13 +1161,18 @@ runs:
     - name: Generate status comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
         && steps.context-info.outputs.issue-number != ''
         && (steps.generate_success_comment.outputs.result-body || steps.generate_error_comment.outputs.result-body || steps.netlify-agent.outputs.outcome != 'success')
       id: generate_status_comment
       continue-on-error: true
       uses: actions/github-script@v8
       env:
+        STATUS_COMMENT_ID: ${{ steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id }}
+        REQUESTED_AGENT: ${{ steps.context-info.outputs.agent }}
+        REQUESTED_MODEL_ID: ${{ steps.context-info.outputs.model-id }}
+        REQUESTED_EFFORT: ${{ steps.context-info.outputs.effort }}
+        REQUESTED_MODE: normal
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
         AGENT_OUTCOME: ${{ steps.netlify-agent.outputs.outcome }}
         AGENT_STEP_OUTCOME: ${{ steps.netlify-agent.outcome }}
@@ -1169,13 +1198,13 @@ runs:
         github-token: ${{ inputs.github-token }}
         script: |
           const run = require(`${process.env.ACTION_DIR}/src/generate-status-comment.js`);
-          await run({ context, core });
+          await run({ github, context, core });
 
     - name: Post or update status comment
       id: post_status_comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
         && steps.generate_status_comment.outputs.comment-body
         && (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) != ''
       continue-on-error: true
@@ -1191,7 +1220,7 @@ runs:
     - name: Generate history comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
         && steps.context-info.outputs.is-pr == 'true'
         && steps.context-info.outputs.issue-number != ''
         && steps.post_result_comment.outputs.result-comment-id != ''
@@ -1211,7 +1240,7 @@ runs:
     - name: Post or update history comment
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
         && steps.context-info.outputs.is-pr == 'true'
         && steps.generate_history_comment.outputs.comment-body != ''
         && steps.context-info.outputs.issue-number != ''
@@ -1228,7 +1257,7 @@ runs:
     - name: Cross-post to PR and update issue
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
         && steps.context-info.outputs.is-pr != 'true'
         && steps.netlify-agent.outputs.agent-pr-url != ''
         && steps.generate_status_comment.outputs.comment-body
@@ -1261,7 +1290,7 @@ runs:
     - name: Fallback status update
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
         && github.event_name != 'workflow_dispatch'
         && steps.context-info.outputs.issue-number != ''
         && steps.preflight-comment.outcome != 'success'
@@ -1298,7 +1327,7 @@ runs:
     - name: Update reaction on completion
       if: >-
         always()
-        && steps.trigger-check.outputs.should-run == 'true'
+        && steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.simulated-orphan != 'true'
         && steps.acknowledge.outputs.reaction-id != ''
         && steps.netlify-agent.outputs.outcome == 'success'
       continue-on-error: true
