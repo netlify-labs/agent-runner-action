@@ -577,3 +577,25 @@ describe('buildInProgressComment model', () => {
     assert.match(body, /> ⚠️ Model Fable 5 runs on claude/);
   });
 });
+
+describe('scope block', () => {
+  it('builds the default, custom, and disabled blocks', () => {
+    assert.equal(utils.buildScopeBlock('default'), `\n\n---\n${utils.SCOPE_BLOCK_HEADER}\n${utils.DEFAULT_SCOPE_GUIDANCE}`);
+    assert.equal(utils.buildScopeBlock(undefined), utils.buildScopeBlock('default'));
+    assert.equal(utils.buildScopeBlock('  Keep changes small.  '), `\n\n---\n${utils.SCOPE_BLOCK_HEADER}\nKeep changes small.`);
+    assert.equal(utils.buildScopeBlock(''), '');
+    assert.equal(utils.buildScopeBlock('none'), '');
+    assert.equal(utils.buildScopeBlock(' NONE '), '');
+  });
+
+  it('is stripped from every displayed prompt, including CRLF bodies', () => {
+    const block = utils.buildScopeBlock('default');
+    assert.equal(utils.cleanPrompt(`@netlify fable fix it\n\n◌ https://github.com/o/r/issues/1${block}`), 'fix it\n\nvia https://github.com/o/r/issues/1');
+    assert.equal(utils.stripScopeBlock(`fix it${block.replace(/\n/g, '\r\n')}`), 'fix it');
+  });
+
+  it('does not truncate a user prompt that contains its own --- separator', () => {
+    const prompt = '@netlify write docs\n\n---\nKeep this part';
+    assert.equal(utils.cleanPrompt(prompt), 'write docs\n\n---\nKeep this part');
+  });
+});

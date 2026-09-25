@@ -6,6 +6,8 @@ const path = require('node:path');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const WORKFLOW_PATH = path.join(REPO_ROOT, '.github', 'workflows', 'canary.yml');
 const workflow = fs.readFileSync(WORKFLOW_PATH, 'utf8');
+// Scenario logic lives in scripts/canary-lib.sh, sourced by canary.yml.
+const lib = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'canary-lib.sh'), 'utf8');
 
 describe('programmatic canary workflow', () => {
   it('runs on pull requests that touch the action or source code', () => {
@@ -38,20 +40,29 @@ describe('programmatic canary workflow', () => {
   });
 
   it('updates the canary workflow pin before creating a test issue', () => {
-    assert.match(workflow, /netlify-labs\/agent-runner-action@/);
     assert.match(workflow, /PR_ACTION_REF: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| '' \}\}/);
     assert.match(workflow, /ACTION_REF="\$\{PR_ACTION_REF:-\$GITHUB_SHA\}"/);
-    assert.match(workflow, /in README\.md, replace or add one line exactly/);
-    assert.match(workflow, /Do not edit other files/);
-    assert.match(workflow, /x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{CANARY_REPO\}\.git/);
-    assert.match(workflow, /git push origin HEAD:main/);
-    assert.match(workflow, /gh issue create/);
+    assert.match(workflow, /source scripts\/canary-lib\.sh\n\s+run_scenario "\$SCENARIO"/);
+    assert.match(lib, /netlify-labs\/agent-runner-action@/);
+    assert.match(lib, /in README\.md, replace or add one line exactly/);
+    assert.match(lib, /Do not edit other files/);
+    assert.match(lib, /x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{CANARY_REPO\}\.git/);
+    assert.match(lib, /git push origin HEAD:main/);
+    assert.match(lib, /gh issue create/);
+    // The pin happens before any scenario creates issues.
+    const runScenario = lib.slice(lib.indexOf('run_scenario() {'));
+    assert.ok(runScenario.indexOf('pin_canary_workflow') < runScenario.indexOf('"$fn" ||'));
   });
 
   it('waits for the issue-triggered workflow and verifies a PR diff marker', () => {
-    assert.match(workflow, /gh run list/);
-    assert.match(workflow, /gh run view/);
-    assert.match(workflow, /gh pr diff/);
-    assert.match(workflow, /Canary PR .* did not contain marker/);
+    assert.match(lib, /gh run list/);
+    assert.match(lib, /gh run view/);
+    assert.match(lib, /gh pr diff/);
+    assert.match(lib, /PR diff contains the marker/);
+  });
+
+  it('defaults to the default scenario for PR and release canaries', () => {
+    assert.match(workflow, /SCENARIO: \$\{\{ inputs\.scenario \|\| 'default' \}\}/);
+    assert.equal((workflow.match(/^      scenario:$/gm) || []).length, 2, 'scenario input on dispatch and workflow_call');
   });
 });

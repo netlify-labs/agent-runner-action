@@ -204,3 +204,29 @@ describe('renderResultComment', () => {
     assert.equal(rendered.resultMarker, '');
   });
 });
+
+describe('renderResultComment scope section', () => {
+  const scope = {
+    flags: [{ path: 'netlify.toml', display: 'netlify.toml (new file)', reason: 'Protected path `**/netlify.toml`', rule: '**/netlify.toml' }],
+    requested: [],
+  };
+
+  it('adds the scope section from the per-run scope file', () => {
+    writeSessions('runner_s', [{ id: 'session_s', prompt: '@netlify fix it', title: 'Fixed', result: 'Done.', agent_config: { agent: 'codex' } }]);
+    fs.writeFileSync(path.join(tempDir, 'agent-scope-runner_s.json'), JSON.stringify(scope));
+    const rendered = renderResultComment({
+      context: context(),
+      env: { RUNNER_TEMP: tempDir, AGENT_ID: 'runner_s', SITE_NAME: 'site', SESSION_DATA_MAP: '{}' },
+    });
+    assert.match(rendered.resultBody, /Done\.\n\n#### ⚠️ Review these changes/);
+    assert.match(rendered.resultBody, /\| `netlify\.toml` \(new file\) \| Protected path `\*\*\/netlify\.toml` \|/);
+  });
+
+  it('adds nothing without a scope result, and ignores malformed JSON', () => {
+    writeSessions('runner_t', [{ id: 'session_t', prompt: '@netlify fix it', result: 'Done.', agent_config: { agent: 'codex' } }]);
+    const plain = renderResultComment({ context: context(), env: { RUNNER_TEMP: tempDir, AGENT_ID: 'runner_t', SITE_NAME: 'site' } });
+    assert.doesNotMatch(plain.resultBody, /Review these changes/);
+    const malformed = renderResultComment({ context: context(), env: { RUNNER_TEMP: tempDir, AGENT_ID: 'runner_t', SITE_NAME: 'site', SCOPE_RESULT_JSON: '{not json' } });
+    assert.doesNotMatch(malformed.resultBody, /Review these changes/);
+  });
+});

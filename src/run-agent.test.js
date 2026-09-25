@@ -161,6 +161,7 @@ describe('published SDK package integration', () => {
         fixture.pullRequest.commitSha,
       );
       assert.equal(collected.outputs['agent-has-diff'], 'true');
+      assert.equal(collected.outputs['agent-landing-kind'], 'pr-created');
       assert.equal(
         fs.existsSync(path.join(
           runnerTemp,
@@ -457,6 +458,13 @@ describe('effort forwarding', () => {
       ReportedActionError,
     );
     assert.equal(calls.createRunner.length, 0);
+  });
+
+  it('appends the scope block to the prompt sent to the agent', async () => {
+    const calls = await runWith({ TRIGGER_TEXT: 'Fix the header', SCOPE_BLOCK: '\n\n---\nScope guidance from this repository\'s workflow:\nOnly modify needed files.' });
+    assert.match(calls.createRunner[0].prompt, /^Fix the header\n\n---\nScope guidance from this repository's workflow:\nOnly modify needed files\./);
+    const without = await runWith({ TRIGGER_TEXT: 'Fix the header', SCOPE_BLOCK: '' });
+    assert.doesNotMatch(without.createRunner[0].prompt, /Scope guidance/);
   });
 
   it('rejects malformed effort values before any SDK call', async () => {

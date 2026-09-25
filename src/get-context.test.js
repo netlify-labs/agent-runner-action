@@ -505,4 +505,27 @@ describe('getContext', () => {
       assert.equal(core.outputs.effort, 'low');
     });
   });
+
+  describe('scope block', () => {
+    function commentContext(body) {
+      return {
+        eventName: 'issue_comment',
+        payload: { issue: { number: 5 }, comment: { body, html_url: 'https://github.com/o/r/issues/5#c1' } },
+        repo: { owner: 'o', repo: 'r' },
+      };
+    }
+
+    it('outputs the default block, a custom block, or none', async () => {
+      delete process.env.SCOPE_INSTRUCTIONS;
+      await getContext({ github: mockGithub(), context: commentContext('@netlify fix it'), core });
+      assert.match(core.outputs['scope-block'], /Scope guidance from this repository's workflow:\nOnly modify files needed for this task\./);
+      process.env.SCOPE_INSTRUCTIONS = 'none';
+      await getContext({ github: mockGithub(), context: commentContext('@netlify fix it'), core });
+      assert.equal(core.outputs['scope-block'], '');
+      process.env.SCOPE_INSTRUCTIONS = 'Stay in docs/.';
+      await getContext({ github: mockGithub(), context: commentContext('@netlify fix it'), core });
+      assert.match(core.outputs['scope-block'], /\nStay in docs\/\.$/);
+      delete process.env.SCOPE_INSTRUCTIONS;
+    });
+  });
 });

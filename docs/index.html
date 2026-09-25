@@ -326,6 +326,10 @@ jobs:
     <tr><td><code>default-model-id</code></td><td>No</td><td><code>''</code></td><td>Default model ID or alias (e.g. <code>claude-fable-5</code>, <code>fable</code>). Empty or <code>auto</code> lets the backend choose</td></tr>
     <tr><td><code>default-effort</code></td><td>No</td><td><code>''</code></td><td>Default effort level (<code>low</code>, <code>medium</code>, <code>high</code>). Empty or <code>auto</code> lets the backend choose</td></tr>
     <tr><td><code>manage-labels</code></td><td>No</td><td><code>false</code></td><td>Auto-create and apply labels on runs</td></tr>
+    <tr><td><code>protected-paths</code></td><td>No</td><td><code>default</code></td><td>Files to flag for review when a run changes them (globs; <code>default</code> = built-in list, <code>none</code> disables, <code>!pattern</code> excludes)</td></tr>
+    <tr><td><code>flag-new-top-level</code></td><td>No</td><td><code>true</code></td><td>Also flag files added at the repository root and new top-level folders</td></tr>
+    <tr><td><code>protected-paths-action</code></td><td>No</td><td><code>comment</code></td><td><code>comment</code> (always on), plus optionally <code>label</code> and/or <code>draft</code></td></tr>
+    <tr><td><code>scope-instructions</code></td><td>No</td><td><code>default</code></td><td>Guidance appended to every agent prompt; <code>none</code> disables</td></tr>
     <tr><td><code>dry-run</code></td><td>No</td><td><code>false</code></td><td>Start an agent run but skip commit/PR creation</td></tr>
     <tr><td><code>preflight-only</code></td><td>No</td><td><code>false</code></td><td>Validate setup and exit without creating/resuming an agent run</td></tr>
     <tr><td><code>timeout-minutes</code></td><td>No</td><td><code>10</code></td><td>Max minutes to wait for agent</td></tr>
@@ -359,6 +363,8 @@ jobs:
     <tr><td><code>should-continue</code></td><td>Whether execution should continue into agent runtime</td></tr>
     <tr><td><code>failure-category</code></td><td>Preflight/runtime taxonomy category when available</td></tr>
     <tr><td><code>failure-stage</code></td><td>Preflight/runtime failure stage when available</td></tr>
+    <tr><td><code>scope-flags</code></td><td>JSON array of files the scope check flagged</td></tr>
+    <tr><td><code>scope-flag-count</code></td><td>Number of files the scope check flagged</td></tr>
     <tr><td><code>agent-error</code></td><td>Sanitized runtime error summary emitted by agent orchestration</td></tr>
   </table>
   <h3>Example: run tests after agent</h3>
@@ -372,6 +378,12 @@ jobs:
   - name: Run tests on agent PR
     if: steps.agent.outputs.outcome == 'success'
     run: echo "PR created at ${{ steps.agent.outputs.agent-pr-url }}"</code></pre>
+</section>
+
+<section id="scope-guard">
+  <h2>Scope guard</h2>
+  <p>After a successful run, the action checks which files that run changed and adds a <strong>⚠️ Review these changes</strong> table to the result comment (and to the PR, for runs started from an issue) when it touched workflows, <code>netlify.toml</code>, root <code>*.toml</code> files, lockfiles, <code>AGENTS.md</code>/<code>CLAUDE.md</code>, <code>.env</code> files, new root files, or new top-level folders. Files the request names are listed as requested instead. It never blocks a run.</p>
+  <p>Configure it with <code>protected-paths</code> (globs; a pattern without <code>/</code> matches only at the root; <code>default</code>, <code>none</code>, and <code>!pattern</code> are supported) and escalate with <code>protected-paths-action: comment,label,draft</code>. By default, <code>scope-instructions</code> also tells agents to report unrelated build or deploy failures instead of working around them.</p>
 </section>
 
 <section id="versioning">

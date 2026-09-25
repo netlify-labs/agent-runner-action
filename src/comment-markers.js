@@ -17,7 +17,7 @@ const RUNNER_ID_FORMAT = /^[A-Za-z0-9_-]{1,128}$/;
 // found in user-influenced content is stripped before parsing/rendering, so
 // outsiders cannot smuggle fake markers and bot comments cannot accidentally
 // reflect attacker-supplied markers from echoed user content.
-const ALLOWED_MARKER_INNER = /^\s*netlify-agent-(?:run-status|run-history|run-result(?::|\s|$)|runner-id:|session-data:)/;
+const ALLOWED_MARKER_INNER = /^\s*netlify-agent-(?:run-status|run-history|run-result(?::|\s|$)|runner-id:|session-data:|scope:)/;
 
 // Allowlist for URL-bearing fields in session-data entries. These URLs flow
 // into bot-rendered Markdown links; anything outside these patterns gets

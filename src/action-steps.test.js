@@ -154,3 +154,41 @@ describe('action.yml run-agent crash fallback', () => {
     assert.equal(runWith('process.exit(3);\n').status, 3);
   });
 });
+
+describe('action.yml scope guard wiring', () => {
+  it('runs Check run scope right after the agent step, only on success, never failing the job', () => {
+    const all = steps();
+    const agentIndex = all.findIndex((step) => step.name === 'Run Netlify Agent Runners');
+    const scope = all[agentIndex + 1];
+    assert.equal(scope.name, 'Check run scope');
+    assert.match(scope.text, /id: check-scope/);
+    assert.match(scope.text, /steps\.netlify-agent\.outputs\.outcome == 'success'/);
+    assert.match(scope.text, /continue-on-error: true/);
+    assert.match(scope.text, /src\/check-run-scope\.js/);
+    assert.match(scope.text, /LANDING_KIND: \$\{\{ steps\.netlify-agent\.outputs\.agent-landing-kind \}\}/);
+  });
+
+  it('passes the scope block to the size check and the agent step', () => {
+    for (const name of ['Check trigger text size', 'Run Netlify Agent Runners']) {
+      const step = steps().find((entry) => entry.name === name);
+      assert.match(step?.text || '', /SCOPE_BLOCK: \$\{\{ steps\.context-info\.outputs\.scope-block \}\}/, name);
+    }
+  });
+
+  it('counts the scope block in the trigger size check', () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'size-check-'));
+    try {
+      const output = path.join(temp, 'out');
+      fs.writeFileSync(output, '');
+      const script = runScript('Check trigger text size').replace('${{ steps.context-info.outputs.trigger-text }}', 'hello');
+      const result = spawnSync('bash', ['-c', script], {
+        env: { ...process.env, RUNNER_TEMP: temp, GITHUB_OUTPUT: output, SCOPE_BLOCK: 'x'.repeat(100) },
+        encoding: 'utf8',
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(fs.readFileSync(output, 'utf8'), /^trigger-text-bytes=106$/m);
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  });
+});

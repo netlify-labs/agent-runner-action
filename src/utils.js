@@ -399,6 +399,39 @@ function stripSelection(text) {
   return lines.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Scope guidance appended to agent prompts (scope-instructions input)
+// ---------------------------------------------------------------------------
+
+const SCOPE_BLOCK_HEADER = "Scope guidance from this repository's workflow:";
+const DEFAULT_SCOPE_GUIDANCE = 'Only modify files needed for this task. If a build or deploy fails for reasons unrelated to your task, do not change build, deploy, or workspace configuration to work around it; finish the task and describe the failure in your result.';
+
+/**
+ * Build the block appended to the agent prompt. "default" (or unset) uses the
+ * built-in guidance, an empty string or "none" disables it, and anything else
+ * replaces the guidance text.
+ * @param {string | null | undefined} value
+ * @returns {string}
+ */
+function buildScopeBlock(value) {
+  if (value === '' || (typeof value === 'string' && value.trim().toLowerCase() === 'none')) return '';
+  const text = value === undefined || value === null || value.trim() === 'default'
+    ? DEFAULT_SCOPE_GUIDANCE
+    : value.trim();
+  if (!text) return '';
+  return `\n\n---\n${SCOPE_BLOCK_HEADER}\n${text}`;
+}
+
+/**
+ * Remove an appended scope block so comments show only what the user wrote.
+ * @param {string} text
+ * @returns {string}
+ */
+function stripScopeBlock(text) {
+  const match = new RegExp(`\\r?\\n---\\r?\\n${SCOPE_BLOCK_HEADER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*$`).exec(text);
+  return match ? text.slice(0, match.index).replace(/\s+$/, '') : text;
+}
+
 /**
  * Strip the @netlify mention, optional agent/model/effort selector words,
  * explicit model:/effort: tokens, and ◌ markers from prompt text.
@@ -407,7 +440,7 @@ function stripSelection(text) {
  */
 function cleanPrompt(text) {
   if (!text) return '';
-  return stripSelection(text)
+  return stripSelection(stripScopeBlock(text))
     .replace(/◌/g, 'via')
     .trim();
 }
@@ -589,6 +622,10 @@ module.exports = {
   normalizeEffort,
   extractEffort,
   stripSelection,
+  SCOPE_BLOCK_HEADER,
+  DEFAULT_SCOPE_GUIDANCE,
+  buildScopeBlock,
+  stripScopeBlock,
   cleanPrompt,
   randomFlavor,
   ghContainsExpressions,
