@@ -11,6 +11,7 @@ const {
   stripAllHtmlComments,
 } = require('./comment-markers');
 const { assembleStatusBody } = require('./comment-truncation');
+const { readScopeResult, renderScopeStatusLine } = require('./scope-guard');
 const { readSessions } = require('./generate-result-comment');
 
 /**
@@ -154,6 +155,9 @@ function renderStatusComment({ env = process.env, context, outcome }) {
     : '';
 
   let statusTitle = title ? `${runLine}\n\n**Prompt summary:** ${utils.escapeMarkdownLinks(title)}` : runLine;
+  const scope = isFailure ? null : readScopeResult(env, agentId);
+  const scopeLine = scope ? renderScopeStatusLine(scope) : '';
+  if (scopeLine) statusTitle = `${statusTitle}\n\n${scopeLine}`;
   if (isFailure) {
     const failure = classifyFailure({
       category: env.FAILURE_CATEGORY || env.AGENT_FAILURE_CATEGORY || '',

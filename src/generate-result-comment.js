@@ -3,6 +3,7 @@
 
 const fs = require('fs');
 const utils = require('./utils');
+const { readScopeResult, renderScopeSection } = require('./scope-guard');
 const { classifyFailure } = require('./failure-taxonomy');
 const {
   renderResultCommentMarker,
@@ -239,6 +240,9 @@ function renderResultComment({ env = process.env, context, outcome }) {
       body += `<a href="${utils.escapeAttr(safeDeployUrl)}"><img src="${utils.escapeAttr(safeScreenshotUrl)}" alt="Preview" width="250" align="right"></a>\n\n`;
     }
     if (resultSummary) body += `${utils.escapeMarkdownLinks(resultSummary)}\n\n`;
+    const scope = readScopeResult(env, agentId);
+    const scopeSection = scope ? renderScopeSection(scope) : '';
+    if (scopeSection) body += `${scopeSection}\n`;
   }
 
   if (links.length > 0) body += `${links.join(' | ')}\n\n`;

@@ -143,3 +143,29 @@ describe('renderStatusComment failure inference', () => {
     assert.match(body, /Netlify Agent Run completed\./);
   });
 });
+
+describe('renderStatusComment scope line', () => {
+  const scope = JSON.stringify({
+    flags: [
+      { path: 'netlify.toml', display: 'netlify.toml', reason: 'Protected path `**/netlify.toml`', rule: '**/netlify.toml' },
+      { path: 'AGENTS.md', display: 'AGENTS.md', reason: 'Protected path `AGENTS.md`', rule: 'AGENTS.md' },
+    ],
+    requested: [],
+  });
+
+  it('adds the one-liner on success', () => {
+    const body = renderStatusComment({
+      env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site', AGENT_OUTCOME: 'success', SCOPE_RESULT_JSON: scope },
+      context: context(),
+    }).statusBody;
+    assert.match(body, /⚠️ 2 files outside the usual scope\. See the result comment\./);
+  });
+
+  it('omits it on failure', () => {
+    const body = renderStatusComment({
+      env: { RUNNER_TEMP: tempDir, SITE_NAME: 'site', AGENT_OUTCOME: 'failure', SCOPE_RESULT_JSON: scope },
+      context: context(),
+    }).statusBody;
+    assert.doesNotMatch(body, /outside the usual scope/);
+  });
+});
