@@ -2,7 +2,7 @@
 // Sets outputs: agent-runner-id, session-data-map, agent-run-url, has-linked-pr, linked-pr-number
 
 /** @typedef {import('./types').ActionParams} ActionParams */
-const { RUNNER_ID_MARKER_PREFIX, stripUntrustedHtmlComments } = require('./comment-markers');
+const { RUNNER_ID_MARKER_PREFIX, stripUntrustedHtmlComments, parseCheckpoint } = require('./comment-markers');
 const { reconcileAgentState } = require('./state-reconciliation');
 
 /**
@@ -58,6 +58,13 @@ module.exports = async function extractAgentId({ github, context, core, inputs }
   }
 
   core.setOutput('agent-runner-id', reconciled.runnerId);
+
+  // Run checkpoints are read only from the bot-authored status comment (never
+  // from a PR body), and only when they belong to the reconciled runner.
+  const checkpoint = parseCheckpoint(statusCommentBody);
+  const usable = checkpoint && (!reconciled.runnerId || checkpoint.runnerId === reconciled.runnerId) ? checkpoint : null;
+  core.setOutput('checkpoint', usable ? JSON.stringify(usable) : '');
+  core.setOutput('checkpoint-state', usable ? usable.state : '');
   core.setOutput('session-data-map', JSON.stringify(reconciled.sessionDataMap));
 
   // Preserve current behavior: prefer explicit URL links from comment/PR body.

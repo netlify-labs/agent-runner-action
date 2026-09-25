@@ -182,6 +182,7 @@ Or comment `@netlify make it blue` on an existing PR.
 | `scope-instructions` | No | `default` | Guidance appended to every agent prompt; `default` = report unrelated build/deploy failures instead of working around them, `none` disables |
 | `dry-run` | No | `false` | Start an agent run but skip commit/PR creation |
 | `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent run |
+| `job-timeout-minutes` | No | `''` | The job's `timeout-minutes`. When set, the agent limit is shortened to leave 5 minutes for setup, so the agent times out cleanly before GitHub cancels the job |
 | `timeout-minutes` | No | `10` | Max minutes to wait for agent completion |
 | `netlify-cli-version` | No | `24.8.1` | Netlify CLI version to install |
 | `debug` | No | `false` | Enable debug logging of API responses |

@@ -192,3 +192,16 @@ describe('action.yml scope guard wiring', () => {
     }
   });
 });
+
+describe('action.yml agent time limit', () => {
+  it('uses the preflight effective timeout for the agent step', () => {
+    const step = steps().find((entry) => entry.name === 'Run Netlify Agent Runners');
+    assert.match(step?.text || '', /MAX_WAIT_MINUTES: \$\{\{ steps\.preflight\.outputs\.effective-timeout-minutes \|\| inputs\.timeout-minutes \}\}/);
+  });
+
+  it('passes job-timeout-minutes to preflight', () => {
+    const step = steps().find((entry) => entry.name === 'Run preflight checks');
+    assert.match(step?.text || '', /JOB_TIMEOUT_MINUTES: \$\{\{ inputs\.job-timeout-minutes \}\}/);
+    assert.match(step?.text || '', /core\.setOutput\('effective-timeout-minutes'/);
+  });
+});

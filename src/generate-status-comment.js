@@ -53,6 +53,10 @@ function buildSessionDataMap(env, sessions) {
   if (env.GH_ACTION_URL) entry.gh_action_url = env.GH_ACTION_URL;
   if (env.AGENT_COMMIT_SHA) entry.commit_sha = env.AGENT_COMMIT_SHA;
   if (env.AGENT_PR_URL) entry.pr_url = env.AGENT_PR_URL;
+  if (env.REQUESTED_AGENT) entry.agent = env.REQUESTED_AGENT;
+  if (env.REQUESTED_MODEL_ID) entry.model = env.REQUESTED_MODEL_ID;
+  if (env.REQUESTED_EFFORT) entry.effort = env.REQUESTED_EFFORT;
+  if (env.REQUESTED_MODE) entry.mode = env.REQUESTED_MODE;
   sessionDataMap[latestSession.id] = entry;
   return sessionDataMap;
 }
@@ -129,7 +133,13 @@ function renderStatusComment({ env = process.env, context, outcome }) {
   const agentRunUrl = formatAgentRunUrl(siteName, agentId, sessionId);
   const isFailure = outcome ? outcome === 'failure' : inferFailure(env);
   const isDryRun = env.IS_DRY_RUN === 'true';
-  const model = (latestSession && latestSession.agent_config && latestSession.agent_config.agent) || env.AGENT_MODEL || 'codex';
+  const config = (latestSession && latestSession.agent_config) || {};
+  const requested = /** @type {Record<string, string | undefined>} */ ((latestSession && sessionDataMap[latestSession.id]) || {});
+  const model = utils.describeRunConfig({
+    agent: config.agent || requested.agent || env.AGENT_MODEL || 'codex',
+    model: config.model || requested.model,
+    effort: config.effort || requested.effort,
+  });
   const runNumber = sessions.length || 1;
   const timestamp = new Date().toISOString();
   const title = cleanInline((latestSession && latestSession.title) || env.AGENT_TITLE || '');

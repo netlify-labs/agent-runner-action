@@ -46,6 +46,10 @@ inputs:
     description: 'Automatically create and apply labels on agent runs (opt-in)'
     required: false
     default: 'false'
+  job-timeout-minutes:
+    description: "The workflow job's timeout-minutes. When set, the agent limit is shortened to leave 5 minutes for setup, so the agent times out cleanly before GitHub cancels the job (a cancel stops the agent)."
+    required: false
+    default: ''
   timeout-minutes:
     description: 'Maximum minutes to wait for the agent to complete'
     required: false
@@ -370,6 +374,7 @@ runs:
         DEFAULT_AGENT: ${{ inputs.default-agent || inputs.default-model }}
         DEFAULT_MODEL: ${{ inputs.default-model || inputs.default-agent }}
         TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+        JOB_TIMEOUT_MINUTES: ${{ inputs.job-timeout-minutes }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
         ISSUE_NUMBER: ${{ steps.context-info.outputs.issue-number }}
         PREFLIGHT_ONLY: ${{ inputs.preflight-only }}
@@ -391,6 +396,7 @@ runs:
               defaultAgent: process.env.DEFAULT_AGENT,
               defaultModel: process.env.DEFAULT_MODEL,
               timeoutMinutes: process.env.TIMEOUT_MINUTES,
+              jobTimeoutMinutes: process.env.JOB_TIMEOUT_MINUTES,
               triggerText: process.env.TRIGGER_TEXT,
               issueNumber: process.env.ISSUE_NUMBER,
               eventName,
@@ -482,6 +488,12 @@ runs:
             : `Preflight failed: ${failedChecks.join(', ') || 'unknown checks failed'}`;
 
           core.setOutput('preflight-ok', preflightOk ? 'true' : 'false');
+          core.setOutput('effective-timeout-minutes', String(result.effectiveTimeoutMinutes || ''));
+          const jobTimeoutCheck = result.checks.find((check) => check.id === 'job-timeout');
+          if (jobTimeoutCheck && jobTimeoutCheck.status === 'warn') core.warning(jobTimeoutCheck.message, { title: 'Agent time limit' });
+          if (!process.env.JOB_TIMEOUT_MINUTES) {
+            await core.summary.addRaw('Tip: set `job-timeout-minutes` to your job\'s `timeout-minutes` so the agent limit always fits inside the job.\n').write();
+          }
           core.setOutput('preflight-json', JSON.stringify(result));
           core.setOutput('preflight-summary', summary);
           core.setOutput('failure-category', firstFailureCategory);
@@ -948,7 +960,7 @@ runs:
         SESSION_DATA_MAP: ${{ steps.extract-agent-id.outputs.session-data-map }}
         HEAD_BRANCH: ${{ steps.context-info.outputs.head-ref }}
         REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        MAX_WAIT_MINUTES: ${{ inputs.timeout-minutes }}
+        MAX_WAIT_MINUTES: ${{ steps.preflight.outputs.effective-timeout-minutes || inputs.timeout-minutes }}
         IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
       # run-agent.js reports its own outcome. If it exits non-zero without one
@@ -1056,6 +1068,10 @@ runs:
       continue-on-error: true
       uses: actions/github-script@v8
       env:
+        REQUESTED_AGENT: ${{ steps.context-info.outputs.agent }}
+        REQUESTED_MODEL_ID: ${{ steps.context-info.outputs.model-id }}
+        REQUESTED_EFFORT: ${{ steps.context-info.outputs.effort }}
+        REQUESTED_MODE: normal
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
         AGENT_DEPLOY_URL: ${{ steps.netlify-agent.outputs.agent-deploy-url }}
@@ -1089,6 +1105,10 @@ runs:
       continue-on-error: true
       uses: actions/github-script@v8
       env:
+        REQUESTED_AGENT: ${{ steps.context-info.outputs.agent }}
+        REQUESTED_MODEL_ID: ${{ steps.context-info.outputs.model-id }}
+        REQUESTED_EFFORT: ${{ steps.context-info.outputs.effort }}
+        REQUESTED_MODE: normal
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
         AGENT_ERROR: ${{ steps.netlify-agent.outputs.agent-error }}
         FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.trigger-text-size.outputs.failure-category || steps.preflight.outputs.failure-category }}
@@ -1144,6 +1164,10 @@ runs:
       continue-on-error: true
       uses: actions/github-script@v8
       env:
+        REQUESTED_AGENT: ${{ steps.context-info.outputs.agent }}
+        REQUESTED_MODEL_ID: ${{ steps.context-info.outputs.model-id }}
+        REQUESTED_EFFORT: ${{ steps.context-info.outputs.effort }}
+        REQUESTED_MODE: normal
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
         AGENT_OUTCOME: ${{ steps.netlify-agent.outputs.outcome }}
         AGENT_STEP_OUTCOME: ${{ steps.netlify-agent.outcome }}

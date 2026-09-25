@@ -145,3 +145,12 @@ describe('renderHistoryTocFromComments', () => {
     assert.ok(body.includes(HISTORY_COMMENT_MARKER));
   });
 });
+
+describe('parseResultSummary run configuration', () => {
+  const { parseResultSummary } = require('./generate-history-toc');
+  it('parses old agent-only and new agent · model · effort headers', () => {
+    assert.equal(parseResultSummary('### [Run #1 | codex | Agent Run completed](https://app.netlify.com/projects/s/agent-runs/r) ✅').model, 'codex');
+    const summary = parseResultSummary('### [Run #3 | opencode · GLM 5.2 · max | Agent Run failed](https://app.netlify.com/projects/s/agent-runs/r) ❌');
+    assert.deepEqual([summary.runNumber, summary.model, summary.status], ['3', 'opencode · GLM 5.2 · max', 'failed']);
+  });
+});
