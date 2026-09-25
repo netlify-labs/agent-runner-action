@@ -34,6 +34,10 @@ inputs:
     description: 'Backward-compatible alias for default-agent'
     required: false
     default: 'codex'
+  default-effort:
+    description: 'Default effort level (low, medium, high, xhigh, max). Empty or auto lets the backend choose.'
+    required: false
+    default: ''
   manage-labels:
     description: 'Automatically create and apply labels on agent runs (opt-in)'
     required: false
@@ -88,6 +92,9 @@ outputs:
   model:
     description: 'Backward-compatible alias for agent'
     value: ${{ steps.context-info.outputs.model }}
+  effort:
+    description: 'The selected effort level (empty when the backend chose Auto)'
+    value: ${{ steps.context-info.outputs.effort }}
   trigger-text:
     description: 'The cleaned trigger text / prompt'
     value: ${{ steps.context-info.outputs.trigger-text }}
@@ -208,6 +215,7 @@ runs:
         ACTION_DIR: ${{ github.action_path }}
         DEFAULT_AGENT: ${{ inputs.default-agent || inputs.default-model }}
         DEFAULT_MODEL: ${{ inputs.default-model || inputs.default-agent }}
+        DEFAULT_EFFORT: ${{ inputs.default-effort }}
         DRY_RUN: ${{ inputs.dry-run }}
       with:
         github-token: ${{ inputs.github-token }}
@@ -648,7 +656,8 @@ runs:
           const isDryRun = '${{ steps.context-info.outputs.is-dry-run }}' === 'true';
           const dryRunTag = isDryRun ? ' (preview)' : '';
           const ghActionUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-          const body = utils.buildInProgressComment({ prompt: triggerText, model, ghActionUrl }) +
+          const effort = ${{ toJSON(steps.context-info.outputs.effort) }} || '';
+          const body = utils.buildInProgressComment({ prompt: triggerText, model, effort, ghActionUrl }) +
             (isDryRun ? '\n\n> **Preview mode** — no changes will be committed.\n' : '');
           const { data: comment } = await github.rest.issues.createComment({
             owner: context.repo.owner, repo: context.repo.repo,
@@ -852,8 +861,9 @@ runs:
           const triggerText = ${{ toJSON(steps.context-info.outputs.trigger-text) }} || '';
           const agentRunUrl = `https://app.netlify.com/projects/${siteName}/agent-runs/${runnerId}`;
           const ghActionUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+          const effort = ${{ toJSON(steps.context-info.outputs.effort) }} || '';
           const body = utils.buildInProgressComment({
-            agentRunUrl, prompt: triggerText, model, runnerId, ghActionUrl
+            agentRunUrl, prompt: triggerText, model, effort, runnerId, ghActionUrl
           });
           await github.rest.issues.updateComment({
             owner: context.repo.owner, repo: context.repo.repo,
@@ -875,6 +885,7 @@ runs:
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
         NETLIFY_AGENT: ${{ steps.context-info.outputs.agent || steps.context-info.outputs.model }}
         AGENT_MODEL: ${{ steps.context-info.outputs.model || steps.context-info.outputs.agent }}
+        NETLIFY_EFFORT: ${{ steps.context-info.outputs.effort }}
         EXISTING_RUNNER_ID: ${{ steps.extract-agent-id.outputs.agent-runner-id }}
         SESSION_DATA_MAP: ${{ steps.extract-agent-id.outputs.session-data-map }}
         HEAD_BRANCH: ${{ steps.context-info.outputs.head-ref }}

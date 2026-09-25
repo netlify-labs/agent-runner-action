@@ -27,6 +27,18 @@ session to an existing agent PR, but it never merges the PR automatically.
 
 The default agent is `codex`. Specify `claude`, `codex`, or `gemini` after `@netlify` to choose an agent.
 
+### Effort level
+
+Add an effort level directly after the agent: `low`, `medium`, `high`, `xhigh`, or `max`. Without one, the backend chooses (Auto), unless you set `default-effort`.
+
+```
+@netlify claude high Refactor the checkout flow
+@netlify codex low: Fix the typo in the footer
+@netlify Add pagination to the blog effort:medium
+```
+
+The effort word only counts when it comes right after the agent and is followed by a space, `:`, or the end of the line. That means `@netlify codex low-hanging fixes` leaves effort on Auto. A prompt that starts with an effort word, like `@netlify claude high priority: ...`, is read as `high`. To avoid that, write `effort:<level>` (or `effort=<level>`) anywhere on the `@netlify` line; it takes precedence. `effort:auto` forces Auto. A follow-up comment on a PR only changes effort when it names one.
+
 Aliases like `@netlify-agent` and `@netlify-ai` work too, and common typos are recognised (`@nelify`, `@netlfy`, `@netify`, `@netlif`, `@netfly`). Mentions inside fenced code blocks or inline code spans are ignored, so you can quote `@netlify` in a comment without triggering a run.
 
 ## Quick start
@@ -134,6 +146,7 @@ Or comment `@netlify make it blue` on an existing PR.
 | `allowed-users` | No | `''` | Comma-separated usernames allowed to trigger (empty = repo collaborators) |
 | `default-agent` | No | `codex` | Default agent (`claude`, `codex`, or `gemini`) |
 | `default-model` | No | `codex` | Backward-compatible alias for `default-agent` |
+| `default-effort` | No | `''` | Default effort level (`low`, `medium`, `high`, `xhigh`, `max`). Empty or `auto` lets the backend choose |
 | `manage-labels` | No | `false` | Auto-create and apply labels on agent runs |
 | `dry-run` | No | `false` | Start an agent run but skip commit/PR creation |
 | `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent run |
@@ -189,6 +202,7 @@ Use these outputs in subsequent workflow steps for custom automation:
 | `agent-deploy-url` | Deploy preview URL |
 | `agent` | Agent that was used |
 | `model` | Backward-compatible alias for `agent` |
+| `effort` | Effort level that was requested (empty when the backend chose Auto) |
 | `trigger-text` | Cleaned trigger text / prompt |
 | `is-pr` | Whether triggered from a PR (`true`/`false`) |
 | `issue-number` | Issue or PR number |

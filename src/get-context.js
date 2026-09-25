@@ -1,6 +1,7 @@
 // Extract context information from the GitHub event.
 // Sets outputs: issue-number, pr-number, head-ref, base-ref, head-sha,
-//               is-pr, trigger-text, has-linked-pr, agent, model, is-dry-run
+//               is-pr, trigger-text, has-linked-pr, agent, model, effort,
+//               is-dry-run
 
 /** @typedef {import('./types').ActionParams} ActionParams */
 
@@ -12,6 +13,11 @@ const utils = require('./utils');
  */
 module.exports = async function getContext({ github, context, core }) {
   const defaultAgent = process.env.DEFAULT_AGENT || process.env.DEFAULT_MODEL || 'codex';
+  let defaultEffort = utils.normalizeEffort(process.env.DEFAULT_EFFORT);
+  if (defaultEffort === null) {
+    console.log(`Ignoring unsupported default-effort "${process.env.DEFAULT_EFFORT}"; using Auto. Supported: ${utils.VALID_EFFORTS.join(', ')}, auto.`);
+    defaultEffort = '';
+  }
 
   /** @type {number | undefined} */
   let issueNumber;
@@ -27,6 +33,9 @@ module.exports = async function getContext({ github, context, core }) {
   let triggerText = '';
   let hasLinkedPR = false;
   let isPR = false;
+  // Text used to select agent and effort. Differs from triggerText only when
+  // an issue title's @netlify mention is stripped for display.
+  let selectionText = '';
 
   const { payload } = context;
 
@@ -53,11 +62,13 @@ module.exports = async function getContext({ github, context, core }) {
     let issueTitle = issue?.title || '';
     const issueBody = issue?.body || '';
     if (utils.matchesTrigger(issueTitle)) {
+      selectionText = `${issueTitle}\n\n${issueBody}`;
       // Strip @netlify mention from title only when the title itself contains the trigger
       issueTitle = issueTitle
         .replace(utils.TRIGGER_PATTERN, '')
-        .replace(/\s+(?:with|using|use|via)\s+(?:claude|codex|gemini)\s*/i, '')
-        .replace(/\s+(?:claude|codex|gemini)\s*/i, '')
+        .replace(new RegExp(`\\s+(?:with|using|use|via)\\s+(?:claude|codex|gemini)(?:[ \\t]+(?:${utils.VALID_EFFORTS.join('|')})(?=\\s|:|$))?\\s*`, 'i'), '')
+        .replace(new RegExp(`\\s+(?:claude|codex|gemini)(?:[ \\t]+(?:${utils.VALID_EFFORTS.join('|')})(?=\\s|:|$))?\\s*`, 'i'), '')
+        .replace(new RegExp(`\\s*${utils.EXPLICIT_EFFORT_PATTERN.source}`, 'i'), '')
         .trim();
     }
     triggerText = `${issueTitle}\n\n${issueBody}`.trim();
@@ -97,6 +108,8 @@ module.exports = async function getContext({ github, context, core }) {
       : (payload.review?.body || '');
   }
 
+  selectionText = selectionText || triggerText;
+
   // Detect preview/dry-run mode from trigger text
   const isDryRun = process.env.DRY_RUN === 'true' ||
     /\b(?:preview|dry[- ]?run)\b/i.test(triggerText.split('\n')[0] || '');
@@ -107,7 +120,16 @@ module.exports = async function getContext({ github, context, core }) {
   if (context.eventName === 'workflow_dispatch' && workflowDispatchAgent) {
     agent = workflowDispatchAgent.toLowerCase();
   } else {
-    agent = utils.extractModel(triggerText, defaultAgent);
+    agent = utils.extractModel(selectionText, defaultAgent);
+  }
+
+  // Extract effort. Empty means omit it and let the backend choose (Auto).
+  let effort = defaultEffort;
+  const workflowDispatchEffort = utils.normalizeEffort(payload.inputs?.effort);
+  if (context.eventName === 'workflow_dispatch' && workflowDispatchEffort) {
+    effort = workflowDispatchEffort;
+  } else {
+    effort = utils.extractEffort(selectionText, defaultEffort);
   }
 
   // Append source URL for back-linking
@@ -137,7 +159,8 @@ module.exports = async function getContext({ github, context, core }) {
   core.setOutput('linked-pr-number', linkedPrNumber);
   core.setOutput('agent', agent);
   core.setOutput('model', agent);
+  core.setOutput('effort', effort);
   core.setOutput('is-dry-run', isDryRun.toString());
 
-  console.log(`Context: event=${context.eventName} issue=#${issueNumber} isPR=${isPR} agent=${agent} dryRun=${isDryRun}`);
+  console.log(`Context: event=${context.eventName} issue=#${issueNumber} isPR=${isPR} agent=${agent} effort=${effort || 'auto'} dryRun=${isDryRun}`);
 };

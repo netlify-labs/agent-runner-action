@@ -270,4 +270,87 @@ describe('getContext', () => {
     await getContext({ github: mockGithub(), context, core });
     assert.ok(core.outputs['trigger-text'].includes('◌ https://github.com/o/r/issues/1#issuecomment-123'));
   });
+
+  describe('effort', () => {
+    beforeEach(() => {
+      delete process.env.DEFAULT_EFFORT;
+    });
+
+    function commentContext(body) {
+      return {
+        eventName: 'issue_comment',
+        payload: {
+          issue: { number: 5 },
+          comment: { body, html_url: 'https://github.com/o/r/issues/5#c1' },
+        },
+        repo: { owner: 'o', repo: 'r' },
+      };
+    }
+
+    it('outputs the effort named after the agent', async () => {
+      await getContext({ github: mockGithub(), context: commentContext('@netlify claude high Fix it'), core });
+      assert.equal(core.outputs.agent, 'claude');
+      assert.equal(core.outputs.effort, 'high');
+    });
+
+    it('outputs empty effort (Auto) by default', async () => {
+      await getContext({ github: mockGithub(), context: commentContext('@netlify claude Fix it'), core });
+      assert.equal(core.outputs.effort, '');
+    });
+
+    it('applies default-effort when the mention names none', async () => {
+      process.env.DEFAULT_EFFORT = 'medium';
+      await getContext({ github: mockGithub(), context: commentContext('@netlify claude Fix it'), core });
+      assert.equal(core.outputs.effort, 'medium');
+    });
+
+    it('falls back to Auto for an unsupported default-effort', async () => {
+      process.env.DEFAULT_EFFORT = 'extreme';
+      await getContext({ github: mockGithub(), context: commentContext('@netlify claude Fix it'), core });
+      assert.equal(core.outputs.effort, '');
+    });
+
+    it('uses the workflow_dispatch effort input', async () => {
+      const context = {
+        eventName: 'workflow_dispatch',
+        payload: { inputs: { trigger_text: 'Fix it', agent: 'claude', effort: 'xhigh' } },
+        repo: { owner: 'o', repo: 'r' },
+      };
+      await getContext({ github: mockGithub(), context, core });
+      assert.equal(core.outputs.effort, 'xhigh');
+    });
+
+    it('treats workflow_dispatch effort auto as no override', async () => {
+      process.env.DEFAULT_EFFORT = 'low';
+      const context = {
+        eventName: 'workflow_dispatch',
+        payload: { inputs: { trigger_text: 'Fix it', effort: 'auto' } },
+        repo: { owner: 'o', repo: 'r' },
+      };
+      await getContext({ github: mockGithub(), context, core });
+      assert.equal(core.outputs.effort, 'low');
+    });
+
+    it('selects agent and effort from an issue title and strips them', async () => {
+      const context = {
+        eventName: 'issues',
+        payload: {
+          issue: {
+            number: 9,
+            title: '@netlify claude high Build a page',
+            body: 'Details about the page',
+            html_url: 'https://github.com/o/r/issues/9',
+          },
+        },
+        repo: { owner: 'o', repo: 'r' },
+      };
+      await getContext({ github: mockGithub(), context, core });
+      assert.equal(core.outputs.agent, 'claude');
+      assert.equal(core.outputs.effort, 'high');
+      assert.ok(
+        core.outputs['trigger-text'].startsWith('Build a page'),
+        `Expected clean title but got: ${core.outputs['trigger-text'].split('\n')[0]}`
+      );
+    });
+  });
 });

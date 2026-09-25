@@ -345,3 +345,94 @@ describe('escapeMarkdownLinks', () => {
     assert.equal(utils.escapeMarkdownLinks('Result complete.'), 'Result complete.');
   });
 });
+
+// ---------------------------------------------------------------------------
+// extractEffort / normalizeEffort
+// ---------------------------------------------------------------------------
+describe('extractEffort', () => {
+  it('reads the effort word directly after the agent', () => {
+    assert.equal(utils.extractEffort('@netlify claude high fix the bug'), 'high');
+    assert.equal(utils.extractEffort('@netlify codex xhigh add tests'), 'xhigh');
+    assert.equal(utils.extractEffort('@netlify with gemini LOW refactor'), 'low');
+    assert.equal(utils.extractEffort('@netlify claude max'), 'max');
+  });
+
+  it('accepts a colon boundary after the effort word', () => {
+    assert.equal(utils.extractEffort('@netlify codex low: fix the typo'), 'low');
+  });
+
+  it('defaults to Auto (empty string) when no effort is given', () => {
+    assert.equal(utils.extractEffort('@netlify claude fix the bug'), '');
+    assert.equal(utils.extractEffort('@netlify fix the bug'), '');
+    assert.equal(utils.extractEffort(''), '');
+    assert.equal(utils.extractEffort(null), '');
+  });
+
+  it('does not treat hyphenated or embedded words as effort', () => {
+    assert.equal(utils.extractEffort('@netlify codex low-hanging fixes'), '');
+    assert.equal(utils.extractEffort('@netlify claude highlight the nav'), '');
+    assert.equal(utils.extractEffort('@netlify claude maximize images'), '');
+  });
+
+  it('requires an agent before a positional effort word', () => {
+    assert.equal(utils.extractEffort('@netlify high contrast mode'), '');
+  });
+
+  it('lets an explicit effort token win over the positional word', () => {
+    assert.equal(utils.extractEffort('@netlify claude high priority: fix login effort:low'), 'low');
+    assert.equal(utils.extractEffort('@netlify add pagination effort=medium'), 'medium');
+    assert.equal(utils.extractEffort('@netlify claude high fix effort:auto', 'max'), '');
+  });
+
+  it('only reads effort from lines that mention @netlify', () => {
+    assert.equal(utils.extractEffort('Thanks!\n@netlify claude high fix it'), 'high');
+    assert.equal(utils.extractEffort('@netlify claude fix it\n\nnotes: effort:high'), '');
+  });
+
+  it('ignores effort inside code spans', () => {
+    assert.equal(utils.extractEffort('@netlify claude fix `effort:high` parsing'), '');
+  });
+
+  it('uses a valid default when nothing matches', () => {
+    assert.equal(utils.extractEffort('@netlify claude fix it', 'medium'), 'medium');
+    assert.equal(utils.extractEffort('@netlify claude fix it', 'bogus'), '');
+    assert.equal(utils.extractEffort('@netlify claude low fix it', 'max'), 'low');
+  });
+});
+
+describe('normalizeEffort', () => {
+  it('maps empty and auto to Auto, and rejects unknown values', () => {
+    assert.equal(utils.normalizeEffort(''), '');
+    assert.equal(utils.normalizeEffort(undefined), '');
+    assert.equal(utils.normalizeEffort(' AUTO '), '');
+    assert.equal(utils.normalizeEffort('High'), 'high');
+    assert.equal(utils.normalizeEffort('extreme'), null);
+  });
+});
+
+describe('cleanPrompt with effort', () => {
+  it('strips the agent and effort prefix', () => {
+    assert.equal(utils.cleanPrompt('@netlify claude high Fix the header'), 'Fix the header');
+    assert.equal(utils.cleanPrompt('@netlify codex low: Fix the typo'), ': Fix the typo');
+  });
+
+  it('keeps words that are not effort levels', () => {
+    assert.equal(utils.cleanPrompt('@netlify codex low-hanging fixes'), 'low-hanging fixes');
+  });
+
+  it('strips an explicit effort token', () => {
+    assert.equal(utils.cleanPrompt('@netlify Add pagination effort:medium'), 'Add pagination');
+  });
+});
+
+describe('buildInProgressComment effort', () => {
+  it('shows effort next to the agent when set', () => {
+    const body = utils.buildInProgressComment({ prompt: '@netlify claude high Fix it', model: 'claude', effort: 'high' });
+    assert.match(body, /\*\*Agent:\*\* `claude` · \*\*Effort:\*\* `high`/);
+  });
+
+  it('omits effort when Auto', () => {
+    const body = utils.buildInProgressComment({ prompt: '@netlify claude Fix it', model: 'claude', effort: '' });
+    assert.doesNotMatch(body, /Effort/);
+  });
+});

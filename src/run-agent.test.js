@@ -303,6 +303,118 @@ describe('follow-up compatibility and session-aware landing', () => {
   });
 });
 
+describe('effort forwarding', () => {
+  function dryRunTransport(calls) {
+    const runner = clone(fixture.runner);
+    const known = { ...clone(fixture.session), sessionId: 'known-session' };
+    let current = clone(fixture.session);
+    const sessions = [known];
+    return {
+      async createRunner(input) {
+        calls.createRunner.push(input);
+        current.prompt = input.prompt;
+        if (input.effort !== undefined) current.effort = input.effort;
+        sessions.push(current);
+        return runner;
+      },
+      async createSession(runnerId, input) {
+        calls.createSession.push(input);
+        current = {
+          ...clone(fixture.session),
+          sessionId: 'current-follow-up',
+          runnerId,
+          prompt: input.prompt,
+          ...(input.effort === undefined ? {} : { effort: input.effort }),
+        };
+        sessions.push(current);
+        return current;
+      },
+      async getRunner() {
+        return runner;
+      },
+      async listRunners() {
+        return { items: [runner] };
+      },
+      async listAccountRunners() {
+        return { items: [runner] };
+      },
+      async getSession(_runnerId, sessionId) {
+        return sessions.find(session => session.sessionId === sessionId) || current;
+      },
+      async listSessions() {
+        return sessions;
+      },
+      async cancelRunner() {},
+      async cancelSession() {},
+      async member(_runnerId, action) {
+        if (action === 'diff') {
+          return {
+            diff: { kind: 'inline', text: 'diff --git a/fixture.txt b/fixture.txt' },
+          };
+        }
+        throw new Error(`Unexpected member action: ${action}`);
+      },
+    };
+  }
+
+  async function runWith(overrides, calls = { createRunner: [], createSession: [] }) {
+    const runnerTemp = tempDirectory();
+    try {
+      const sdk = createAgentRunnerSdk({
+        transport: dryRunTransport(calls),
+        sleep: async () => {},
+      });
+      await runAgentAction({
+        env: actionEnv(runnerTemp, { IS_DRY_RUN: 'true', ...overrides }),
+        sdk,
+        setOutput: outputCollector().setOutput,
+        log: () => {},
+        getScreenshot: async () => '',
+      });
+      return calls;
+    } finally {
+      fs.rmSync(runnerTemp, { recursive: true, force: true });
+    }
+  }
+
+  it('forwards an explicit effort when creating a runner', async () => {
+    const calls = await runWith({ NETLIFY_EFFORT: 'high' });
+    assert.equal(calls.createRunner.length, 1);
+    assert.equal(calls.createRunner[0].effort, 'high');
+    assert.equal(calls.createRunner[0].agent, 'codex');
+  });
+
+  it('omits effort for backend Auto when none is selected', async () => {
+    const calls = await runWith({ NETLIFY_EFFORT: '' });
+    assert.equal(calls.createRunner.length, 1);
+    assert.equal('effort' in calls.createRunner[0], false);
+  });
+
+  it('forwards effort on follow-ups only when one is given', async () => {
+    const followUp = {
+      EXISTING_RUNNER_ID: fixture.runner.runnerId,
+      SESSION_DATA_MAP: JSON.stringify({ 'known-session': {} }),
+    };
+    const withEffort = await runWith({ ...followUp, NETLIFY_EFFORT: 'xhigh' });
+    assert.equal(withEffort.createSession.length, 1);
+    assert.equal(withEffort.createSession[0].effort, 'xhigh');
+
+    const withoutEffort = await runWith(followUp);
+    assert.equal(withoutEffort.createSession.length, 1);
+    assert.equal('effort' in withoutEffort.createSession[0], false);
+  });
+
+  it('rejects malformed effort values before any SDK call', async () => {
+    const calls = { createRunner: [], createSession: [] };
+    await assert.rejects(
+      runWith({ NETLIFY_EFFORT: 'high; rm -rf' }, calls),
+      ReportedActionError,
+    );
+    assert.equal(calls.createRunner.length, 0);
+    assert.equal(calls.createSession.length, 0);
+  });
+});
+
 describe('action policy and failures', () => {
   it('does not land or expose a PR URL in dry-run mode', async () => {
     const runnerTemp = tempDirectory();

@@ -276,6 +276,13 @@ jobs:
 @netlify gemini Add a testimonials carousel</code></pre>
   <p>Default agent is <code>codex</code>. You can change the default with the <code>default-agent</code> input.</p>
 
+  <h3>Choose an effort level</h3>
+  <p>Add <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, or <code>max</code> right after the agent. Without one, the backend chooses (Auto), unless you set <code>default-effort</code>.</p>
+  <pre><code>@netlify claude high Refactor the checkout flow
+@netlify codex low: Fix the typo in the footer
+@netlify Add pagination to the blog effort:medium</code></pre>
+  <p>Only the word directly after the agent counts, and only when a space, <code>:</code>, or the end of the line follows it. <code>effort:&lt;level&gt;</code> anywhere on the <code>@netlify</code> line takes precedence, and <code>effort:auto</code> forces Auto.</p>
+
   <h3>Follow-up prompts</h3>
   <p>After the first run creates a PR, add follow-up <code>@netlify</code> comments on the PR to iterate. The agent continues from where it left off.</p>
 
@@ -313,6 +320,7 @@ jobs:
     <tr><td><code>allowed-users</code></td><td>No</td><td><code>''</code></td><td>Comma-separated usernames allowed to trigger</td></tr>
     <tr><td><code>default-agent</code></td><td>No</td><td><code>codex</code></td><td>Default agent (<code>claude</code>, <code>codex</code>, <code>gemini</code>)</td></tr>
     <tr><td><code>default-model</code></td><td>No</td><td><code>codex</code></td><td>Backward-compatible alias for <code>default-agent</code></td></tr>
+    <tr><td><code>default-effort</code></td><td>No</td><td><code>''</code></td><td>Default effort level (<code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>). Empty or <code>auto</code> lets the backend choose</td></tr>
     <tr><td><code>manage-labels</code></td><td>No</td><td><code>false</code></td><td>Auto-create and apply labels on runs</td></tr>
     <tr><td><code>dry-run</code></td><td>No</td><td><code>false</code></td><td>Start an agent run but skip commit/PR creation</td></tr>
     <tr><td><code>preflight-only</code></td><td>No</td><td><code>false</code></td><td>Validate setup and exit without creating/resuming an agent run</td></tr>
@@ -335,6 +343,7 @@ jobs:
     <tr><td><code>agent-deploy-url</code></td><td>Deploy preview URL</td></tr>
     <tr><td><code>agent</code></td><td>Agent that was used</td></tr>
     <tr><td><code>model</code></td><td>Backward-compatible alias for <code>agent</code></td></tr>
+    <tr><td><code>effort</code></td><td>Effort level that was requested (empty when the backend chose Auto)</td></tr>
     <tr><td><code>trigger-text</code></td><td>Cleaned trigger prompt</td></tr>
     <tr><td><code>is-pr</code></td><td><code>true</code> / <code>false</code></td></tr>
     <tr><td><code>issue-number</code></td><td>Issue or PR number</td></tr>

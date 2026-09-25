@@ -21,6 +21,18 @@ on:
           - claude
           - gemini
         default: 'codex'
+      effort:
+        description: 'Effort level (auto lets the backend choose)'
+        required: false
+        type: choice
+        options:
+          - auto
+          - low
+          - medium
+          - high
+          - xhigh
+          - max
+        default: 'auto'
   pull_request_target:
     types: [opened, reopened]
   pull_request_review_comment:
@@ -58,6 +70,7 @@ jobs:
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
           # Optional settings:
           # default-agent: 'codex'        # Default agent (claude, codex, gemini)
+          # default-effort: ''            # Default effort (low, medium, high, xhigh, max); empty = Auto
           # manage-labels: 'false'        # Auto-create and apply labels
           # dry-run: 'false'              # Still starts an agent run; skips commit/PR creation
           # preflight-only: 'false'       # Validate setup only; starts no agent run
