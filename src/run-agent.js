@@ -15,6 +15,7 @@ const {
   createAuthenticatedNetlifyClient,
   redactSensitiveText,
 } = require('nax-agent-runner-sdk');
+const { MODEL_ID_PATTERN } = require('./agent-catalog');
 
 /** @typedef {import('nax-agent-runner-sdk').AgentRunnerSdk} AgentRunnerSdk */
 /** @typedef {import('nax-agent-runner-sdk').Handle} Handle */
@@ -27,7 +28,6 @@ const {
 const RUNNER_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const AGENT_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const EFFORT_PATTERN = /^[a-z]{1,32}$/;
-const MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._~\/-]{0,127}$/;
 const MAX_TIMEOUT_MINUTES = 24 * 60;
 const POLL_INTERVAL_MS = 15_000;
 const CHECKPOINT_FILE_PREFIX = 'agent-runner-sdk-handle-';

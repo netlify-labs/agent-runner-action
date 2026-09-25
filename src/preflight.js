@@ -4,7 +4,7 @@
 const { createPreflightCheck, createPreflightResult } = require('./contracts');
 const { classifyFailure } = require('./failure-taxonomy');
 
-const VALID_MODELS = Object.freeze(['claude', 'codex', 'gemini']);
+const VALID_MODELS = Object.freeze([...require('./agent-catalog').PROVIDERS]);
 const DEFAULT_MODEL = 'codex';
 
 /**

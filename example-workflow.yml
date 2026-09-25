@@ -34,6 +34,7 @@ on:
           - codex
           - claude
           - gemini
+          - opencode
         default: 'codex'
       model_id:
         description: 'Model (auto lets the backend choose; a model picks its own agent)'
@@ -53,6 +54,13 @@ on:
           - gemini-3.1-pro-preview
           - gemini-3.6-flash
           - gemini-3.5-flash-lite
+          - moonshotai/kimi-k3
+          - moonshotai/kimi-k2.7-code
+          - z-ai/glm-5.2
+          - deepseek/deepseek-v4-pro
+          - ~deepseek/deepseek-v4-flash-latest
+          - x-ai/grok-4.5
+          - minimax/minimax-m3
         default: 'auto'
       effort:
         description: 'Effort level (auto lets the backend choose)'
@@ -63,6 +71,7 @@ on:
           - low
           - medium
           - high
+          - max
         default: 'auto'
   pull_request_target:
     types: [opened, reopened]
@@ -101,9 +110,9 @@ jobs:
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
           # Optional settings:
-          # default-agent: 'codex'        # Default agent (claude, codex, gemini)
+          # default-agent: 'codex'        # Default agent (claude, codex, gemini, opencode)
           # default-model-id: ''          # Default model (e.g. claude-fable-5 or fable); empty = Auto
-          # default-effort: ''            # Default effort (low, medium, high); empty = Auto
+          # default-effort: ''            # Default effort (low, medium, high, max*); empty = Auto
           # manage-labels: 'false'        # Auto-create and apply labels
           # dry-run: 'false'              # Still starts an agent run; skips commit/PR creation
           # preflight-only: 'false'       # Validate setup only; starts no agent run

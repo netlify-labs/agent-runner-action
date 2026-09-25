@@ -90,6 +90,7 @@
  * @property {string} model
  * @property {string} [modelLabel]
  * @property {string} [effort]
+ * @property {string} [effortLabel] Effort as displayed when it differs from the wire value.
  * @property {string} [configWarnings] Newline-separated configuration warnings.
  * @property {string} [runnerId]
  * @property {string} [ghActionUrl]

@@ -37,6 +37,23 @@ describe('normalizePreflightInput', () => {
 });
 
 describe('runPreflight', () => {
+  it('accepts every catalog provider as default-agent', async () => {
+    for (const defaultAgent of ['claude', 'codex', 'gemini', 'opencode']) {
+      const result = await runPreflight({
+        netlifyAuthToken: 'token',
+        netlifySiteId: 'site-id',
+        githubToken: 'gh-token',
+        defaultAgent,
+        timeoutMinutes: 10,
+        triggerText: '@netlify fix it',
+        issueNumber: '88',
+        commentsRequired: true,
+      });
+      const check = result.checks.find(entry => entry.id === 'default-agent');
+      assert.equal(check.status, 'pass', defaultAgent);
+    }
+  });
+
   it('passes static checks and records skipped runtime checks as warnings', async () => {
     const result = await runPreflight({
       netlifyAuthToken: 'token',

@@ -33,7 +33,7 @@ const TRIGGER_BASE_PATTERN = `(?:${TRIGGER_BASES.join('|')})`;
 // ---------------------------------------------------------------------------
 
 /** @type {string[]} */
-const VALID_MODELS = ['claude', 'codex', 'gemini'];
+const VALID_MODELS = catalog.PROVIDERS;
 const DEFAULT_MODEL = 'codex';
 
 /** @type {string[]} */
@@ -78,10 +78,14 @@ const EXPLICIT_EFFORT_PATTERN = new RegExp(
 );
 
 /** Match an explicit "model:<id>" or "model=<id>" token. */
-const EXPLICIT_MODEL_PATTERN = /(?<![\w-])model[:=]([A-Za-z0-9][A-Za-z0-9._~\/-]*)(?![\w-])/i;
+const EXPLICIT_MODEL_PATTERN = /(?<![\w-])model[:=](~?[A-Za-z0-9][A-Za-z0-9._~\/-]*)(?![\w-])/i;
 
-/** One selector word, followed by whitespace, ':', ',' or end of line. */
-const SELECTOR_WORD_PATTERN = /^[ \t]+([A-Za-z0-9][A-Za-z0-9._~\/-]*?)(?=[ \t]|[:,]|$)/;
+/**
+ * One selector word, followed by whitespace (including the '\r' of CRLF
+ * bodies), ':', ',', a sentence-ending '.', or end of line. A '.' inside a
+ * word (opus-4.8) is part of the word.
+ */
+const SELECTOR_WORD_PATTERN = /^[ \t]+(~?[A-Za-z0-9][A-Za-z0-9._~\/-]*?)(?=\s|[:,]|\.(?:\s|$)|$)/;
 const CONNECTOR_PATTERN = /^[ \t]+(?:with|using|use|via)(?=[ \t])/i;
 
 // ---------------------------------------------------------------------------
@@ -198,7 +202,12 @@ function parseMentionLine(line) {
   }
 
   const explicitModel = line.match(EXPLICIT_MODEL_PATTERN);
-  if (explicitModel) selection.model = explicitModel[1].toLowerCase();
+  if (explicitModel) {
+    // Keep the agent a positional model implied (e.g. "fable" -> claude).
+    const implied = selection.model ? catalog.resolveModelWord(selection.model, selection.agent) : undefined;
+    if (!selection.agent && implied) selection.agent = implied.provider;
+    selection.model = explicitModel[1].toLowerCase();
+  }
   const explicitEffort = line.match(EXPLICIT_EFFORT_PATTERN);
   if (explicitEffort) selection.effort = explicitEffort[1].toLowerCase();
   return selection;
@@ -270,6 +279,8 @@ function extractEffort(text, defaultEffort) {
  * @property {string} modelId Wire model ID; '' means backend Auto.
  * @property {string} modelLabel Display label for the model ('' for Auto).
  * @property {string} effort Wire effort; '' means backend Auto.
+ * @property {string} effortLabel Effort as typed/displayed (e.g. `max` when
+ *   the wire value is `xhigh`).
  * @property {string[]} warnings Human-readable adjustments that were made.
  */
 
@@ -326,10 +337,10 @@ function resolveSelection(selection, defaults = {}) {
       modelLabel = known.label;
     }
   } else if (modelWord && modelWord !== 'auto') {
-    if (/^[a-z0-9][a-z0-9._~\/-]{0,127}$/.test(modelWord)) {
-      warnings.push(`Model "${modelWord}" is not in the action's catalog; passing it through for Agent Runner to validate.`);
+    if (catalog.MODEL_ID_PATTERN.test(modelWord)) {
+      warnings.push(`Model \`${modelWord}\` is not in the action's catalog; passing it through for Agent Runner to validate.`);
       modelId = modelWord;
-      modelLabel = modelWord;
+      modelLabel = `\`${modelWord}\``;
     } else {
       warnings.push('Ignoring an invalid model value; using Auto.');
     }
@@ -345,19 +356,26 @@ function resolveSelection(selection, defaults = {}) {
     }
     effort = fallback || '';
   }
+  let effortLabel = effort;
   if (effort) {
     const knownForEffort = catalog.modelById(modelId);
     const supported = knownForEffort
       ? knownForEffort.efforts
       : modelId ? null : catalog.AUTO_MODEL_EFFORTS;
-    if (supported && !supported.includes(effort)) {
+    const match = supported ? catalog.findEffort(supported, effort) : undefined;
+    if (supported && !match) {
       const target = knownForEffort ? knownForEffort.label : `${agent} (Auto model)`;
-      warnings.push(`Effort "${effort}" is not supported by ${target} (supported: ${supported.join(', ')}); using Auto.`);
+      const levels = supported.map((level) => level.id).join(', ') || 'none; Auto only';
+      warnings.push(`Effort "${effort}" is not supported by ${target} (supported: ${levels}); using Auto.`);
       effort = '';
+      effortLabel = '';
+    } else if (match) {
+      effort = match.wire || match.id;
+      effortLabel = match.id;
     }
   }
 
-  return { agent, modelId, modelLabel, effort, warnings };
+  return { agent, modelId, modelLabel, effort, effortLabel, warnings };
 }
 
 /**
@@ -372,7 +390,7 @@ function stripSelection(text) {
     const selection = parseMentionLine(lines[index]);
     if (!selection) continue;
     const line = lines[index];
-    const after = line.slice(selection.end).replace(/^[ \t]*[:,]?[ \t]*/, '');
+    const after = line.slice(selection.end).replace(/^[ \t]*(?:[:,]|\.(?=\s|$))?[ \t]*/, '');
     lines[index] = (line.slice(0, selection.start) + after)
       .replace(new RegExp(`[ \\t]*${EXPLICIT_MODEL_PATTERN.source}`, 'i'), '')
       .replace(new RegExp(`[ \\t]*${EXPLICIT_EFFORT_PATTERN.source}`, 'i'), '');
@@ -513,7 +531,7 @@ function formatRunDate(dateStr) {
  * @param {InProgressCommentOptions} options
  * @returns {string}
  */
-function buildInProgressComment({ agentRunUrl, prompt, model, modelLabel, effort, configWarnings, runnerId, ghActionUrl }) {
+function buildInProgressComment({ agentRunUrl, prompt, model, modelLabel, effort, effortLabel, configWarnings, runnerId, ghActionUrl }) {
   const [flavor, emoji] = randomFlavor();
   const clean = cleanPrompt(prompt);
   const sourceUrlMatch = (prompt || '').match(/◌\s+(\S+)/);
@@ -526,7 +544,7 @@ function buildInProgressComment({ agentRunUrl, prompt, model, modelLabel, effort
   body += `Netlify Agent Runners ${flavor} ${emoji}\n\n`;
   const config = [`**Agent:** \`${model}\``];
   if (modelLabel) config.push(`**Model:** ${modelLabel}`);
-  if (effort) config.push(`**Effort:** \`${effort}\``);
+  if (effort) config.push(`**Effort:** \`${effortLabel || effort}\``);
   body += `${config.join(' · ')}\n\n`;
   for (const warning of String(configWarnings || '').split('\n').filter(Boolean)) {
     body += `> ⚠️ ${escapeMarkdownLinks(warning)}\n`;

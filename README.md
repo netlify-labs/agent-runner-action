@@ -25,7 +25,7 @@ session to an existing agent PR, but it never merges the PR automatically.
 @netlify gemini Add a testimonials section
 ```
 
-The default agent is `codex`. Specify `claude`, `codex`, or `gemini` after `@netlify` to choose an agent.
+The default agent is `codex`. Specify `claude`, `codex`, `gemini`, or `opencode` after `@netlify` to choose an agent.
 
 ### Choosing a model and effort
 
@@ -53,10 +53,16 @@ A model picks its own agent, so `fable` means Claude. If you name a model from a
 | codex | `gpt-5.4-mini` | `codex mini` |
 | gemini | `gemini-3.1-pro-preview` | `gemini pro` |
 | gemini | `gemini-3.6-flash` / `gemini-3.5-flash-lite` | `gemini flash` / `gemini flash-lite` |
+| opencode | `moonshotai/kimi-k3` (Kimi K3) | `kimi` or `k3` |
+| opencode | `moonshotai/kimi-k2.7-code` (Kimi K2.7 Code) | `kimi-code` |
+| opencode | `z-ai/glm-5.2` (GLM 5.2) | `glm` |
+| opencode | `deepseek/deepseek-v4-pro` / `~deepseek/deepseek-v4-flash-latest` | `deepseek` / `deepseek-flash` |
+| opencode | `x-ai/grok-4.5` (Grok 4.5) | `grok` |
+| opencode | `minimax/minimax-m3` (MiniMax M3) | `minimax` |
 
-The Claude names (`fable`, `opus`, `sonnet`, `haiku`) work on their own and as `@netlify-fable`-style mentions. The shorter Codex and Gemini names need the agent in front, so a prompt starting with "pro tip" isn't read as a model. Exact model IDs always work, and `model:<id>` anywhere on the `@netlify` line requests any model, including ones missing from this list. Those are passed through for Agent Runner to validate.
+The Claude and OpenCode names (`fable`, `opus`, `sonnet`, `haiku`, `kimi`, `glm`, `deepseek`, `grok`, `minimax`, and so on) work on their own, and the single-word ones also work as `@netlify-fable`-style mentions. The shorter Codex and Gemini names need the agent in front, so a prompt starting with "pro tip" isn't read as a model. Exact model IDs always work, and `model:<id>` anywhere on the `@netlify` line requests any model, including ones missing from this list. Those are passed through for Agent Runner to validate.
 
-Effort levels are `low`, `medium`, and `high`, and they go after an agent or model. A level only counts when a space, `:`, `,`, or the end of the line follows it, so `@netlify codex low-hanging fixes` leaves effort on Auto. `effort:<level>` anywhere on the line overrides the positional word (use it for prompts like `@netlify claude high priority: ...`), and `effort:auto` forces Auto. If a level isn't supported for the chosen model, the action falls back to Auto and posts a warning in the status comment. A follow-up comment on a PR only changes the model or effort when it names one.
+Effort levels go after an agent or model. Claude, Codex, and Gemini models take `low`, `medium`, or `high`. OpenCode models vary: Kimi K3 and DeepSeek V4 Flash take `low`, `high`, or `max`; GLM 5.2 and DeepSeek V4 Pro take `high` or `max` (sent to Agent Runner as `xhigh`); Grok 4.5 takes `low`, `medium`, or `high`; Kimi K2.7 Code and MiniMax M3 take no effort level. A level only counts when a space, `:`, `,`, or the end of the line follows it, so `@netlify codex low-hanging fixes` leaves effort on Auto. `effort:<level>` anywhere on the line overrides the positional word (use it for prompts like `@netlify claude high priority: ...`), and `effort:auto` forces Auto. If a level isn't supported for the chosen model, the action falls back to Auto and posts a warning in the status comment. A follow-up comment on a PR only changes the model or effort when it names one.
 
 The model list mirrors the Netlify UI's model picker as of 2026-08-06 (`src/agent-catalog.js`).
 
@@ -165,10 +171,10 @@ Or comment `@netlify make it blue` on an existing PR.
 | `netlify-filter` | No | `''` | Deprecated compatibility input. SDK dispatch uses the exact `netlify-site-id`. |
 | `github-token` | No | `github.token` | GitHub token for API calls |
 | `allowed-users` | No | `''` | Comma-separated usernames allowed to trigger (empty = repo collaborators) |
-| `default-agent` | No | `codex` | Default agent (`claude`, `codex`, or `gemini`) |
+| `default-agent` | No | `codex` | Default agent (`claude`, `codex`, `gemini`, or `opencode`) |
 | `default-model` | No | `codex` | Backward-compatible alias for `default-agent` |
 | `default-model-id` | No | `''` | Default model ID or alias (e.g. `claude-fable-5`, `fable`). Empty or `auto` lets the backend choose. Ignored when a mention names a different agent |
-| `default-effort` | No | `''` | Default effort level (`low`, `medium`, `high`). Empty or `auto` lets the backend choose |
+| `default-effort` | No | `''` | Default effort level (`low`, `medium`, `high`; some OpenCode models take `max`). Empty or `auto` lets the backend choose |
 | `manage-labels` | No | `false` | Auto-create and apply labels on agent runs |
 | `dry-run` | No | `false` | Start an agent run but skip commit/PR creation |
 | `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent run |
@@ -206,7 +212,7 @@ If `preflight-only` fails, inspect `preflight-summary` and `preflight-json` outp
 
 - `netlify-auth-token` is present and valid
 - `netlify-site-id` matches a site your token can access
-- `default-agent` selects one of the supported agents: `claude`, `codex`, or `gemini`
+- `default-agent` selects one of the supported agents: `claude`, `codex`, `gemini`, or `opencode`
 - `default-model` remains supported as a backward-compatible alias
 - `timeout-minutes` is a positive integer
 - workflow permissions include `contents: write`, `pull-requests: write`, and `issues: write`
@@ -225,7 +231,7 @@ Use these outputs in subsequent workflow steps for custom automation:
 | `agent` | Agent that was used |
 | `model` | Backward-compatible alias for `agent` |
 | `model-id` | Model ID that was requested (empty when the backend chose Auto) |
-| `effort` | Effort level that was requested (empty when the backend chose Auto) |
+| `effort` | Effort level sent to Agent Runner (empty when the backend chose Auto; `max` is sent as `xhigh` for GLM 5.2 and DeepSeek V4 Pro) |
 | `trigger-text` | Cleaned trigger text / prompt |
 | `is-pr` | Whether triggered from a PR (`true`/`false`) |
 | `issue-number` | Issue or PR number |
