@@ -262,7 +262,7 @@ async function recoverRun(params) {
   const resultEnv = {};
   let note = '';
   let outcome = /** @type {'success' | 'failure'} */ (result.status === 'succeeded' ? 'success' : 'failure');
-  if (result.status === 'succeeded' && result.changes === 'changed' && checkpoint.landing === 'pr') {
+  if (result.status === 'succeeded' && result.changes === 'changed' && checkpoint.landing === 'pr' && checkpoint.mode !== 'ask') {
     if (await prHeadMoved({ github, repo, checkpoint })) {
       note = 'Not applied: the branch changed after this run started. See the agent run to apply it manually.';
     } else {

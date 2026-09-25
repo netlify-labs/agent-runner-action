@@ -68,6 +68,24 @@ The model list mirrors the Netlify UI's model picker as of 2026-08-06 (`src/agen
 
 Aliases like `@netlify-agent` and `@netlify-ai` work too, and common typos are recognised (`@nelify`, `@netlfy`, `@netify`, `@netlif`, `@netfly`). Mentions inside fenced code blocks or inline code spans are ignored, so you can quote `@netlify` in a comment without triggering a run.
 
+### Asking questions (ask mode)
+
+Ask mode answers a question about the code in a comment. It never changes files or opens a PR. Use any of these forms:
+
+```
+@netlify-ask How does the Gong follow-up agent pick recipients?
+@netlify ask: why does the context-service ingest job retry twice?
+@netlify claude sonnet mode:ask where is rate limiting configured?
+```
+
+Agent, model, and effort words work the same as for normal runs: `@netlify-ask fable high …` or `@netlify ask: fable high …`. Anything you leave out uses the same defaults as normal runs (`default-agent`, `default-model-id`, `default-effort`, else Auto).
+
+A plain `ask` isn't enough, because `@netlify ask the user to confirm before deleting` is a request to build something. Ask mode needs the `-ask` suffix, `ask:` with its colon as the first word, or `mode:ask` right after the mention and its selector words. `mode:ask` later in the prompt is ignored.
+
+The answer appears as a result comment headed `Run #N | claude · Fable 5 | Agent Run answered 💬`, followed by the prompt and an `### Answer` section, and the status comment shows 💬 Answered. On a PR, the question goes to that PR's agent run, so the agent reads the PR branch. On an issue, it starts a run that later `@netlify` requests continue, so "now build it" keeps the context.
+
+The agent can't edit files in ask mode. If a session ever reports changes anyway, the action doesn't apply them and the answer says so: "The agent changed files while answering; those changes were not applied." From the workflow's **Run workflow** form, choose `runner_mode: ask`.
+
 ## Quick start
 
 ### 1. Install prerequisites

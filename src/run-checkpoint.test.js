@@ -58,6 +58,14 @@ describe('buildCheckpoint', () => {
   });
 });
 
+describe('buildCheckpoint ask mode', () => {
+  it('records mode ask and landing none even when the handle policy lands PRs', () => {
+    const { checkpoint } = buildCheckpoint({ handle: handle(), sdk, token: TOKEN, env: { ...env, RUNNER_MODE: 'ask' }, state: 'running', startedAt: 1 });
+    assert.equal(checkpoint.mode, 'ask');
+    assert.equal(checkpoint.landing, 'none');
+  });
+});
+
 describe('renderCheckpointStatusBody', () => {
   it('shows the live run link and carries runner, session-data, and checkpoint markers without plaintext secrets', () => {
     const { checkpoint } = buildCheckpoint({ handle: handle(), sdk, token: TOKEN, env, state: 'running', startedAt: 1, model: 'claude-fable-5', effort: 'high' });

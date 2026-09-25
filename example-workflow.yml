@@ -73,6 +73,14 @@ on:
           - high
           - max
         default: 'auto'
+      runner_mode:
+        description: 'normal makes changes and opens a PR; ask answers a question in a comment without changing anything'
+        required: false
+        type: choice
+        options:
+          - normal
+          - ask
+        default: 'normal'
       recover_thread:
         description: 'Internal: issue or PR number whose unfinished agent run should be finished (used by the recovery workflow)'
         required: false

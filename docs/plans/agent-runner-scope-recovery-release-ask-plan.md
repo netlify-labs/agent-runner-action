@@ -550,6 +550,29 @@ The SDK forwards `mode: 'ask'`, but nothing documents what the backend does with
 
 The findings are recorded in this plan (a new "Ask mode backend contract" subsection) before D1 starts. If question 2 is "no", ask runs on issues must not record their runner as the thread's runner (see below).
 
+### Ask mode backend contract (D0 findings, 2026-09-25)
+
+Probe: `scripts/probe-ask-mode.mjs` against the canary site (`github-agent-runner-action-canary`), SDK 0.3.0, agent codex (backend default model). Runner `6ab6ddabacb181026aaba618` (Q1–Q3, Q5) and a separate normal runner (Q4). Evidence PR canary#129 was closed afterwards.
+
+| # | Question | Finding |
+|---|---|---|
+| 1 | `start({ mode: 'ask' })` | Session echoes `mode: "ask"`, `state: done`, `hasResultDiff: false`, `commitSha: null`. `resultText` is Markdown (three bullets with links and code spans, ~600 chars). `waitFor` → `{ status: 'succeeded', changes: 'unchanged' }`; `sdk.land` → `{ kind: 'skipped' }`. |
+| 2 | Normal follow-up on an ask-created runner | Works normally: the follow-up edited README.md (`changes: 'changed'`), and `sdk.land` returned `prOpen` (canary#129). |
+| 3 | Ask follow-up on a runner with a PR | No commit (`commitSha: null`, `changes: 'unchanged'`), and it **sees the PR branch**: asked for README's last line, it answered with the line the normal follow-up had just added. |
+| 4 | Cost and duration vs normal | Same prompt, one sample each: ask 32 s, 56.9k tokens, 27.4 credits; normal 31 s, 100.7k tokens, 13.6 credits. Duration is the same; credits aren't lower for ask (a single sample, dominated by cache pricing), so the docs make no cost claim. |
+| 5 | Ask session asked to change files | The agent **refuses**: "It's in Ask mode, which can read and answer questions but can't edit files." No diff (`changes: 'unchanged'`, `hasResultDiff: false`). `sdk.land` on that session only reported the runner's existing PR (no new commit). |
+
+Sanitized session sample (prompt redacted):
+
+```json
+{ "mode": "ask", "state": "done", "hasResultDiff": false, "commitSha": null,
+  "usage": { "totalTokens": 56900, "totalCreditsCost": 27.39, "stepsCount": 5 } }
+```
+
+Note: after the normal follow-up landed, the runner-level commit (`e38e721…`) also appeared on the earlier ask session's `commitSha`, so `commitSha` on a session isn't evidence that the session itself committed. The action keys "changed" off `result.changes`, not `commitSha`.
+
+**Decision:** keep "reuse the thread's runner" (decision 19). Ask sessions don't interfere with later normal follow-ups, so an ask-created runner **is** recorded as the thread's runner (runner ID and checkpoint), and a later "build it" request continues with the same context. The action still never calls `sdk.land` in ask mode, and keeps the discarded-changes note as a safety net, although the backend currently refuses edits in ask mode.
+
 ### Syntax
 
 Ask mode needs an unambiguous signal. `@netlify ask the user to confirm before deleting` is a *build* request, so a bare leading `ask` can't mean ask mode. Three accepted forms:
@@ -585,7 +608,7 @@ Dispatch input: `runner_mode` (`normal` | `ask`), named to avoid colliding with 
 - `start` / `followUp` pass `mode: 'ask'`, and landing is forced to `none` (`land: 'none'`), regardless of `dry-run`.
 - **Never land in ask mode.** Even if `result.changes === 'changed'`, skip `sdk.land`. The result comment then says: "The agent changed files while answering; those changes were not applied. Ask again without `ask` to make changes." The scope guard is skipped in ask mode.
 - Result comment: the header uses "Agent Run answered", then a `### Answer` section with the full `resultText`, under the existing truncation contract. The status comment uses "💬 Answered" instead of "✅ completed". Labels, PR finalization, and cross-posting are skipped.
-- **Thread continuity (provisional until D0):** the intended behavior is to reuse the thread's runner (decision 19). On a PR with an existing runner, ask is a follow-up on that runner, so it sees the PR branch. On an issue with no runner, ask creates a runner. D0 must confirm this. If the probe shows ask sessions interfere with later normal follow-ups (for example, an ask diff gets landed), the plan switches to isolated ask runners before D1. Whether an ask-created runner is recorded as the thread's runner depends on probe question 2:
+- **Thread continuity (confirmed by D0, see "Ask mode backend contract"):** reuse the thread's runner (decision 19). On a PR with an existing runner, ask is a follow-up on that runner, so it sees the PR branch. On an issue with no runner, ask creates a runner. D0 must confirm this. If the probe shows ask sessions interfere with later normal follow-ups (for example, an ask diff gets landed), the plan switches to isolated ask runners before D1. Whether an ask-created runner is recorded as the thread's runner depends on probe question 2:
   - if normal follow-ups work, record it (later "build it" requests continue with the same context)
   - otherwise, don't record the runner ID or the checkpoint, and the next normal request starts fresh
 - **Defaults:** an ask that names no agent, model, or effort uses the same resolution as normal runs (`default-agent`, `default-model-id`, `default-effort`, else Auto). There are no separate ask defaults.

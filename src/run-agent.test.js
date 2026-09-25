@@ -383,6 +383,27 @@ describe('effort forwarding', () => {
     }
   }
 
+  it('ask mode sends mode ask with land none and never lands, even with changes', async () => {
+    const calls = await runWith({ RUNNER_MODE: 'ask', IS_DRY_RUN: 'false' });
+    assert.equal(calls.createRunner.length, 1);
+    assert.equal(calls.createRunner[0].mode, 'ask');
+    // The dry-run transport throws on any landing member action, so reaching
+    // here means sdk.land was never called.
+    assert.equal(calls.outputs['agent-ask-discarded-changes'], 'true');
+    assert.equal(calls.outputs['agent-pr-url'], '');
+    assert.equal(calls.outputs['agent-landing-kind'], 'none');
+    assert.equal(calls.outputs.outcome, 'success');
+  });
+
+  it('ask mode follow-ups send mode ask; normal runs send no mode', async () => {
+    const followUp = { EXISTING_RUNNER_ID: fixture.runner.runnerId, SESSION_DATA_MAP: JSON.stringify({ 'known-session': {} }) };
+    const ask = await runWith({ ...followUp, RUNNER_MODE: 'ask', IS_DRY_RUN: 'false' });
+    assert.equal(ask.createSession[0].mode, 'ask');
+    const normal = await runWith({ RUNNER_MODE: 'normal' });
+    assert.equal('mode' in normal.createRunner[0], false);
+    assert.equal(normal.outputs['agent-ask-discarded-changes'], 'false');
+  });
+
   it('forwards an explicit effort when creating a runner', async () => {
     const calls = await runWith({ NETLIFY_EFFORT: 'high' });
     assert.equal(calls.createRunner.length, 1);

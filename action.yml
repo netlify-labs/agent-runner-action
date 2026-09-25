@@ -1027,6 +1027,7 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         TRIGGER_TEXT: ${{ steps.context-info.outputs.trigger-text }}
         NETLIFY_AGENT: ${{ steps.context-info.outputs.agent || steps.context-info.outputs.model }}
+        RUNNER_MODE: ${{ steps.context-info.outputs.runner-mode || 'normal' }}
         AGENT_MODEL: ${{ steps.context-info.outputs.model || steps.context-info.outputs.agent }}
         NETLIFY_MODEL: ${{ steps.context-info.outputs.model-id }}
         NETLIFY_EFFORT: ${{ steps.context-info.outputs.effort }}
@@ -1112,7 +1113,7 @@ runs:
 
     - name: Check run scope
       id: check-scope
-      if: steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.outcome == 'success'
+      if: steps.trigger-check.outputs.should-run == 'true' && steps.netlify-agent.outputs.outcome == 'success' && steps.context-info.outputs.runner-mode != 'ask'
       continue-on-error: true
       uses: actions/github-script@v8
       env:
@@ -1163,6 +1164,7 @@ runs:
         && steps.netlify-agent.outputs.outcome == 'success'
         && inputs.manage-labels == 'true'
         && steps.context-info.outputs.issue-number != ''
+        && steps.context-info.outputs.runner-mode != 'ask'
       continue-on-error: true
       uses: actions/github-script@v8
       env:
@@ -1196,7 +1198,9 @@ runs:
         REQUESTED_AGENT: ${{ steps.context-info.outputs.agent }}
         REQUESTED_MODEL_ID: ${{ steps.context-info.outputs.model-id }}
         REQUESTED_EFFORT: ${{ steps.context-info.outputs.effort }}
-        REQUESTED_MODE: normal
+        REQUESTED_MODE: ${{ steps.context-info.outputs.runner-mode || 'normal' }}
+        RUNNER_MODE: ${{ steps.context-info.outputs.runner-mode || 'normal' }}
+        AGENT_ASK_DISCARDED_CHANGES: ${{ steps.netlify-agent.outputs.agent-ask-discarded-changes }}
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
         AGENT_ID: ${{ steps.netlify-agent.outputs.agent-id }}
         STOP_REQUESTED_BY: ${{ steps.stop-check.outputs.by }}
@@ -1235,7 +1239,9 @@ runs:
         REQUESTED_AGENT: ${{ steps.context-info.outputs.agent }}
         REQUESTED_MODEL_ID: ${{ steps.context-info.outputs.model-id }}
         REQUESTED_EFFORT: ${{ steps.context-info.outputs.effort }}
-        REQUESTED_MODE: normal
+        REQUESTED_MODE: ${{ steps.context-info.outputs.runner-mode || 'normal' }}
+        RUNNER_MODE: ${{ steps.context-info.outputs.runner-mode || 'normal' }}
+        AGENT_ASK_DISCARDED_CHANGES: ${{ steps.netlify-agent.outputs.agent-ask-discarded-changes }}
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
         AGENT_ERROR: ${{ steps.netlify-agent.outputs.agent-error }}
         FAILURE_CATEGORY: ${{ steps.netlify-agent.outputs.failure-category || steps.trigger-text-size.outputs.failure-category || steps.preflight.outputs.failure-category }}
@@ -1296,7 +1302,9 @@ runs:
         REQUESTED_AGENT: ${{ steps.context-info.outputs.agent }}
         REQUESTED_MODEL_ID: ${{ steps.context-info.outputs.model-id }}
         REQUESTED_EFFORT: ${{ steps.context-info.outputs.effort }}
-        REQUESTED_MODE: normal
+        REQUESTED_MODE: ${{ steps.context-info.outputs.runner-mode || 'normal' }}
+        RUNNER_MODE: ${{ steps.context-info.outputs.runner-mode || 'normal' }}
+        AGENT_ASK_DISCARDED_CHANGES: ${{ steps.netlify-agent.outputs.agent-ask-discarded-changes }}
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
         AGENT_OUTCOME: ${{ steps.netlify-agent.outputs.outcome }}
         AGENT_STEP_OUTCOME: ${{ steps.netlify-agent.outcome }}

@@ -59,6 +59,7 @@ class ReportedActionError extends Error {
  * @property {Record<string, unknown>} sessionDataMap
  * @property {number} deadlineMs
  * @property {boolean} dryRun
+ * @property {boolean} [ask] Ask mode: answer only; never land.
  * @property {string} runnerTemp
  */
 
@@ -160,6 +161,7 @@ function readActionInput(env) {
     sessionDataMap: parseJsonMap(env.SESSION_DATA_MAP),
     deadlineMs: Math.ceil(timeoutMinutes * 60_000),
     dryRun: booleanInput(env.IS_DRY_RUN),
+    ask: env.RUNNER_MODE === 'ask',
     runnerTemp: requiredText(env.RUNNER_TEMP, 'RUNNER_TEMP'),
   };
 }
@@ -317,7 +319,7 @@ async function createLegacyHandle({ sdk, input }) {
     );
   }
 
-  const landing = input.dryRun ? 'none' : 'pr';
+  const landing = input.dryRun || input.ask ? 'none' : 'pr';
   return buildResumeHandle({
     sdk,
     runner: { ...runner, runnerId: input.existingRunnerId },
@@ -567,6 +569,7 @@ async function runAgentAction(options = {}) {
     'agent-landing-kind': 'none',
     'checkpoint-written': 'false',
     'simulated-orphan': 'false',
+    'agent-ask-discarded-changes': 'false',
   })) {
     setOutput(name, value);
   }
@@ -624,7 +627,9 @@ async function runAgentAction(options = {}) {
     });
 
     const requestOptions = { token: input.token };
-    const landing = input.dryRun ? 'none' : 'pr';
+    // Ask mode answers in a comment: nothing is ever landed.
+    const landing = input.dryRun || input.ask ? 'none' : 'pr';
+    const modeInput = input.ask ? { mode: /** @type {const} */ ('ask') } : {};
     /** @type {Handle} */
     let handle;
     if (input.existingRunnerId) {
@@ -638,6 +643,7 @@ async function runAgentAction(options = {}) {
           agent: input.agent,
           ...(input.model ? { model: input.model } : {}),
           ...(input.effort ? { effort: input.effort } : {}),
+          ...modeInput,
         },
         requestOptions,
       );
@@ -651,6 +657,7 @@ async function runAgentAction(options = {}) {
         ...(input.model ? { model: input.model } : {}),
         ...(input.effort ? { effort: input.effort } : {}),
         ...(input.branch ? { branch: input.branch } : {}),
+        ...modeInput,
         land: landing,
         deadlineMs: input.deadlineMs,
         retryBudget: { capacity: 0 },
@@ -713,10 +720,15 @@ async function runAgentAction(options = {}) {
       ),
     ]);
     const hasChanges = result.changes === 'changed';
-    const landingKind = !input.dryRun && hasChanges
+    const landingKind = !input.dryRun && !input.ask && hasChanges
       ? (preLandingRunner.prUrl ? 'commit' : 'pr-created')
       : 'none';
-    if (input.dryRun && result.diff && result.diff.kind === 'inline') {
+    if (input.ask && hasChanges) {
+      // Never land in ask mode; the result comment says the changes were dropped.
+      setOutput('agent-ask-discarded-changes', 'true');
+      log('Ask mode: the agent changed files while answering; not applying them.');
+    }
+    if (input.dryRun && !input.ask && result.diff && result.diff.kind === 'inline') {
       // Nothing lands in a dry run; keep the session diff so the scope guard
       // can still report which files the run would have changed.
       fs.writeFileSync(
@@ -725,7 +737,7 @@ async function runAgentAction(options = {}) {
         { encoding: 'utf8', mode: 0o600 },
       );
     }
-    if (!input.dryRun && hasChanges) {
+    if (!input.dryRun && !input.ask && hasChanges) {
       stage = preLandingRunner.prUrl && handle.kind === 'session'
         ? 'commit'
         : 'create-pr';
@@ -813,8 +825,8 @@ async function runAgentAction(options = {}) {
       currentSession.deployUrl || result.deployUrl || '',
     );
     setOutput('agent-screenshot-url', screenshot);
-    setOutput('agent-pr-url', input.dryRun ? '' : prUrl);
-    setOutput('agent-pr-branch', input.dryRun ? '' : runner.prBranch || '');
+    setOutput('agent-pr-url', input.dryRun || input.ask ? '' : prUrl);
+    setOutput('agent-pr-branch', input.dryRun || input.ask ? '' : runner.prBranch || '');
     setOutput('agent-commit-sha', currentSession.commitSha || '');
     setOutput('agent-title', currentSession.title || '');
     setOutput('agent-sessions', sessionsJson);

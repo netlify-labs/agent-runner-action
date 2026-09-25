@@ -47,7 +47,7 @@ describe('programmatic canary workflow', () => {
     assert.match(lib, /in README\.md, replace or add one line exactly/);
     assert.match(lib, /Do not edit other files/);
     assert.match(lib, /x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{CANARY_REPO\}\.git/);
-    assert.match(lib, /git push origin HEAD:main/);
+    assert.match(lib, /git push -q origin HEAD:main/);
     assert.match(lib, /gh issue create/);
     // The pin happens before any scenario creates issues.
     const runScenario = lib.slice(lib.indexOf('run_scenario() {'));

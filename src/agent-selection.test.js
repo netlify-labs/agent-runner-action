@@ -443,3 +443,39 @@ describe('selectorPrefixEnd', () => {
     assert.equal(period.slice(utils.selectorPrefixEnd(period)), ' Fix');
   });
 });
+
+describe('ask mode parsing', () => {
+  const cases = [
+    // [text, mode, agent, model, effort, prompt]
+    ['@netlify-ask why is the build slow?', 'ask', null, null, null, 'why is the build slow?'],
+    ['@netlify_ask why?', 'ask', null, null, null, 'why?'],
+    ['@Netlify-Ask fable high why is it slow?', 'ask', null, 'fable', 'high', 'why is it slow?'],
+    ['@netlify ask: why is the build slow?', 'ask', null, null, null, 'why is the build slow?'],
+    ['@netlify ASK: claude sonnet low where is auth handled?', 'ask', 'claude', 'sonnet', 'low', 'where is auth handled?'],
+    ['@netlify mode:ask what does this do?', 'ask', null, null, null, 'what does this do?'],
+    ['@netlify fable mode=ask high explain', 'ask', null, 'fable', 'high', 'explain'],
+    ['@netlify-ask mode:normal fix it', 'normal', null, null, null, 'fix it'],
+    ['@netlify ask: fable high why?\r\nmore context', 'ask', null, 'fable', 'high', 'why?\nmore context'],
+    // Not ask mode
+    ['@netlify ask the user for their email in the signup form', 'normal', null, null, null, 'ask the user for their email in the signup form'],
+    ['@netlify fable ask: why?', 'normal', null, 'fable', null, 'ask: why?'],
+    ['@netlify add a FAQ. mode:ask is not a thing here', 'normal', null, null, null, 'add a FAQ. mode:ask is not a thing here'],
+    ['`@netlify-ask why?` is the syntax', null, null, null, null, ''],
+  ];
+  for (const [text, mode, agent, model, effort, prompt] of cases) {
+    it(JSON.stringify(text), () => {
+      const parsed = utils.parseCommand(text);
+      if (mode === null) {
+        assert.equal(utils.matchesTrigger(text), false, text);
+        return;
+      }
+      assert.equal(parsed.mode, mode, text);
+      assert.deepEqual(parsed.selection, { agent, model, effort }, text);
+      assert.equal(parsed.prompt.replace(/\r/g, ''), prompt, text);
+    });
+  }
+
+  it('near-miss suffixes do not trigger', () => {
+    for (const text of ['@netlify-asks why?', '@netlify-askme why?']) assert.equal(utils.matchesTrigger(text), false, text);
+  });
+});

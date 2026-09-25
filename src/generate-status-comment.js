@@ -154,18 +154,21 @@ function renderStatusComment({ env = process.env, context, outcome, checkpoint =
   const stopped = Boolean(checkpoint && (checkpoint.state === 'stopped' || checkpoint.state === 'stop-pending') && env.AGENT_OUTCOME !== 'success');
   const stoppedBy = String(env.STOP_REQUESTED_BY || '').replace(/[^A-Za-z0-9-]/g, '');
   const stopReason = String(env.STOP_REASON || '').replace(/[\r\n<>]/g, ' ').slice(0, 300);
-  const statusIcon = stopped ? '⏹' : isFailure ? '❌' : '✅';
+  const answered = !stopped && !isFailure && (env.RUNNER_MODE || env.REQUESTED_MODE || requested.mode) === 'ask';
+  const statusIcon = stopped ? '⏹' : isFailure ? '❌' : answered ? '💬' : '✅';
   const lateStop = !stopped && !isFailure && stoppedBy ? ` Stop requested by @${stoppedBy} after the run finished.` : '';
   const statusLine = stopped
     ? (stopReason || (stoppedBy ? `Stopped by @${stoppedBy}.` : 'The workflow was cancelled, so the agent run was stopped.'))
     : isFailure
       ? 'Netlify Agent Run failed.'
-      : `${isDryRun ? 'Netlify Agent Run completed (preview).' : 'Netlify Agent Run completed.'}${lateStop}`;
+      : answered
+        ? `Answered.${lateStop}`
+        : `${isDryRun ? 'Netlify Agent Run completed (preview).' : 'Netlify Agent Run completed.'}${lateStop}`;
   const header = agentRunUrl
     ? `### [Netlify Agent Run Status](${agentRunUrl}) ${statusIcon}`
     : `### Netlify Agent Run Status ${statusIcon}`;
   const subtitle = statusLine;
-  const runLine = `Run #${runNumber} | ${model} | ${stopped ? 'stopped' : isFailure ? 'failed' : 'completed'} at ${timestamp}`;
+  const runLine = `Run #${runNumber} | ${model} | ${stopped ? 'stopped' : isFailure ? 'failed' : answered ? 'answered' : 'completed'} at ${timestamp}`;
 
   const deployUrl = utils.safeHttpUrl(env.AGENT_DEPLOY_URL || (latestSession && latestSession.deploy_url) || '');
   const screenshotUrl = utils.safeHttpUrl(env.AGENT_SCREENSHOT_URL || '');

@@ -137,6 +137,13 @@ module.exports = async function getContext({ github, context, core }) {
       : 'stop-misplaced';
   }
 
+  // Runner mode: @netlify-ask, "ask:", or mode:ask in the mention; the
+  // dispatch input runner_mode (normal|ask) wins.
+  const dispatchMode = context.eventName === 'workflow_dispatch'
+    ? String((payload.inputs && payload.inputs.runner_mode) || '').trim().toLowerCase()
+    : '';
+  if (dispatchMode === 'ask' || dispatchMode === 'normal') parsedCommand.mode = dispatchMode;
+
   // Detect preview/dry-run mode from trigger text
   const isDryRun = process.env.DRY_RUN === 'true' ||
     /\b(?:preview|dry[- ]?run)\b/i.test(triggerText.split('\n')[0] || '');
@@ -154,6 +161,7 @@ module.exports = async function getContext({ github, context, core }) {
     agent: selection?.agent || null,
     model: selection?.model || null,
     effort: selection?.effort || null,
+    mode: selection?.mode || null,
     start: 0,
     end: 0,
   };
@@ -208,6 +216,7 @@ module.exports = async function getContext({ github, context, core }) {
   core.setOutput('config-warnings', warnings.join('\n'));
   core.setOutput('scope-block', utils.buildScopeBlock(process.env.SCOPE_INSTRUCTIONS));
   core.setOutput('command', parsedCommand.command);
+  core.setOutput('runner-mode', parsedCommand.mode);
   core.setOutput('runner-mode', parsedCommand.mode);
   core.setOutput('is-dry-run', isDryRun.toString());
 

@@ -72,35 +72,47 @@ checkpoint_state_from_body() {
 }
 
 pin_canary_workflow() {
-  local workdir="${RUNNER_TEMP:-/tmp}/agent-runner-action-canary"
-  rm -rf "$workdir"
-  gh repo clone "$CANARY_REPO" "$workdir" -- --depth 1
-  (
-    cd "$workdir" || exit 1
-    git config user.name "github-actions[bot]"
-    git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-    if [ ! -f "$CANARY_WORKFLOW_PATH" ]; then
-      echo "::error::Canary workflow file not found: ${CANARY_WORKFLOW_PATH}"
-      exit 1
-    fi
-    # Pin every canary workflow that uses the action (main + recovery).
-    local files
-    files=$(grep -l 'netlify-labs/agent-runner-action@' .github/workflows/*.yml)
-    for file in $files; do
-      ACTION_REF="$ACTION_REF" perl -0pi -e \
-        's#netlify-labs/agent-runner-action@[A-Za-z0-9._/-]+#"netlify-labs/agent-runner-action@".$ENV{ACTION_REF}#ge' \
-        "$file"
-    done
-    if git diff --quiet -- .github/workflows; then
-      log "Canary workflows already pinned to ${ACTION_REF}."
-    else
+  # Pin every canary workflow that uses the action (main + recovery). Two
+  # canaries for the same commit can race here, so a rejected push re-clones
+  # and retries; if the other run already pinned the same ref, we're done.
+  local workdir="${RUNNER_TEMP:-/tmp}/agent-runner-action-canary" attempt
+  for attempt in 1 2 3; do
+    rm -rf "$workdir"
+    gh repo clone "$CANARY_REPO" "$workdir" -- --depth 1 || return 1
+    if (
+      cd "$workdir" || exit 1
+      git config user.name "github-actions[bot]"
+      git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      if [ ! -f "$CANARY_WORKFLOW_PATH" ]; then
+        echo "::error::Canary workflow file not found: ${CANARY_WORKFLOW_PATH}"
+        exit 2
+      fi
+      local files
+      files=$(grep -l 'netlify-labs/agent-runner-action@' .github/workflows/*.yml)
+      for file in $files; do
+        ACTION_REF="$ACTION_REF" perl -0pi -e \
+          's#netlify-labs/agent-runner-action@[A-Za-z0-9._/-]+#"netlify-labs/agent-runner-action@".$ENV{ACTION_REF}#ge' \
+          "$file"
+      done
+      if git diff --quiet -- .github/workflows; then
+        log "Canary workflows already pinned to ${ACTION_REF}."
+        exit 0
+      fi
       git add .github/workflows
-      git commit -m "chore: pin Agent Runners canary to ${ACTION_REF}"
+      git commit -q -m "chore: pin Agent Runners canary to ${ACTION_REF}"
       git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${CANARY_REPO}.git"
-      git push origin HEAD:main
+      git push -q origin HEAD:main || exit 1
       log "Pinned canary workflows to ${ACTION_REF}."
+    ); then
+      return 0
+    elif [ $? -eq 2 ]; then
+      return 1
     fi
-  )
+    log "Pin push was rejected (attempt ${attempt}); retrying."
+    sleep $((attempt * 5))
+  done
+  echo "::error::Couldn't pin the canary workflows to ${ACTION_REF}."
+  return 1
 }
 
 # run_issue_case <case> <prompt>
@@ -446,7 +458,44 @@ scenario_stop_command() {
     record_check stop-command "no PR was opened" "a PR is linked" fail
   fi
 }
-scenario_ask() { not_implemented ask; }
+backend_session_modes() {
+  # backend_session_modes <runner id>: prints each session mode (needs NETLIFY_AUTH_TOKEN).
+  if [ -z "${NETLIFY_AUTH_TOKEN:-}" ]; then
+    echo "unknown"
+    return 0
+  fi
+  curl -fsS -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
+    "https://api.netlify.com/api/v1/agent_runners/$1/sessions" | jq -r '.[].mode // "none"'
+}
+
+scenario_ask() {
+  # An @netlify-ask question: answered in a result comment, no PR, ask session.
+  run_issue_case ask "@netlify-ask codex mini low Which file is this site's main HTML page? Answer with the file path and one sentence. Marker: ${RUN_MARKER}." || return 1
+  output issue-url "$CASE_ISSUE_URL"
+  output run-url "$CASE_RUN_URL"
+  output run-conclusion "$CASE_CONCLUSION"
+  expect_equal ask "downstream run conclusion" "$CASE_CONCLUSION" success
+  expect_contains ask "result comment" "$CASE_COMMENTS" "Agent Run answered"
+  expect_contains ask "result comment" "$CASE_COMMENTS" "### Answer"
+  expect_contains ask "result comment" "$CASE_COMMENTS" "docs/index.html"
+  expect_not_contains ask "result comment" "$CASE_COMMENTS" "Netlify Agent Run failed"
+  if [ -z "$CASE_PR_NUMBER" ]; then
+    record_check ask "no PR was opened" "none" pass
+  else
+    record_check ask "no PR was opened" "#${CASE_PR_NUMBER}" fail
+  fi
+  local body runner modes
+  body=$(status_comment_body "$CASE_ISSUE_NUMBER")
+  expect_contains ask "status comment" "$body" "Answered."
+  expect_contains ask "checkpoint" "$body" '"mode":"ask"'
+  runner=$(printf '%s' "$body" | checkpoint_runner_from_body)
+  modes=$(backend_session_modes "$runner" | tr '\n' ' ')
+  if [ "$modes" = "unknown " ] || printf '%s' "$modes" | grep -q 'ask'; then
+    record_check ask "backend session mode is ask" "${modes}" pass
+  else
+    record_check ask "backend session mode is ask" "${modes:-none}" fail
+  fi
+}
 
 run_scenario() {
   local name="$1"
@@ -457,7 +506,7 @@ run_scenario() {
     return 1
   fi
   log "Running canary scenario ${name} against ${ACTION_REF}"
-  pin_canary_workflow
+  pin_canary_workflow || { CANARY_FAILED=1; return 1; }
   "$fn" || CANARY_FAILED=1
   {
     echo "### Scenario \`${name}\`"
