@@ -42,11 +42,58 @@ on:
         type: boolean
         default: false
 
+  # Reusable entry point (used by release.yml to canary the exact release SHA).
+  # Keep these inputs in sync with workflow_dispatch above.
+  workflow_call:
+    inputs:
+      action_ref:
+        description: 'agent-runner-action ref/SHA to pin in the canary repo. Defaults to this workflow run SHA.'
+        required: false
+        type: string
+      canary_repo:
+        description: 'Canary repository to update and test.'
+        required: false
+        type: string
+        default: 'netlify-labs/agent-runner-action-canary'
+      canary_workflow_path:
+        description: 'Path to the canary agent workflow file.'
+        required: false
+        type: string
+        default: '.github/workflows/netlify-agents.yml'
+      canary_workflow_name:
+        description: 'Workflow file name used by gh run list.'
+        required: false
+        type: string
+        default: 'netlify-agents.yml'
+      timeout_minutes:
+        description: 'Maximum time to wait for the canary issue run.'
+        required: false
+        type: string
+        default: '20'
+      prompt:
+        description: 'Optional @netlify prompt. Defaults to a minimal README canary marker edit.'
+        required: false
+        type: string
+      simulate_failure:
+        description: 'If true, fail the controller after downstream canary verification.'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      CANARY_REPO_TOKEN:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: false
+      NETLIFY_AUTH_TOKEN:
+        required: false
 permissions:
   contents: read
 
+# Group per tested commit. For workflow_call this expression is evaluated in
+# the caller's context, so keying on github.ref alone would collide with a
+# manual canary on the same branch.
 concurrency:
-  group: canary-${{ github.ref }}
+  group: canary-${{ inputs.action_ref || github.event.pull_request.head.sha || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -95,9 +142,11 @@ jobs:
           TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
           START_SECONDS=$SECONDS
 
-          echo "action-ref=${ACTION_REF}" >> "$GITHUB_OUTPUT"
-          echo "marker=${RUN_MARKER}" >> "$GITHUB_OUTPUT"
-          echo "simulated-failure=${SIMULATE_FAILURE}" >> "$GITHUB_OUTPUT"
+          {
+            echo "action-ref=${ACTION_REF}"
+            echo "marker=${RUN_MARKER}"
+            echo "simulated-failure=${SIMULATE_FAILURE}"
+          } >> "$GITHUB_OUTPUT"
 
           WORKDIR="${RUNNER_TEMP}/agent-runner-action-canary"
           rm -rf "$WORKDIR"

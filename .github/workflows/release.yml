@@ -1,0 +1,137 @@
+name: Release
+
+# Cut a versioned release: validate the version, run the test gates and a live
+# canary against the exact commit, then (unless dry_run) create the immutable
+# vX.Y.Z tag, move the v1 major tag, and publish GitHub release notes.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, without the v prefix (e.g. 1.1.0)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Run every gate but skip tagging and publishing'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      major-tag: ${{ steps.validate.outputs.major-tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Validate release version
+        id: validate
+        env:
+          VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin
+          git fetch origin main
+          MAIN_HEAD=false
+          if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_SHA" = "$(git rev-parse origin/main)" ]; then
+            MAIN_HEAD=true
+          fi
+          set +e
+          RESULT=$(node src/release-version.js --version "$VERSION" --tags "$(git tag -l 'v*' | tr '\n' ' ')" --main-head "$MAIN_HEAD" --dry-run "$DRY_RUN")
+          STATUS=$?
+          set -e
+          echo "$RESULT"
+          {
+            echo "## Release validation"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Ref | \`${GITHUB_REF}\` |"
+            echo "| Main HEAD | \`${MAIN_HEAD}\` |"
+            echo "| Dry run | \`${DRY_RUN}\` |"
+            echo "| Errors | $(echo "$RESULT" | jq -r '.errors | join("; ") | if . == "" then "none" else . end') |"
+            echo "| Warnings | $(echo "$RESULT" | jq -r '.warnings | join("; ") | if . == "" then "none" else . end') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$RESULT" | jq -r '.warnings[] | "::warning title=Release validation::" + .'
+          echo "$RESULT" | jq -r '.errors[] | "::error title=Release validation::" + .'
+          echo "tag=$(echo "$RESULT" | jq -r .tag)" >> "$GITHUB_OUTPUT"
+          echo "major-tag=$(echo "$RESULT" | jq -r .majorTag)" >> "$GITHUB_OUTPUT"
+          exit "$STATUS"
+
+  checks:
+    name: Test gates
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun test src/*.test.js
+      - run: bunx tsc --noEmit
+      - run: bun run docs:check
+      - name: Simulator sanity
+        run: bun run simulate -- --fixture fixtures/events/issue-opened-body-trigger.json --format json | jq -e '.decision == "run"'
+      - name: Bead dependency cycles
+        run: |
+          if command -v br >/dev/null 2>&1; then
+            br dep cycles --json
+          else
+            echo "::warning title=Release gate::br is not installed on the runner; bead cycle check skipped."
+            echo "- Bead cycle check skipped (br not installed)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  canary:
+    name: Live canary
+    needs: validate
+    uses: ./.github/workflows/canary.yml
+    with:
+      action_ref: ${{ github.sha }}
+    secrets: inherit
+
+  publish:
+    name: Tag and publish
+    needs: [validate, checks, canary]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.validate.outputs.tag }}
+      MAJOR_TAG: ${{ needs.validate.outputs.major-tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Create release tag and move major tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+          git tag -f "$MAJOR_TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$MAJOR_TAG"
+      - name: Publish release notes
+        run: gh release create "$TAG" --generate-notes --verify-tag --title "$TAG"
+      - name: Summary
+        run: |
+          {
+            echo "## Released ${TAG}"
+            echo
+            echo "- \`${TAG}\` and \`${MAJOR_TAG}\` point at \`${GITHUB_SHA}\`"
+            echo "- Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          } >> "$GITHUB_STEP_SUMMARY"

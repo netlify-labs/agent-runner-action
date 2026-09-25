@@ -259,6 +259,37 @@ steps:
     run: echo "Agent created PR: ${{ steps.agent.outputs.agent-pr-url }}"
 ```
 
+## Versioning
+
+Releases are tagged `vX.Y.Z`, and the major tag `v1` always points at the latest `v1.Y.Z` release.
+
+- **Follow v1 automatically:** `uses: netlify-labs/agent-runner-action@v1` picks up every minor and patch release.
+- **Pin and review upgrades:** pin a release commit with a version comment, and let Dependabot open a PR for each new release:
+
+  ```yaml
+  - uses: netlify-labs/agent-runner-action@<sha> # v1.2.0
+  ```
+
+  ```yaml
+  # .github/dependabot.yml
+  version: 2
+  updates:
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+        interval: weekly
+  ```
+
+What counts as a breaking change (it needs a new major tag):
+
+- removing or renaming an input or output, or changing the values an input accepts
+- changing the hidden comment markers so older and newer versions can't read each other's comments
+- changing the mention syntax so a mention that worked before now selects a different agent, model, or effort
+
+Everything else ships in minor releases. That includes new inputs and outputs, new mention forms that used to be plain prompt text, and changes to agent guidance or comment content. Release notes list those under **Behavior changes**. Workflow-file edits that are needed only to use a new feature are listed under **Action required to use new features**; existing workflows keep working without them.
+
+Maintainers cut releases with the **Release** workflow (`.github/workflows/release.yml`): run it with a version and `dry_run: true` first, then again with `dry_run: false`. It runs the tests, the type check, the docs check, the simulator, and a live canary against the exact commit before it tags anything.
+
 ## Maintainer simulator CLI
 
 Use the local simulator to preview action decisions from fixtures without GitHub Actions or live Netlify calls. The `simulate` package script wraps `src/simulate.js`.

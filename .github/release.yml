@@ -1,0 +1,18 @@
+# Release-note categories for `gh release create --generate-notes`.
+# Label PRs to place them. See README "Versioning" for what each means.
+changelog:
+  categories:
+    - title: Behavior changes
+      labels: [behavior-change]
+    - title: Action required to use new features
+      labels: [action-required]
+    - title: Features
+      labels: [feat, enhancement]
+    - title: Fixes
+      labels: [fix, bug]
+    - title: Documentation
+      labels: [docs, documentation]
+    - title: CI and tooling
+      labels: [ci]
+    - title: Other changes
+      labels: ['*']

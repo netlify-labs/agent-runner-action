@@ -32,6 +32,27 @@ describe('check-docs-drift', () => {
     );
   });
 
+  it('detects a hard-coded commit SHA pin in public examples', () => {
+    const template = read('workflow-templates/netlify-agents.yml').replace(
+      'netlify-labs/agent-runner-action@v1',
+      'netlify-labs/agent-runner-action@cae789d022bbb42e5990f6119bec8e6ff6c7ed2a',
+    );
+    const errors = checkDocsDrift({
+      rootDir: ROOT,
+      fileOverrides: { 'workflow-templates/netlify-agents.yml': template },
+    });
+    assert.ok(
+      errors.some((error) => error.includes('workflow-templates/netlify-agents.yml') && error.includes('Commit SHA pin found')),
+      JSON.stringify(errors),
+    );
+  });
+
+  it('allows the <sha> placeholder used in versioning docs', () => {
+    const readme = `${read('README.md')}\n\n- uses: netlify-labs/agent-runner-action@<sha> # v1.2.0\n`;
+    const errors = checkDocsDrift({ rootDir: ROOT, fileOverrides: { 'README.md': readme } });
+    assert.deepEqual(errors, []);
+  });
+
   it('detects undeclared input references in example workflows', () => {
     const workflow = read('workflow-templates/netlify-agents.yml');
     const driftedWorkflow = workflow.replace(
