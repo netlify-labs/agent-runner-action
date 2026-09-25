@@ -303,3 +303,12 @@ describe('action.yml recover_thread dispatch path', () => {
     }
   });
 });
+
+describe('action.yml recover dispatch trust', () => {
+  it('resolves the bot identity for recover dispatches so only bot-authored status comments are trusted', () => {
+    const identity = steps().find((entry) => entry.name === 'Resolve bot identity');
+    assert.match(identity?.text || '', /\(github\.event_name != 'workflow_dispatch' \|\| steps\.context-info\.outputs\.command == 'recover'\)/);
+    const find = steps().find((entry) => entry.name === 'Find existing status comment');
+    assert.match(find?.text || '', /comment-author: \$\{\{ steps\.bot-identity\.outputs\.login \}\}/);
+  });
+});

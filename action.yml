@@ -515,7 +515,9 @@ runs:
     # -----------------------------------------------------------------------
     - name: Resolve bot identity
       id: bot-identity
-      if: steps.trigger-check.outputs.should-run == 'true' && github.event_name != 'workflow_dispatch'
+      # Recover dispatches read the thread's status comment too, so they need
+      # the bot login to trust only bot-authored state.
+      if: steps.trigger-check.outputs.should-run == 'true' && (github.event_name != 'workflow_dispatch' || steps.context-info.outputs.command == 'recover')
       uses: actions/github-script@v8
       with:
         github-token: ${{ inputs.github-token }}
