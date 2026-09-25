@@ -332,7 +332,7 @@ As soon as an agent run starts, the status comment shows **View the in progress 
 - It's bound to this repository, thread, and runner, so a copy pasted into another thread fails to open.
 - The prompt and site ID never appear in the comment in plain text.
 
-**Cancelling the workflow stops the agent.** If you cancel the workflow run (from the Actions tab), the action stops the agent run and the status comment says "⏹ The workflow was cancelled, so the agent run was stopped." This is best-effort: GitHub gives cancelled jobs only a short grace period.
+**Cancelling the workflow stops the agent.** If you cancel the workflow run (from the Actions tab), the action stops the agent run and the status comment says "⏹ The workflow was cancelled, so the agent run was stopped." This is best-effort: GitHub gives cancelled jobs only a short grace period, and it can take up to a minute to deliver the cancel. If the agent finishes and opens its PR in that window, the status comment says the changes were already applied and links the PR, so you can close it.
 
 **Comment `@netlify stop` to stop a run.** Add a comment on the issue or PR containing only `@netlify stop`. Anyone allowed to start runs can stop them. The action:
 - stops the agent run right away and replies "⏹ Stopping the agent run, requested by @you"

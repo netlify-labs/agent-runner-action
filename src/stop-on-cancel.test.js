@@ -85,3 +85,40 @@ describe('stopOnCancel', () => {
     assert.equal(newestHandleFile(path.join(temp, 'missing')), null);
   });
 });
+
+describe('stopOnCancel after the run already landed', () => {
+  // GitHub can deliver a cancel a minute late; the agent may finish and open
+  // its PR in that window. The status must say so instead of "stopped".
+  const landedCheckpoint = { ...checkpoint, prUrl: 'https://github.com/o/r/pull/146', committedSessionIds: ['session1'] };
+  function landedFakes(body) {
+    const f = fakes();
+    f.github.rest.issues.getComment = async () => ({ data: { body } });
+    return f;
+  }
+
+  it('reports the landed PR (from the checkpoint) and does not claim a stop', async () => {
+    fs.writeFileSync(path.join(temp, 'agent-runner-sdk-handle-runner1.json'), JSON.stringify({ runnerId: 'runner1', currentSessionId: 'session1' }));
+    const { calls, sdk, github, core } = landedFakes(`x\n${renderCheckpointMarker(landedCheckpoint)}\n${STATUS_COMMENT_MARKER}`);
+    const result = await stopOnCancel({ github, context, core, sdk, env: { RUNNER_TEMP: temp, STATUS_COMMENT_ID: '9', SITE_NAME: 'site' } });
+    assert.deepEqual(result, { outcome: 'landed-before-cancel' });
+    assert.ok(!calls.some(([kind]) => kind === 'stop'), 'a finished run is not stopped');
+    const body = calls.find(([kind]) => kind === 'update')[1].body;
+    assert.match(body, /cancelled after the agent had already finished, so its changes were applied: \[pull request\]\(https:\/\/github\.com\/o\/r\/pull\/146\)/);
+    assert.doesNotMatch(body, /so the agent run was stopped/);
+    assert.equal(parseCheckpoint(body)?.state, 'finalized');
+  });
+
+  it('uses the saved handle landing when the checkpoint missed it', async () => {
+    fs.writeFileSync(path.join(temp, 'agent-runner-sdk-handle-runner1.json'), JSON.stringify({ runnerId: 'runner1', currentSessionId: 'session1', landing: { prUrl: 'https://github.com/o/r/pull/7', committedSessionIds: ['session1'] } }));
+    const { calls, sdk, github, core } = fakes();
+    assert.deepEqual(await stopOnCancel({ github, context, core, sdk, env: { RUNNER_TEMP: temp, STATUS_COMMENT_ID: '9' } }), { outcome: 'landed-before-cancel' });
+    assert.match(calls.find(([kind]) => kind === 'update')[1].body, /pull\/7/);
+  });
+
+  it('an earlier session\'s PR does not count as this run landing', () => {
+    const { landedPrUrl } = stopOnCancel;
+    assert.equal(landedPrUrl({ runnerId: 'runner1', currentSessionId: 'session2' }, /** @type {any} */ ({ ...landedCheckpoint })), null);
+    assert.equal(landedPrUrl({ runnerId: 'runner2', currentSessionId: 'session1' }, /** @type {any} */ ({ ...landedCheckpoint })), null, 'another runner');
+    assert.equal(landedPrUrl({ runnerId: 'runner1', currentSessionId: 'session1', landing: { prUrl: 'javascript:alert(1)', committedSessionIds: ['session1'] } }, null), null, 'unsafe URL');
+  });
+});
