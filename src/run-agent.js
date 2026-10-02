@@ -18,6 +18,7 @@ const { MODEL_ID_PATTERN } = require('./agent-catalog');
 const { parseDiffFiles } = require('./scope-files');
 const { writeCheckpoint } = require('./run-checkpoint');
 const { buildResumeHandle } = require('./resume-handle');
+const { attachPrDiff } = require('./pr-diff-attachment');
 
 /** @typedef {import('nax-agent-runner-sdk').AgentRunnerSdk} AgentRunnerSdk */
 /** @typedef {import('nax-agent-runner-sdk').Handle} Handle */
@@ -61,6 +62,8 @@ class ReportedActionError extends Error {
  * @property {boolean} dryRun
  * @property {boolean} [ask] Ask mode: answer only; never land.
  * @property {string} runnerTemp
+ * @property {string} prDiffPath PR diff to attach; empty when not a PR or disabled.
+ * @property {string} baseRef
  */
 
 /**
@@ -163,6 +166,8 @@ function readActionInput(env) {
     dryRun: booleanInput(env.IS_DRY_RUN),
     ask: env.RUNNER_MODE === 'ask',
     runnerTemp: requiredText(env.RUNNER_TEMP, 'RUNNER_TEMP'),
+    prDiffPath: String(env.PR_DIFF_PATH || '').trim(),
+    baseRef: String(env.BASE_REF || '').trim(),
   };
 }
 
@@ -533,7 +538,7 @@ async function fetchDeployScreenshot(deployId, token) {
  * @property {(name: string, value: unknown) => void} [setOutput]
  * @property {(message: string) => void} [log]
  * @property {(deployId: string, token: string) => Promise<string>} [getScreenshot]
- * @property {typeof fetch} [fetchImpl] used for status-comment checkpoint writes
+ * @property {typeof fetch} [fetchImpl] used for status-comment checkpoint writes and the PR diff upload
  * @property {(ms: number) => Promise<void>} [sleep] backoff sleep (tests)
  */
 
@@ -630,6 +635,17 @@ async function runAgentAction(options = {}) {
     // Ask mode answers in a comment: nothing is ever landed.
     const landing = input.dryRun || input.ask ? 'none' : 'pr';
     const modeInput = input.ask ? { mode: /** @type {const} */ ('ask') } : {};
+    stage = 'attach-diff';
+    const diff = await attachPrDiff({
+      token: input.token,
+      siteId: input.siteId,
+      diffPath: input.prDiffPath,
+      baseRef: input.baseRef,
+      fetchImpl,
+      log,
+    });
+    const prompt = `${input.prompt}${diff.note}`;
+    const fileKeysInput = diff.fileKeys.length ? { fileKeys: diff.fileKeys } : {};
     /** @type {Handle} */
     let handle;
     if (input.existingRunnerId) {
@@ -639,11 +655,12 @@ async function runAgentAction(options = {}) {
       handle = await sdk.followUp(
         base,
         {
-          prompt: input.prompt,
+          prompt,
           agent: input.agent,
           ...(input.model ? { model: input.model } : {}),
           ...(input.effort ? { effort: input.effort } : {}),
           ...modeInput,
+          ...fileKeysInput,
         },
         requestOptions,
       );
@@ -652,12 +669,13 @@ async function runAgentAction(options = {}) {
       log(`Starting Agent Runner with nax-agent-runner-sdk@${AGENT_RUNNER_SDK_VERSION}.`);
       handle = await sdk.start({
         siteId: input.siteId,
-        prompt: input.prompt,
+        prompt,
         agent: input.agent,
         ...(input.model ? { model: input.model } : {}),
         ...(input.effort ? { effort: input.effort } : {}),
         ...(input.branch ? { branch: input.branch } : {}),
         ...modeInput,
+        ...fileKeysInput,
         land: landing,
         deadlineMs: input.deadlineMs,
         retryBudget: { capacity: 0 },

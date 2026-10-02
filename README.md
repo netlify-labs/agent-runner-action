@@ -203,6 +203,7 @@ Or comment `@netlify make it blue` on an existing PR.
 | `recover-workflow` | No | `netlify-agents.yml` | For `recover-scan`: the main workflow file to dispatch |
 | `recover-lookback-hours` | No | `48` | For `recover-scan`: only check issues and PRs updated this recently |
 | `recover-max-items` | No | `50` | For `recover-scan`: maximum recently updated issues and PRs to check |
+| `attach-pr-diff` | No | `true` | On PRs, attach the full diff against the base branch to the agent session (`.netlify/assets/`); the runner can't `git diff` against the base itself |
 | `dry-run` | No | `false` | Start an agent run but skip commit/PR creation |
 | `preflight-only` | No | `false` | Validate setup and exit without creating/resuming an agent run |
 | `job-timeout-minutes` | No | `''` | The job's `timeout-minutes`. When set, the agent limit is shortened to leave 5 minutes for setup, so the agent times out cleanly before GitHub cancels the job |

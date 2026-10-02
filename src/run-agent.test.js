@@ -404,6 +404,47 @@ describe('effort forwarding', () => {
     assert.equal(normal.outputs['agent-ask-discarded-changes'], 'false');
   });
 
+  it('attaches the PR diff to new runs and follow-ups and points the prompt at it', async () => {
+    const diffDir = tempDirectory();
+    const diffPath = path.join(diffDir, 'pr-7.diff');
+    fs.writeFileSync(diffPath, 'diff --git a/x b/x\n');
+    const fetchImpl = async (url) => ({
+      status: 200,
+      ok: true,
+      headers: { get: () => null },
+      json: async () => (String(url).includes('/sites/')
+        ? { account_id: 'acct-1' }
+        : { upload_url: 'https://storage.example/signed', file_key: 'key/pr-7.diff' }),
+    });
+    try {
+      const diffEnv = { PR_DIFF_PATH: diffPath, BASE_REF: 'main', RUNNER_MODE: 'ask', IS_DRY_RUN: 'false' };
+      const created = await runWith(diffEnv, undefined, { fetchImpl });
+      assert.deepEqual(created.createRunner[0].fileKeys, ['key/pr-7.diff']);
+      assert.match(created.createRunner[0].prompt, /attached as `pr-7\.diff`/);
+
+      const followUp = { EXISTING_RUNNER_ID: fixture.runner.runnerId, SESSION_DATA_MAP: JSON.stringify({ 'known-session': {} }) };
+      const followed = await runWith({ ...diffEnv, ...followUp }, undefined, { fetchImpl });
+      assert.deepEqual(followed.createSession[0].fileKeys, ['key/pr-7.diff']);
+    } finally {
+      fs.rmSync(diffDir, { recursive: true, force: true });
+    }
+  });
+
+  it('runs without an attachment when the diff upload fails', async () => {
+    const diffDir = tempDirectory();
+    const diffPath = path.join(diffDir, 'pr-7.diff');
+    fs.writeFileSync(diffPath, 'diff --git a/x b/x\n');
+    const fetchImpl = async () => ({ status: 500, ok: false, headers: { get: () => null }, json: async () => ({}) });
+    try {
+      const calls = await runWith({ PR_DIFF_PATH: diffPath, BASE_REF: 'main', RUNNER_MODE: 'ask', IS_DRY_RUN: 'false' }, undefined, { fetchImpl });
+      assert.equal('fileKeys' in calls.createRunner[0], false);
+      assert.doesNotMatch(calls.createRunner[0].prompt, /attached as/);
+      assert.equal(calls.outputs.outcome, 'success');
+    } finally {
+      fs.rmSync(diffDir, { recursive: true, force: true });
+    }
+  });
+
   it('forwards an explicit effort when creating a runner', async () => {
     const calls = await runWith({ NETLIFY_EFFORT: 'high' });
     assert.equal(calls.createRunner.length, 1);

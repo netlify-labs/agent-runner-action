@@ -335,6 +335,7 @@ jobs:
     <tr><td><code>recover-workflow</code></td><td>No</td><td><code>netlify-agents.yml</code></td><td>For <code>recover-scan</code>: the main workflow file to dispatch</td></tr>
     <tr><td><code>recover-lookback-hours</code></td><td>No</td><td><code>48</code></td><td>For <code>recover-scan</code>: only check recently updated threads</td></tr>
     <tr><td><code>recover-max-items</code></td><td>No</td><td><code>50</code></td><td>For <code>recover-scan</code>: maximum threads to check</td></tr>
+    <tr><td><code>attach-pr-diff</code></td><td>No</td><td><code>true</code></td><td>On PRs, attach the full diff against the base branch to the agent session (<code>.netlify/assets/</code>); the runner can't <code>git diff</code> against the base itself</td></tr>
     <tr><td><code>dry-run</code></td><td>No</td><td><code>false</code></td><td>Start an agent run but skip commit/PR creation</td></tr>
     <tr><td><code>preflight-only</code></td><td>No</td><td><code>false</code></td><td>Validate setup and exit without creating/resuming an agent run</td></tr>
     <tr><td><code>job-timeout-minutes</code></td><td>No</td><td><code>''</code></td><td>The job's <code>timeout-minutes</code>; the agent limit is shortened to fit inside it</td></tr>
