@@ -94,6 +94,10 @@ inputs:
     description: 'For operation recover-scan: maximum number of recently updated issues and PRs to check'
     required: false
     default: '50'
+  attach-pr-diff:
+    description: 'On pull requests, attach the full diff against the base branch to the agent session (the runner cannot run git diff against the base itself)'
+    required: false
+    default: 'true'
   dry-run:
     description: 'Preview mode — start an agent run but skip PR creation and commits'
     required: false
@@ -882,6 +886,30 @@ runs:
         echo "📋 Changed files:"
         git diff --name-only "origin/$BASE_REF"..HEAD || true
 
+    # The runner's checkout is a blobless clone and ask mode has no network, so
+    # `git diff base...head` fails inside it. Write the diff here; run-agent.js
+    # uploads it as a session attachment. Best-effort: no diff, no attachment.
+    - name: Write pull request diff
+      id: pr-diff
+      if: >-
+        steps.trigger-check.outputs.should-run == 'true'
+        && steps.should-continue.outputs.should-continue == 'true'
+        && steps.context-info.outputs.is-pr == 'true'
+        && steps.context-info.outputs.base-ref != ''
+        && inputs.attach-pr-diff == 'true'
+      shell: bash
+      env:
+        BASE_REF: ${{ steps.context-info.outputs.base-ref }}
+        PR_NUMBER: ${{ steps.context-info.outputs.issue-number }}
+      run: |
+        DIFF_PATH="${RUNNER_TEMP:-/tmp}/pr-${PR_NUMBER:-diff}.diff"
+        if git diff --no-color --no-ext-diff "origin/$BASE_REF...HEAD" > "$DIFF_PATH"; then
+          echo "path=$DIFF_PATH" >> "$GITHUB_OUTPUT"
+          echo "📎 PR diff: $(wc -c < "$DIFF_PATH" | tr -d ' ') bytes"
+        else
+          echo "::warning title=PR diff not written::git diff origin/$BASE_REF...HEAD failed; the agent runs without the diff attachment."
+        fi
+
     # -----------------------------------------------------------------------
     # 9. Detect project type
     # -----------------------------------------------------------------------
@@ -1048,6 +1076,8 @@ runs:
         REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         MAX_WAIT_MINUTES: ${{ steps.preflight.outputs.effective-timeout-minutes || inputs.timeout-minutes }}
         IS_DRY_RUN: ${{ steps.context-info.outputs.is-dry-run }}
+        PR_DIFF_PATH: ${{ steps.pr-diff.outputs.path }}
+        BASE_REF: ${{ steps.context-info.outputs.base-ref }}
         ACTION_DIR: ${{ steps.install-deps.outputs.action-dir || github.action_path }}
       # run-agent.js reports its own outcome. If it exits non-zero without one
       # (e.g. it crashed while loading modules), record a failure here so the
