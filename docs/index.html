@@ -254,7 +254,16 @@
     details[open] summary::after { transform: rotate(45deg); }
     details > div { padding: 0 18px 4px; color: var(--muted); }
 
-    footer { margin-top: 72px; padding: 32px 0 48px; border-top: 1px solid var(--rule); color: var(--faint); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; }
+    /* Bottom right: copies a setup prompt for the reader's AI coding agent. */
+    .agent-prompt { position: fixed; right: 16px; bottom: 16px; z-index: 12; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 10px 18px;
+      border: 1px solid var(--rule); border-radius: 999px; background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--text);
+      -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); font-weight: 600; font-size: 14px; cursor: pointer;
+      box-shadow: 0 12px 30px -12px rgba(0, 0, 0, .45); transition: border-color .2s var(--ease), transform .3s var(--spring), background .2s var(--ease); }
+    .agent-prompt:hover { border-color: color-mix(in srgb, var(--accent) 60%, transparent); transform: translateY(-1px); }
+    .agent-prompt:active { transform: scale(.97); }
+    .agent-prompt svg { width: 16px; height: 16px; flex: none; }
+    .agent-prompt.copied { border-color: var(--ok); color: var(--ok); }
+    footer { margin-top: 72px; padding: 32px 0 96px; border-top: 1px solid var(--rule); color: var(--faint); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; }
     footer a { color: var(--muted); }
 
     .js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s var(--ease), transform .8s var(--spring); }
@@ -936,6 +945,51 @@ jobs:
 </main>
 </div>
 
+<button type="button" class="agent-prompt" id="agent-prompt-btn" aria-describedby="agent-prompt-desc">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/></svg>
+  <span>Copy prompt for your agent</span>
+</button>
+<p id="agent-prompt-desc" hidden>Copies instructions your AI coding agent can follow to set up this action in your repository.</p>
+
+<!-- What the "Copy prompt for your agent" button copies. Plain text; keep it in step with the setup section. -->
+<script type="text/plain" id="agent-prompt">Set up the Netlify Agent Runners GitHub Action (beta, Netlify Labs) in this repository.
+
+What it does: anyone with write access can comment "@netlify <request>" on an issue or pull request, and a Netlify Agent Runner (Claude, Codex, Gemini or OpenCode) makes the change on Netlify and opens a pull request with a deploy preview. It never merges anything itself.
+
+Docs: https://agent-runner-github-action.netlify.app
+Source and README: https://github.com/netlify-labs/agent-runner-action
+
+Work through these steps. Stop and ask me whenever a step needs me (anything in a browser, or a secret).
+
+1. Netlify site. Check whether this repo is linked to a Netlify site: read the site ID from .netlify/state.json if it exists. If not, run `netlify link` (or `netlify init` to create a site) with the Netlify CLI, and tell me which site you linked.
+
+2. GitHub App. Ask me to install the netlify-coding GitHub App on this repository: https://github.com/apps/netlify-coding
+   It's what creates the commits and pull requests.
+
+3. Secrets. The workflow needs two repository secrets:
+   - NETLIFY_SITE_ID: set it yourself with `gh secret set NETLIFY_SITE_ID --body "<site ID from step 1>"`.
+   - NETLIFY_AUTH_TOKEN: a Netlify personal access token. Don't handle the token yourself. Ask me to create one at https://app.netlify.com/user/applications#personal-access-tokens and run `gh secret set NETLIFY_AUTH_TOKEN` myself (it prompts for the value).
+
+4. Workflow. Create .github/workflows/netlify-agents.yml with the exact contents of the template:
+   https://raw.githubusercontent.com/netlify-labs/agent-runner-action/main/workflow-templates/netlify-agents.yml
+   Keep `uses: netlify-labs/agent-runner-action@v1`, the `concurrency` group, the job's `if:` (it skips bot comments) and the `permissions` as they are. Keep `job-timeout-minutes` equal to the job's `timeout-minutes`. Optional settings are in the commented lines; see https://agent-runner-github-action.netlify.app/#inputs
+
+5. Optional recovery. To finish runs whose GitHub job died, also add .github/workflows/netlify-agents-recover.yml from:
+   https://raw.githubusercontent.com/netlify-labs/agent-runner-action/main/workflow-templates/netlify-agents-recover.yml
+   Ask me first: it runs every 30 minutes (about 20-30 seconds of Actions time when there's nothing to do).
+
+6. Safety. Don't add steps to this workflow that install or run code from the repository (npm install, tests, linters, builds). It uses pull_request_target and can read secrets. Why: https://agent-runner-github-action.netlify.app/#security
+
+7. Ship and test. Commit the workflow(s) on a branch and open a pull request. Issue and comment workflows only run from the default branch, so testing waits until it's merged. Then I can open an issue whose body starts with "@netlify" and a small request; a 👀 reaction and a status comment should appear within a minute. To check the setup without starting an agent run, set `preflight-only: 'true'` on the action for one run.
+
+When you're done, tell me what you changed and exactly what I still need to do.
+
+More:
+- Talking to it (agents, models, effort): https://agent-runner-github-action.netlify.app/#usage
+- Asking questions without code changes: https://agent-runner-github-action.netlify.app/#ask-mode
+- Troubleshooting: https://agent-runner-github-action.netlify.app/#troubleshooting
+</script>
+
 <script>
 (() => {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -1143,6 +1197,32 @@ jobs:
       new IntersectionObserver(([e]) => { e.isIntersecting ? (!userStopped && start()) : stop() }, { threshold: 0.45 }).observe(viz)
       document.addEventListener('visibilitychange', () => { if (document.hidden) stop() })
     }
+  }
+
+  // "Copy prompt for your agent": copies the setup prompt, with a fallback for browsers without the clipboard API.
+  const promptBtn = $('#agent-prompt-btn'), promptText = $('#agent-prompt')
+  if (promptBtn && promptText) {
+    const label = $('span', promptBtn)
+    const text = promptText.textContent.trim() + '\n'
+    const copyFallback = () => {
+      const ta = Object.assign(document.createElement('textarea'), { value: text, readOnly: true })
+      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0'
+      document.body.append(ta); ta.select()
+      const ok = document.execCommand('copy'); ta.remove()
+      if (!ok) throw new Error('copy failed')
+    }
+    let resetTimer
+    promptBtn.addEventListener('click', async () => {
+      try {
+        try { await navigator.clipboard.writeText(text) } catch { copyFallback() }
+        label.textContent = 'Copied. Paste it into your agent'
+        promptBtn.classList.add('copied')
+      } catch {
+        label.textContent = 'Couldn’t copy. Try again'
+      }
+      clearTimeout(resetTimer)
+      resetTimer = setTimeout(() => { label.textContent = 'Copy prompt for your agent'; promptBtn.classList.remove('copied') }, 2600)
+    })
   }
 
   // The hero video: shown once its MP4 is set on the panel's data-src.
