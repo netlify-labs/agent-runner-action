@@ -4,214 +4,496 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Netlify Agent Runners - GitHub Action</title>
+  <meta name="description" content="Mention @netlify in a GitHub issue or pull request and a Netlify Agent Runner opens a pull request with the change.">
+  <script>
+    // The theme chosen with the switch (top right), before the page paints; otherwise the system's.
+    document.documentElement.classList.add('js')
+    try { const t = localStorage.getItem('arga-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t } catch {}
+  </script>
   <style>
     :root {
-      --teal: #00AD9F;
-      --teal-dark: #008F84;
-      --bg: #0e1117;
-      --surface: #161b22;
-      --border: #30363d;
-      --text: #e6edf3;
-      --text-muted: #8b949e;
-      --code-bg: #1c2129;
+      --ground: #f6f7f9; --surface: #ffffff; --raised: #eceff2; --rule: #e1e5e9;
+      --text: #0f1216; --muted: #4a535e; --faint: #6b7580;
+      --accent: #047f77; --accent-soft: #dcf3f1; --ok: #0f8a4f; --ok-soft: #dff4e8; --warn: #a15c00; --warn-soft: #fbefdc;
+      --code: #0b0d10; --code-text: #d9e1e8; --code-dim: #7d8894; --stage: #0d1117;
+      --spring: cubic-bezier(.34, 1.4, .64, 1); --ease: cubic-bezier(.22, 1, .36, 1);
+      color-scheme: light;
     }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --ground: #0a0c0f; --surface: #12151a; --raised: #1a1e24; --rule: #252a31;
+        --text: #f2f4f6; --muted: #b2bbc5; --faint: #85909b;
+        --accent: #32e6e2; --accent-soft: #0e2a2b; --ok: #3ddc84; --ok-soft: #0f2a1c; --warn: #f5b25b; --warn-soft: #2d2212;
+        --code: #07090b; --stage: #07090b;
+        color-scheme: dark;
+      }
     }
-    a { color: var(--teal); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .container { max-width: 800px; margin: 0 auto; padding: 0 24px; }
+    :root[data-theme="dark"] {
+      --ground: #0a0c0f; --surface: #12151a; --raised: #1a1e24; --rule: #252a31;
+      --text: #f2f4f6; --muted: #b2bbc5; --faint: #85909b;
+      --accent: #32e6e2; --accent-soft: #0e2a2b; --ok: #3ddc84; --ok-soft: #0f2a1c; --warn: #f5b25b; --warn-soft: #2d2212;
+      --code: #07090b; --stage: #07090b;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+    body { margin: 0; background: var(--ground); color: var(--text); font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .wrap { max-width: 1240px; margin: 0 auto; padding: 0 24px; }
+
+    /* The contents list sits in the left margin and follows the reader; below 1180 px it's hidden. */
+    .page { max-width: 1480px; display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: 44px; }
+    .toc { position: sticky; top: 0; align-self: start; padding: 72px 0 24px; max-height: 100vh; overflow-y: auto; }
+    .toc p { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); margin: 0 0 10px 12px; }
+    .toc a { position: relative; display: block; padding: 6px 12px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.35;
+      transition: background .2s var(--ease), color .2s var(--ease); }
+    .toc a::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 1px; background: transparent; transition: background .2s var(--ease); }
+    .toc a:hover { color: var(--text); background: var(--raised); }
+    .toc a[aria-current] { color: var(--text); font-weight: 600; background: var(--accent-soft); }
+    .toc a[aria-current]::before { background: var(--accent); }
+    section[id], header[id] { scroll-margin-top: 24px; }
+    .content { min-width: 0; padding-bottom: 24px; }
+    .prose { max-width: 760px; }
+    section { padding: 72px 0 0; }
+    h1 { font-size: clamp(38px, 5.4vw, 64px); line-height: 1.04; letter-spacing: -.025em; margin: 0 0 20px; }
+    h2 { font-size: clamp(26px, 3vw, 34px); line-height: 1.15; letter-spacing: -.015em; margin: 0 0 12px; }
+    h3 { font-size: 17px; margin: 28px 0 8px; }
+    h2 code, h3 code { font-size: .85em; }
+    p { margin: 0 0 14px; }
+    ul, ol { margin: 0 0 14px; padding-left: 22px; }
+    li { margin: 0 0 6px; }
+    .muted { color: var(--muted); }
+    .kicker { color: var(--accent); font-weight: 600; font-size: 14px; letter-spacing: .02em; margin: 0 0 14px; }
+    .section-lede { color: var(--muted); font-size: 18px; margin: 0 0 28px; max-width: 760px; }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    code { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--raised); padding: 1px 6px; border-radius: 6px; overflow-wrap: anywhere; }
+    pre { position: relative; background: var(--code); color: var(--code-text); border-radius: 14px; padding: 16px 18px; overflow-x: auto; font: 13.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0 0 16px; }
+    pre code { background: none; padding: 0; color: inherit; font: inherit; overflow-wrap: normal; }
+    pre .c { color: var(--code-dim); } pre .k { color: #7ee7ff; } pre .s { color: #b7f19a; } pre .m { color: #32e6e2; font-weight: 600; }
+    .code-block { position: relative; }
+    .copy { position: absolute; top: 8px; right: 8px; z-index: 1; border: 0; border-radius: 8px; padding: 4px 10px; min-height: 30px; font: 600 12px/1 ui-sans-serif, system-ui, sans-serif;
+      background: rgba(255, 255, 255, .08); color: #c5ced8; cursor: pointer; opacity: 0; transition: opacity .2s var(--ease), background .2s var(--ease); }
+    .code-block:hover .copy, .copy:focus-visible { opacity: 1; }
+    .copy:hover { background: rgba(255, 255, 255, .16); }
+    @media (hover: none) { .copy { opacity: 1; } }
+    button { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
     /* Hero */
-    .hero {
-      text-align: center;
-      padding: 80px 24px 60px;
-      border-bottom: 1px solid var(--border);
-    }
-    .hero h1 { font-size: 2.5rem; margin-bottom: 16px; }
-    .hero h1 span { color: var(--teal); }
-    .hero p { font-size: 1.2rem; color: var(--text-muted); max-width: 600px; margin: 0 auto 32px; }
-    .hero-code {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 20px 28px;
-      display: inline-block;
-      font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
-      font-size: 0.95rem;
-      text-align: left;
-      color: var(--text-muted);
-    }
-    .hero-code .key { color: var(--teal); }
-    .hero-code .val { color: #f0883e; }
+    .hero { padding: 64px 0 8px; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: center; }
+    /* The title stays on one line: it's sized to its column (about 16 of its em per line). Phones let it wrap. */
+    .hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .hero > div:first-child { container-type: inline-size; }
+    .hero h1 { font-size: min(40px, 5.9cqi); line-height: 1.15; white-space: nowrap; }
+    .hero h1 .at { color: var(--accent); }
+    .badge-row { margin: 0 0 16px; }
+    .badge-row .badge { margin-left: 0; }
+    .badge-row .badge + .badge { margin-left: 6px; }
+    .badge.labs { background: var(--accent-soft); color: var(--accent); }
+    .lede { font-size: 19px; color: var(--muted); margin: 0 0 28px; }
+    .badge { display: inline-block; vertical-align: middle; margin-left: 8px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: .02em;
+      background: var(--warn-soft); color: var(--warn); }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 10px 20px; border-radius: 999px; font-weight: 600; text-decoration: none; font-size: 15px; border: 0; cursor: pointer; }
+    .btn svg { width: 18px; height: 18px; }
+    .btn.primary { background: var(--text); color: var(--ground); }
+    .btn.accent { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+    .btn.accent:hover { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
+    .theme-toggle { position: fixed; top: 14px; right: 16px; z-index: 11; width: 40px; height: 40px; display: grid; place-items: center; border: 0; background: none; color: var(--muted); cursor: pointer; }
+    .theme-toggle:hover { color: var(--text); }
+    .theme-toggle svg { width: 20px; height: 20px; transition: transform .45s var(--spring); }
+    .theme-toggle:hover svg { transform: rotate(-20deg); }
+    .repo-link { position: fixed; top: 14px; right: 56px; z-index: 11; width: 40px; height: 40px; display: grid; place-items: center; color: var(--muted); }
+    .repo-link:hover { color: var(--text); }
+    .theme-toggle, .repo-link { border-radius: 50%; background: color-mix(in srgb, var(--ground) 72%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+    .repo-link svg { width: 20px; height: 20px; }
 
-    /* Nav */
-    nav {
-      position: sticky;
-      top: 0;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border);
-      z-index: 10;
-      padding: 12px 0;
-    }
-    nav .container {
-      display: flex;
-      gap: 24px;
-      overflow-x: auto;
-    }
-    nav a { color: var(--text-muted); font-size: 0.9rem; white-space: nowrap; }
-    nav a:hover { color: var(--text); text-decoration: none; }
+    /* The hero video. Until data-src is set, a looping sketch of a run stands in for it. */
+    .hero-video { position: relative; aspect-ratio: 16 / 9; border-radius: 18px; overflow: hidden; background: var(--stage); box-shadow: 0 30px 80px -30px rgba(0, 0, 0, .55), 0 0 0 1px var(--rule); }
+    .hero-video video { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .hero-video .pending { position: absolute; inset: 0; display: grid; place-items: center; padding: 40px 6% 16px; color: #c5ced8;
+      background: radial-gradient(120% 90% at 20% 10%, rgba(50, 230, 226, .18), transparent 60%), radial-gradient(90% 80% at 90% 100%, rgba(80, 120, 255, .16), transparent 60%), var(--stage); }
+    .pending .soon { position: absolute; top: 14px; left: 16px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #8ef3ef; }
+    .thread { width: min(100%, 460px); display: grid; gap: 10px; font-size: 13.5px; line-height: 1.45; }
+    .bubble { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: start; opacity: 0; transform: translateY(10px); animation: bubble 9s var(--ease) infinite; }
+    .bubble .av { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #07090b; background: #b7c3cf; }
+    .bubble .av.bot { background: #32e6e2; }
+    .bubble .body { background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .1); border-radius: 10px; padding: 8px 12px; color: #e6edf3; }
+    .bubble .who { display: block; font-size: 11.5px; color: #8b97a3; margin-bottom: 2px; }
+    .bubble .m { color: #32e6e2; font-weight: 600; }
+    .bubble .ok { color: #3ddc84; font-weight: 600; }
+    .bubble .spin { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; border: 2px solid #32e6e2; border-right-color: transparent; vertical-align: -1px; animation: spin .9s linear infinite; }
+    .bubble:nth-child(2) { animation-delay: .9s; }
+    .bubble:nth-child(3) { animation-delay: 2.6s; }
+    @keyframes bubble { 0% { opacity: 0; transform: translateY(10px); } 7%, 85% { opacity: 1; transform: none; } 95%, 100% { opacity: 0; transform: none; } }
+    @keyframes spin { to { transform: rotate(1turn); } }
+    .caption { color: var(--faint); font-size: 13px; margin: 10px 2px 0; }
+    section.first { padding-top: 56px; }
 
-    /* Sections */
-    section { padding: 48px 0; border-bottom: 1px solid var(--border); }
-    section:last-child { border-bottom: none; }
-    h2 { font-size: 1.6rem; margin-bottom: 24px; }
-    h3 { font-size: 1.15rem; margin: 24px 0 12px; color: var(--teal); }
-    p, li { color: var(--text-muted); margin-bottom: 12px; }
-    ul, ol { padding-left: 24px; }
+    /* Panels and cards */
+    .panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 18px; padding: 24px; }
+    .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .card { background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; padding: 18px 20px; }
+    .card h3 { margin: 0 0 6px; }
+    .card p { color: var(--muted); font-size: 15px; margin: 0; }
+    .card p + p { margin-top: 8px; }
+    .note { border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 12px 12px 0; padding: 12px 16px; margin: 0 0 16px; }
+    .note.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+    .note p:last-child { margin: 0; }
 
-    /* Code blocks */
-    pre {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 16px 20px;
-      overflow-x: auto;
-      font-size: 0.85rem;
-      margin: 16px 0;
-      line-height: 1.5;
-    }
-    code {
-      font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
-      background: var(--code-bg);
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-size: 0.85em;
-    }
-    pre code { background: none; padding: 0; }
+    /* How it works: a step-by-step run. Three places (your thread, the workflow job, the agent), wires that
+       light up in the direction work moves, and a sketch of the GitHub thread that fills in as it goes. */
+    .viz { padding: 0; overflow: hidden; }
+    .viz:focus-visible { outline-offset: 4px; }
+    .places { display: grid; grid-template-columns: minmax(0, 1fr) minmax(28px, .5fr) minmax(0, 1fr) minmax(28px, .5fr) minmax(0, 1fr); align-items: center;
+      padding: 24px 24px 20px; border-bottom: 1px solid var(--rule); }
+    .place { text-align: center; padding: 14px 8px 12px; border-radius: 14px; border: 1px solid var(--rule); background: var(--ground); opacity: .55;
+      transition: opacity .35s var(--ease), border-color .35s var(--ease), box-shadow .5s var(--ease), transform .5s var(--spring), background .35s var(--ease); }
+    .place .ico { width: 40px; height: 40px; margin: 0 auto 8px; border-radius: 12px; display: grid; place-items: center; background: var(--raised); color: var(--muted);
+      transition: background .35s var(--ease), color .35s var(--ease); }
+    .place .ico svg { width: 22px; height: 22px; }
+    .place b { display: block; font-size: 14.5px; line-height: 1.3; }
+    .place span { display: block; color: var(--faint); font-size: 12.5px; }
+    .place.on { opacity: 1; border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: var(--surface); transform: translateY(-2px);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent), 0 14px 30px -18px color-mix(in srgb, var(--accent) 60%, transparent); }
+    .place.on .ico { background: var(--accent-soft); color: var(--accent); }
+    .wire { position: relative; height: 2px; margin: 0 6px; border-radius: 1px; background: var(--rule); overflow: visible; transition: background .35s var(--ease); }
+    .wire::before { content: ""; position: absolute; top: 50%; width: 7px; height: 7px; margin-top: -4px; border-top: 2px solid currentColor; border-right: 2px solid currentColor;
+      color: var(--rule); right: -2px; transform: rotate(45deg); transition: color .35s var(--ease), transform .35s var(--ease); }
+    .wire.back::before { right: auto; left: -2px; transform: rotate(-135deg); }
+    .wire.fwd, .wire.back { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+    .wire.fwd::before, .wire.back::before { color: var(--accent); }
+    .wire i { position: absolute; top: -3px; left: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); opacity: 0;
+      box-shadow: 0 0 10px 2px color-mix(in srgb, var(--accent) 60%, transparent); }
+    .wire.fwd i { animation: packet-fwd 1.4s var(--ease) infinite; }
+    .wire.back i { animation: packet-back 1.4s var(--ease) infinite; }
+    @keyframes packet-fwd { 0% { left: 0; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { left: calc(100% - 8px); opacity: 0; } }
+    @keyframes packet-back { 0% { left: calc(100% - 8px); opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { left: 0; opacity: 0; } }
 
-    /* Tables */
-    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
-    th, td {
-      text-align: left;
-      padding: 10px 14px;
-      border: 1px solid var(--border);
-      font-size: 0.9rem;
-    }
-    th { background: var(--surface); color: var(--text); }
-    td { color: var(--text-muted); }
-    td code { font-size: 0.8rem; }
+    .viz-body { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 28px; padding: 24px; align-items: start; }
+    .viz-text { min-height: 190px; }
+    .viz-text .count { color: var(--faint); font-size: 13px; font-variant-numeric: tabular-nums; margin: 0 0 6px; }
+    .viz-text h3 { font-size: 21px; letter-spacing: -.01em; margin: 0 0 10px; }
+    .viz-text p { color: var(--muted); }
+    .viz-text .swap { animation: swap-in .5s var(--spring); }
+    @keyframes swap-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+    /* The GitHub thread sketch */
+    .gh { border: 1px solid var(--rule); border-radius: 14px; background: var(--ground); padding: 14px; display: grid; gap: 10px; font-size: 13.5px; line-height: 1.45; min-height: 300px; align-content: start; }
+    .gh-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; padding: 0 2px 8px; border-bottom: 1px solid var(--rule); }
+    .gh-title .state { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--ok-soft); color: var(--ok); }
+    .gh-title .num { color: var(--faint); font-weight: 400; }
+    .gh-item { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; }
+    .gh-item[hidden] { display: none; }
+    .gh-item.enter { animation: item-in .55s var(--spring); }
+    @keyframes item-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+    .gh-item .av { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #07090b; background: #b7c3cf; }
+    .gh-item .av.bot { background: var(--accent); }
+    .gh-item .av.ev { background: var(--raised); color: var(--muted); }
+    .gh-item .av.ev svg { width: 14px; height: 14px; }
+    .gh-card { border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); overflow: hidden; }
+    .gh-card .hd { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; background: var(--raised); color: var(--faint); font-size: 12px; }
+    .gh-card .bd { padding: 8px 10px; color: var(--text); }
+    .gh-card .bd small { display: block; color: var(--faint); font-size: 12px; margin-top: 2px; }
+    .gh-event { color: var(--muted); padding-top: 3px; }
+    .gh-event b { color: var(--text); }
+    .mention { color: var(--accent); font-weight: 600; }
+    .react { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0; padding: 1px 8px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+      background: var(--accent-soft); font-size: 12px; color: var(--text); }
+    .react[hidden] { display: none; }
+    .spin { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; border: 2px solid var(--accent); border-right-color: transparent; vertical-align: -1px; animation: spin .9s linear infinite; }
+    .ok-text { color: var(--ok); font-weight: 600; }
+    .warn-chip { display: inline-block; margin-top: 4px; padding: 1px 8px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-size: 12px; font-weight: 600; }
+    .gh-item.flash .gh-card { animation: flash 1s var(--ease); }
+    @keyframes flash { from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); } to { box-shadow: 0 0 0 0 transparent; } }
+
+    /* Controls */
+    .viz-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 24px; border-top: 1px solid var(--rule); background: color-mix(in srgb, var(--raised) 45%, transparent); }
+    .icon-btn { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--raised); color: var(--text); display: grid; place-items: center; cursor: pointer;
+      transition: background .2s var(--ease), transform .3s var(--spring); }
+    .icon-btn:hover { background: color-mix(in srgb, var(--accent) 18%, var(--raised)); }
+    .icon-btn:active { transform: scale(.94); }
+    .icon-btn:disabled { opacity: .4; cursor: default; }
+    .icon-btn svg { width: 18px; height: 18px; }
+    .icon-btn.play { background: var(--text); color: var(--ground); }
+    .dots { display: flex; gap: 2px; margin-left: auto; }
+    .dots button { width: 32px; height: 44px; border: 0; background: none; padding: 0; cursor: pointer; display: grid; place-items: center; }
+    .dots button i { display: block; width: 100%; max-width: 24px; height: 4px; border-radius: 2px; background: var(--rule); position: relative; overflow: hidden; transition: background .3s var(--ease); }
+    .dots button.done i { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+    .dots button[aria-current] i { background: var(--rule); }
+    .dots button[aria-current] i::after { content: ""; position: absolute; inset: 0; background: var(--accent); transform-origin: left; transform: scaleX(1); }
+    .playing .dots button[aria-current] i::after { animation: fill var(--step-ms, 4200ms) linear forwards; }
+    @keyframes fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    .viz-hint { color: var(--faint); font-size: 12.5px; }
 
     /* Steps */
-    .step {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 20px 24px;
-      margin: 16px 0;
-    }
-    .step-number {
-      display: inline-block;
-      background: var(--teal);
-      color: var(--bg);
-      font-weight: 700;
-      width: 28px;
-      height: 28px;
-      line-height: 28px;
-      text-align: center;
-      border-radius: 50%;
-      margin-right: 12px;
-      font-size: 0.85rem;
-    }
-    .step h3 { display: inline; color: var(--text); margin: 0; }
+    .steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; counter-reset: step; }
+    .steps > li { min-width: 0; counter-increment: step; position: relative; background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; padding: 18px 20px 18px 64px; margin: 0; }
+    .steps > li::before { content: counter(step); position: absolute; left: 20px; top: 18px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+      background: var(--accent); color: var(--ground); font-weight: 700; font-size: 14px; }
+    .steps h3 { margin: 2px 0 6px; }
+    .steps p { color: var(--muted); }
+    .steps > li > :last-child { margin-bottom: 0; }
+
+    /* Tables */
+    .table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 14px; background: var(--surface); margin: 0 0 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+    th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+    tr:last-child td { border-bottom: 0; }
+    th { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); background: var(--raised); white-space: nowrap; }
+    td { color: var(--muted); }
+    td:first-child { white-space: nowrap; }
+    td:first-child code { color: var(--text); }
+    td code { font-size: 13px; }
 
     /* Troubleshooting */
-    .trouble-item { margin-bottom: 20px; }
-    .trouble-item strong { color: var(--text); }
+    details { border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); margin: 0 0 8px; }
+    summary { cursor: pointer; padding: 14px 18px; font-weight: 600; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; color: var(--faint); font-weight: 400; font-size: 20px; line-height: 1; transition: transform .25s var(--ease); }
+    details[open] summary::after { transform: rotate(45deg); }
+    details > div { padding: 0 18px 4px; color: var(--muted); }
 
-    /* Footer */
-    footer {
-      text-align: center;
-      padding: 40px 24px;
-      color: var(--text-muted);
-      font-size: 0.85rem;
+    /* Bottom right: copies a setup prompt for the reader's AI coding agent. */
+    .agent-prompt { position: fixed; right: 16px; bottom: 16px; z-index: 12; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 10px 18px;
+      border: 1px solid var(--rule); border-radius: 999px; background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--text);
+      -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); font-weight: 600; font-size: 14px; cursor: pointer;
+      box-shadow: 0 12px 30px -12px rgba(0, 0, 0, .45); transition: border-color .2s var(--ease), transform .3s var(--spring), background .2s var(--ease); }
+    .agent-prompt:hover { border-color: color-mix(in srgb, var(--accent) 60%, transparent); transform: translateY(-1px); }
+    .agent-prompt:active { transform: scale(.97); }
+    .agent-prompt svg { width: 16px; height: 16px; flex: none; }
+    .agent-prompt.copied { border-color: var(--ok); color: var(--ok); }
+    footer { margin-top: 72px; padding: 32px 0 96px; border-top: 1px solid var(--rule); color: var(--faint); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; }
+    footer a { color: var(--muted); }
+
+    .js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s var(--ease), transform .8s var(--spring); }
+    .js .reveal.in { opacity: 1; transform: none; }
+
+    @media (max-width: 1180px) {
+      .page { grid-template-columns: minmax(0, 1fr); max-width: 1240px; }
+      .toc { display: none; }
+    }
+    @media (max-width: 960px) {
+      .hero { grid-template-columns: minmax(0, 1fr); gap: 28px; padding-top: 72px; }
+      .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    /* Narrow: text, then the controls, then the thread, so the buttons stay put while the thread grows below them. */
+    @media (max-width: 860px) {
+      .viz { display: flex; flex-direction: column; }
+      .viz-body { display: contents; }
+      .viz-text { order: 1; min-height: 0; padding: 20px 24px 4px; }
+      .viz-controls { order: 2; border-top: 0; background: none; padding-top: 4px; }
+      .gh { order: 3; min-height: 0; margin: 4px 24px 24px; }
+    }
+    @media (max-width: 640px) {
+      .wrap { padding: 0 16px; }
+      .grid2, .grid3 { grid-template-columns: minmax(0, 1fr); }
+      .hero h1 { font-size: 28px; white-space: normal; text-wrap: balance; }
+      .panel { padding: 16px; }
+      .viz { padding: 0; }
+      .places { padding: 16px 12px 14px; grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr) 16px minmax(0, 1fr); }
+      .place { padding: 10px 4px; }
+      .place .ico { width: 34px; height: 34px; margin-bottom: 6px; }
+      .place b { font-size: 12.5px; }
+      .place span { font-size: 11px; }
+      .wire { margin: 0 2px; }
+      .viz-text { padding: 16px 16px 4px; }
+      .gh { margin: 4px 16px 16px; }
+      .viz-controls { padding: 10px 12px; gap: 6px; }
+      .viz-hint { display: none; }
+      .dots button { width: 26px; }
+      .steps > li { padding: 16px 16px 16px 56px; }
+      .steps > li::before { left: 16px; top: 16px; }
+      .thread { font-size: 12px; gap: 6px; }
+      .bubble .body { padding: 6px 10px; }
+      .bubble .who { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .js .reveal { opacity: 1; transform: none; transition: none; }
+      .bubble { animation: none; opacity: 1; transform: none; }
+      .bubble .spin, .spin { animation: none; }
+      .wire i { display: none; }
+      .gh-item.enter, .gh-item.flash .gh-card, .viz-text .swap, .playing .dots button[aria-current] i::after { animation: none; }
+      .place, .place.on { transform: none; transition: none; }
     }
   </style>
 </head>
 <body>
+<button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch theme"></button>
+<a class="repo-link" href="https://github.com/netlify-labs/agent-runner-action" target="_blank" rel="noopener" aria-label="The code on GitHub" title="The code on GitHub"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.46c.53.1.72-.23.72-.5v-1.8c-2.92.63-3.54-1.4-3.54-1.4-.48-1.22-1.17-1.54-1.17-1.54-.95-.65.07-.64.07-.64 1.06.07 1.61 1.08 1.61 1.08.94 1.6 2.46 1.14 3.06.87.1-.68.37-1.14.66-1.4-2.33-.27-4.78-1.17-4.78-5.2 0-1.14.4-2.08 1.08-2.81-.11-.27-.47-1.33.1-2.78 0 0 .88-.28 2.88 1.07a10 10 0 0 1 5.24 0c2-1.35 2.88-1.07 2.88-1.07.57 1.45.21 2.51.1 2.78.67.73 1.08 1.67 1.08 2.81 0 4.04-2.46 4.93-4.8 5.19.38.33.71.97.71 1.96v2.9c0 .28.19.61.73.5A10.5 10.5 0 0 0 12 1.5z"/></svg></a>
 
-<div class="hero">
-  <h1>Netlify <span>Agent Runners</span></h1>
-  <p>Start Netlify Agent Runners agent runs from GitHub issues and pull requests. Just mention <code>@netlify</code> and the selected agent builds your site.</p>
-  <p>Runner execution uses the published <code>nax-agent-runner-sdk</code> and lands changes as an open pull request; this action never merges automatically.</p>
-  <div class="hero-code">
-    <span class="key">- uses:</span> <span class="val">netlify-labs/agent-runner-action@v1</span><br>
-    <span class="key">&nbsp; with:</span><br>
-    <span class="key">&nbsp;&nbsp;&nbsp; netlify-auth-token:</span> <span class="val">${{ secrets.NETLIFY_AUTH_TOKEN }}</span><br>
-    <span class="key">&nbsp;&nbsp;&nbsp; netlify-site-id:</span> <span class="val">${{ secrets.NETLIFY_SITE_ID }}</span>
-  </div>
-</div>
-
-<nav>
-  <div class="container">
-    <a href="#setup">Setup</a>
-    <a href="#usage">Usage</a>
-    <a href="#inputs">Inputs</a>
-    <a href="#outputs">Outputs</a>
-    <a href="#how-it-works">How it Works</a>
-    <a href="#troubleshooting">Troubleshooting</a>
-  </div>
+<div class="wrap page">
+<nav class="toc" aria-label="On this page">
+  <p>On this page</p>
+  <a href="#overview">Overview</a>
+  <a href="#how-it-works">How it works</a>
+  <a href="#setup">Setup</a>
+  <a href="#usage">Talking to it</a>
+  <a href="#ask-mode">Asking questions</a>
+  <a href="#checkpoints">Follow-ups and stopping</a>
+  <a href="#scope-guard">Scope guard</a>
+  <a href="#recovery">Recovering runs</a>
+  <a href="#execution-modes">Dry runs and preflight</a>
+  <a href="#inputs">Inputs</a>
+  <a href="#outputs">Outputs</a>
+  <a href="#security">Security</a>
+  <a href="#versioning">Versioning</a>
+  <a href="#troubleshooting">Troubleshooting</a>
 </nav>
+<main class="content">
 
-<div class="container">
+<header class="hero" id="overview">
+  <div>
+    <p class="badge-row"><span class="badge">Beta</span> <span class="badge labs">Labs</span></p>
+    <h1>Netlify Agent Runners <span class="at">GitHub Action</span></h1>
+    <p class="lede">Mention <code>@netlify</code> with a request in any issue or pull request. A Netlify Agent Runner
+    (Claude, Codex, Gemini or OpenCode) makes the change on Netlify and opens a pull request with a deploy preview.
+    You review it and merge it; the action never merges anything itself.</p>
+    <div class="actions">
+      <a class="btn primary" href="#setup">Set it up in 4 steps</a>
+      <a class="btn accent" href="https://github.com/netlify-labs/agent-runner-action" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.46c.53.1.72-.23.72-.5v-1.8c-2.92.63-3.54-1.4-3.54-1.4-.48-1.22-1.17-1.54-1.17-1.54-.95-.65.07-.64.07-.64 1.06.07 1.61 1.08 1.61 1.08.94 1.6 2.46 1.14 3.06.87.1-.68.37-1.14.66-1.4-2.33-.27-4.78-1.17-4.78-5.2 0-1.14.4-2.08 1.08-2.81-.11-.27-.47-1.33.1-2.78 0 0 .88-.28 2.88 1.07a10 10 0 0 1 5.24 0c2-1.35 2.88-1.07 2.88-1.07.57 1.45.21 2.51.1 2.78.67.73 1.08 1.67 1.08 2.81 0 4.04-2.46 4.93-4.8 5.19.38.33.71.97.71 1.96v2.9c0 .28.19.61.73.5A10.5 10.5 0 0 0 12 1.5z"/></svg>
+        View on GitHub</a>
+    </div>
+  </div>
+  <figure style="margin:0">
+    <!-- The hero video. Set data-src (and optionally data-poster, data-captions) to the MP4's URL and it replaces the sketch below. -->
+    <div class="hero-video" id="hero-video" data-name="Hero: Agent Runner GitHub Action" data-src="media/agent-runner-action.mp4" data-poster="media/agent-runner-action.jpg" data-captions="">
+      <div class="pending" aria-label="A sketch of a run: someone asks @netlify for a change, the agent works, and a pull request opens">
+        <span class="soon">Video coming soon</span>
+        <div class="thread" aria-hidden="true">
+          <div class="bubble"><span class="av">Y</span><div class="body"><span class="who">you commented</span><span class="m">@netlify claude</span> Add a dark mode toggle to the header</div></div>
+          <div class="bubble"><span class="av bot">N</span><div class="body"><span class="who">netlify-coding bot</span><span class="spin"></span>👀 Claude · Fable 5 is working… <span style="color:#8ef3ef;text-decoration:underline">live run</span></div></div>
+          <div class="bubble"><span class="av bot">N</span><div class="body"><span class="who">netlify-coding bot</span><span class="ok">✓ Completed</span> · opened PR #128 · deploy preview ready</div></div>
+        </div>
+      </div>
+    </div>
+    <figcaption class="caption">A one-minute tour: one comment in, one pull request out. The agent runs on Netlify, not on your Actions runner.</figcaption>
+  </figure>
+</header>
+
+<section id="how-it-works" class="first">
+  <div class="prose reveal">
+    <p class="kicker">How it works</p>
+    <h2>From a mention to a pull request</h2>
+    <p class="section-lede">The action watches issues, pull requests and comments for <code>@netlify</code>. When it
+    finds one, it starts an agent run on Netlify through the published <code>nax-agent-runner-sdk</code>, waits for that
+    exact run, and lands the changes as an open pull request.</p>
+  </div>
+  <div class="panel viz reveal" id="run-viz" tabindex="0" role="group" aria-roledescription="walkthrough" aria-label="How a run works, step by step. Use the left and right arrow keys to move between steps.">
+    <div class="places">
+      <div class="place" data-place="github">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z"/></svg></div>
+        <b>Your issue or PR</b><span>GitHub</span>
+      </div>
+      <div class="wire" data-wire="1" aria-hidden="true"><i></i></div>
+      <div class="place" data-place="actions">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.2 7.5l2.1 1.2M17.7 15.3l2.1 1.2M4.2 16.5l2.1-1.2M17.7 8.7l2.1-1.2"/></svg></div>
+        <b>The workflow job</b><span>GitHub Actions</span>
+      </div>
+      <div class="wire" data-wire="2" aria-hidden="true"><i></i></div>
+      <div class="place" data-place="netlify">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l3.2 3.2M12 21l-3.2-3.2M3 12l3.2-3.2M21 12l-3.2 3.2"/><rect x="8.2" y="8.2" width="7.6" height="7.6" rx="1.6" transform="rotate(45 12 12)"/></svg></div>
+        <b>The agent</b><span>Netlify Agent Runner</span>
+      </div>
+    </div>
+
+    <div class="viz-body">
+      <div class="viz-text" aria-live="polite">
+        <div id="viz-copy">
+          <p class="count">Step 1 of 6</p>
+          <h3>You mention <code>@netlify</code></h3>
+          <p>Write <code>@netlify</code> and your request in an issue, a PR, a review or a comment.</p>
+        </div>
+      </div>
+
+      <div class="gh" aria-label="The GitHub thread as the run goes">
+        <div class="gh-title"><span class="state">Open</span> Add a dark mode toggle <span class="num">#42</span></div>
+        <div class="gh-item" data-from="1">
+          <span class="av" aria-hidden="true">Y</span>
+          <div class="gh-card"><div class="hd"><span>you commented</span><span>now</span></div>
+            <div class="bd"><span class="mention">@netlify claude</span> Add a dark mode toggle to the header
+              <div><span class="react" data-from="2" hidden>👀 1</span></div></div></div>
+        </div>
+        <div class="gh-item" data-from="3" hidden>
+          <span class="av bot" aria-hidden="true">N</span>
+          <div class="gh-card"><div class="hd"><span>netlify-coding commented · status</span><span>edited</span></div>
+            <div class="bd" id="viz-status"></div></div>
+        </div>
+        <div class="gh-item" data-from="5" hidden>
+          <span class="av ev" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M6 8.4v7.2M18 15.6V10a3 3 0 0 0-3-3h-4"/></svg></span>
+          <div class="gh-event"><b>netlify-coding</b> opened pull request <b>#128</b> · deploy preview ready<br>
+            <span class="warn-chip">⚠️ Review these changes: netlify.toml</span></div>
+        </div>
+        <div class="gh-item" data-from="6" hidden>
+          <span class="av bot" aria-hidden="true">N</span>
+          <div class="gh-card"><div class="hd"><span>netlify-coding commented · result</span><span>now</span></div>
+            <div class="bd"><span class="ok-text">Run #1 · claude · Fable 5 · Completed ✓</span>
+              <small>Added a dark mode toggle to the header, saved the choice in localStorage, and checked it on the deploy preview. Screenshot and links inside.</small></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="viz-controls">
+      <button type="button" class="icon-btn" id="viz-prev" aria-label="Previous step"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button type="button" class="icon-btn play" id="viz-play" aria-label="Play"></button>
+      <button type="button" class="icon-btn" id="viz-next" aria-label="Next step"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
+      <span class="viz-hint">or use ← → keys</span>
+      <div class="dots" id="viz-dots"></div>
+    </div>
+  </div>
+
+  <h3 class="reveal" style="margin-top:40px">What it posts</h3>
+  <div class="grid2 reveal">
+    <div class="card"><h3>Status comment</h3><p>One comment that changes as the run goes: a short summary, deploy, agent and log links, and hidden state markers that let follow-up runs carry on.</p></div>
+    <div class="card"><h3>Result comments</h3><p>One comment per run that never changes afterwards: the prompt, what the agent did, a screenshot and links.</p></div>
+    <div class="card"><h3>History</h3><p>On a pull request, a compact table of contents of every result comment, newest first.</p></div>
+    <div class="card"><h3>Issue redirect</h3><p>Once a PR exists for an issue, a note on the issue sends people to the PR, where follow-ups go.</p></div>
+  </div>
+</section>
 
 <section id="setup">
-  <h2>Setup</h2>
-
-  <div class="step">
-    <span class="step-number">1</span>
-    <h3>Install the GitHub App</h3>
-    <p>Install <a href="https://github.com/apps/netlify-coding">netlify-coding</a> on your repository. This lets the agent create commits and pull requests.</p>
+  <div class="prose reveal">
+    <p class="kicker">Setup</p>
+    <h2>Four steps, one workflow file</h2>
+    <p class="section-lede">You need a Netlify site linked to the repository, two secrets, and the workflow below.</p>
   </div>
-
-  <div class="step">
-    <span class="step-number">2</span>
-    <h3>Create a Netlify site</h3>
-    <p>Link your repo to a Netlify site. Note the <strong>Site ID</strong> from Site configuration &gt; General.</p>
-    <pre><code>netlify init</code></pre>
-  </div>
-
-  <div class="step">
-    <span class="step-number">3</span>
-    <h3>Add repository secrets</h3>
-    <p>Go to <strong>Settings &gt; Secrets and variables &gt; Actions</strong> and add:</p>
-    <table>
-      <tr><th>Secret</th><th>Description</th></tr>
-      <tr><td><code>NETLIFY_AUTH_TOKEN</code></td><td>Your <a href="https://app.netlify.com/user/applications#personal-access-tokens">Netlify personal access token</a></td></tr>
-      <tr><td><code>NETLIFY_SITE_ID</code></td><td>Your Netlify site ID</td></tr>
-    </table>
-  </div>
-
-  <div class="step">
-    <span class="step-number">4</span>
-    <h3>Add the workflow</h3>
-    <p>Create <code>.github/workflows/netlify-agents.yml</code>:</p>
-    <pre><code>name: Netlify Agent Runners
+  <ol class="steps reveal">
+    <li>
+      <h3>Install the GitHub App</h3>
+      <p>Install <a href="https://github.com/apps/netlify-coding">netlify-coding</a> on your repository. It's what creates the commits and pull requests.</p>
+    </li>
+    <li>
+      <h3>Link a Netlify site</h3>
+      <p>Link the repo to a Netlify site, and note its <strong>Site ID</strong> from Site configuration &gt; General.</p>
+      <pre><code>netlify init</code></pre>
+    </li>
+    <li>
+      <h3>Add two repository secrets</h3>
+      <p>In <strong>Settings &gt; Secrets and variables &gt; Actions</strong>:</p>
+      <div class="table-wrap"><table>
+        <tr><th>Secret</th><th>What it is</th></tr>
+        <tr><td><code>NETLIFY_AUTH_TOKEN</code></td><td>A <a href="https://app.netlify.com/user/applications#personal-access-tokens">Netlify personal access token</a></td></tr>
+        <tr><td><code>NETLIFY_SITE_ID</code></td><td>The site ID from step 2</td></tr>
+      </table></div>
+    </li>
+    <li>
+      <h3>Add the workflow</h3>
+      <p>Save this as <code>.github/workflows/netlify-agents.yml</code>. It's the same as the repo's
+      <a href="https://github.com/netlify-labs/agent-runner-action/blob/main/workflow-templates/netlify-agents.yml">workflow template</a>.</p>
+      <pre class="yaml"><code>name: Netlify Agent Runners
 
 on:
   workflow_dispatch:
     inputs:
       trigger_text:
-        description: 'Prompt for the agent run'
+        description: 'What should the agent build or change? (e.g. "Add a dark mode toggle")'
         required: true
         type: string
         default: '@netlify'
       actor:
-        description: 'Actor triggering the agent'
+        description: 'GitHub username to attribute this run to'
         required: true
         type: string
       agent:
@@ -222,7 +504,58 @@ on:
           - codex
           - claude
           - gemini
+          - opencode
         default: 'codex'
+      model_id:
+        description: 'Model (auto lets the backend choose; a model picks its own agent)'
+        required: false
+        type: choice
+        options:
+          - auto
+          - claude-fable-5
+          - claude-opus-5
+          - claude-opus-4-8
+          - claude-sonnet-5
+          - claude-haiku-4-5
+          - gpt-5.6-sol
+          - gpt-5.6-terra
+          - gpt-5.6-luna
+          - gpt-5.4-mini
+          - gemini-3.1-pro-preview
+          - gemini-3.6-flash
+          - gemini-3.5-flash-lite
+          - moonshotai/kimi-k3
+          - moonshotai/kimi-k2.7-code
+          - z-ai/glm-5.2
+          - deepseek/deepseek-v4-pro
+          - ~deepseek/deepseek-v4-flash-latest
+          - x-ai/grok-4.5
+          - minimax/minimax-m3
+        default: 'auto'
+      effort:
+        description: 'Effort level (auto lets the backend choose)'
+        required: false
+        type: choice
+        options:
+          - auto
+          - low
+          - medium
+          - high
+          - max
+        default: 'auto'
+      runner_mode:
+        description: 'normal makes changes and opens a PR; ask answers a question in a comment without changing anything'
+        required: false
+        type: choice
+        options:
+          - normal
+          - ask
+        default: 'normal'
+      recover_thread:
+        description: 'Internal: issue or PR number whose unfinished agent run should be finished (used by the recovery workflow)'
+        required: false
+        type: string
+        default: ''
   pull_request_target:
     types: [opened, reopened]
   pull_request_review_comment:
@@ -235,12 +568,14 @@ on:
     types: [created, edited]
 
 concurrency:
-  group: ${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && github.event.comment.body == '@netlify stop' && format('netlify-stop-{0}', github.run_id) || format('netlify-{0}-{1}', github.repository, github.event.pull_request.number || github.event.issue.number || inputs.recover_thread || github.run_id) }}
+  # One agent job per issue or PR at a time; recover_thread dispatches share
+  # the thread's group. A comment that is exactly "@netlify stop" gets its own
+  # group so it runs right away instead of queueing behind the run it stops.
+  group: ${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &amp;&amp; github.event.comment.body == '@netlify stop' &amp;&amp; format('netlify-stop-{0}', github.run_id) || format('netlify-{0}-{1}', github.repository, github.event.pull_request.number || github.event.issue.number || inputs.recover_thread || github.run_id) }}
   cancel-in-progress: false
 
 jobs:
   netlify-agent:
-    # Skip bot senders early to avoid burning Actions minutes
     if: &gt;-
       github.event_name == 'workflow_dispatch' ||
       (
@@ -254,49 +589,186 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      actions: read   # recovery checks whether an earlier run's job is still alive
     steps:
       - uses: netlify-labs/agent-runner-action@v1
         with:
           netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
-          # preflight-only: 'false' # Validate setup and skip agent execution</code></pre>
-  </div>
+          job-timeout-minutes: '25'       # Keep equal to this job's timeout-minutes above
+          # Optional settings:
+          # default-agent: 'codex'        # Default agent (claude, codex, gemini, opencode)
+          # default-model-id: ''          # Default model (e.g. claude-fable-5 or fable); empty = Auto
+          # default-effort: ''            # Default effort (low, medium, high, max*); empty = Auto
+          # protected-paths: default      # Flag risky file changes; e.g. "default, infra/**" or "none"
+          # protected-paths-action: comment # Add ",label" and/or ",draft" to escalate
+          # scope-instructions: default   # Prompt guidance; "none" turns it off
+          # manage-labels: 'false'        # Auto-create and apply labels
+          # dry-run: 'false'              # Still starts an agent run; skips commit/PR creation
+          # preflight-only: 'false'       # Validate setup only; starts no agent run
+          # timeout-minutes: '10'         # Max wait for agent completion
+          # netlify-cli-version: '24.8.1' # Netlify CLI version
+          # timezone: 'America/Los_Angeles' # Timezone for rendered timestamps
+          # debug: 'false'                # Enable debug logging</code></pre>
+      <p>Then open an issue that starts with <code>@netlify</code> to try it.</p>
+    </li>
+  </ol>
 </section>
 
 <section id="usage">
-  <h2>Usage</h2>
-  <h3>From an issue</h3>
-  <p>Create an issue with <code>@netlify</code> in the body:</p>
-  <pre><code>@netlify Build a landing page for a coffee shop with a menu and contact form</code></pre>
+  <div class="prose reveal">
+    <p class="kicker">Talking to it</p>
+    <h2>Say what you want after <code>@netlify</code></h2>
+    <p class="section-lede">Everything after the mention is the request. Before it, you can name an agent, a model and an
+    effort level, in that order. Each one is optional.</p>
+  </div>
+  <div class="reveal">
+    <pre class="mentions"><code>@netlify Build a landing page for a coffee shop with a menu and contact form
+@netlify claude Add a dark mode toggle
+@netlify fable high Refactor the checkout flow          # claude + Fable 5, high effort
+@netlify-fable high Refactor the checkout flow          # same thing
+@netlify codex sol medium Add retry logic               # codex + GPT 5.6 Sol
+@netlify gemini flash Summarize the changelog           # gemini + Gemini 3.6 Flash</code></pre>
+    <p class="muted">The default agent is <code>codex</code>; change it with the <code>default-agent</code> input. A model
+    picks its own agent, so <code>fable</code> means Claude, and if you name a model from a different agent the model wins
+    and the status comment says so. Anything you leave out is chosen by the backend (Auto) unless you set
+    <code>default-model-id</code> or <code>default-effort</code>.</p>
 
-  <h3>Choose an agent</h3>
-  <p>Specify <code>claude</code>, <code>codex</code>, <code>gemini</code>, or <code>opencode</code> after <code>@netlify</code>:</p>
-  <pre><code>@netlify claude Add a dark mode toggle
-@netlify codex Make the hero section responsive
-@netlify gemini Add a testimonials carousel</code></pre>
-  <p>Default agent is <code>codex</code>. You can change the default with the <code>default-agent</code> input.</p>
+    <h3 id="models">Models</h3>
+    <div class="table-wrap"><table>
+      <tr><th>Agent</th><th>Model</th><th>Say</th></tr>
+      <tr><td>claude</td><td><code>claude-fable-5</code> (Fable 5)</td><td><code>fable</code></td></tr>
+      <tr><td>claude</td><td><code>claude-opus-5</code> (Opus 5)</td><td><code>opus</code></td></tr>
+      <tr><td>claude</td><td><code>claude-opus-4-8</code> (Opus 4.8)</td><td><code>opus-4.8</code></td></tr>
+      <tr><td>claude</td><td><code>claude-sonnet-5</code> (Sonnet 5)</td><td><code>sonnet</code></td></tr>
+      <tr><td>claude</td><td><code>claude-haiku-4-5</code> (Haiku 4.5)</td><td><code>haiku</code></td></tr>
+      <tr><td>codex</td><td><code>gpt-5.6-sol</code> / <code>gpt-5.6-terra</code> / <code>gpt-5.6-luna</code></td><td><code>codex sol</code> / <code>codex terra</code> / <code>codex luna</code></td></tr>
+      <tr><td>codex</td><td><code>gpt-5.4-mini</code></td><td><code>codex mini</code></td></tr>
+      <tr><td>gemini</td><td><code>gemini-3.1-pro-preview</code></td><td><code>gemini pro</code></td></tr>
+      <tr><td>gemini</td><td><code>gemini-3.6-flash</code> / <code>gemini-3.5-flash-lite</code></td><td><code>gemini flash</code> / <code>gemini flash-lite</code></td></tr>
+      <tr><td>opencode</td><td><code>moonshotai/kimi-k3</code> (Kimi K3)</td><td><code>kimi</code> or <code>k3</code></td></tr>
+      <tr><td>opencode</td><td><code>moonshotai/kimi-k2.7-code</code> (Kimi K2.7 Code)</td><td><code>kimi-code</code></td></tr>
+      <tr><td>opencode</td><td><code>z-ai/glm-5.2</code> (GLM 5.2)</td><td><code>glm</code></td></tr>
+      <tr><td>opencode</td><td><code>deepseek/deepseek-v4-pro</code> / <code>~deepseek/deepseek-v4-flash-latest</code></td><td><code>deepseek</code> / <code>deepseek-flash</code></td></tr>
+      <tr><td>opencode</td><td><code>x-ai/grok-4.5</code> (Grok 4.5)</td><td><code>grok</code></td></tr>
+      <tr><td>opencode</td><td><code>minimax/minimax-m3</code> (MiniMax M3)</td><td><code>minimax</code></td></tr>
+    </table></div>
+    <p class="muted">The shorter Codex and Gemini names need the agent in front, so a prompt starting with "pro tip"
+    isn't read as a model. Exact model IDs always work, and <code>model:&lt;id&gt;</code> anywhere on the
+    <code>@netlify</code> line requests any model, including ones missing from this list.</p>
 
-  <h3>Choose a model and effort</h3>
-  <p>After <code>@netlify</code>, name an agent, a model, and an effort level, in that order. Each is optional, and a model picks its own agent:</p>
-  <pre><code>@netlify fable high Refactor the checkout flow
-@netlify claude fable high Refactor the checkout flow
-@netlify-fable high Refactor the checkout flow
-@netlify codex sol medium Add retry logic
-@netlify claude high Fix the header</code></pre>
-  <p>Claude models: <code>fable</code>, <code>opus</code>, <code>opus-4.8</code>, <code>sonnet</code>, <code>haiku</code>. Codex: <code>codex sol</code>, <code>codex terra</code>, <code>codex luna</code>, <code>codex mini</code>. Gemini: <code>gemini pro</code>, <code>gemini flash</code>, <code>gemini flash-lite</code>. OpenCode: <code>kimi</code>, <code>kimi-code</code>, <code>glm</code>, <code>deepseek</code>, <code>deepseek-flash</code>, <code>grok</code>, <code>minimax</code>. Exact model IDs and <code>model:&lt;id&gt;</code> also work.</p>
-  <p>Effort is <code>low</code>, <code>medium</code>, or <code>high</code> (some OpenCode models also take <code>max</code>; Kimi K2.7 Code and MiniMax M3 take none), placed after an agent or model and followed by a space, <code>:</code>, <code>,</code>, or the end of the line. <code>effort:&lt;level&gt;</code> anywhere on the <code>@netlify</code> line takes precedence, and <code>effort:auto</code> forces Auto. Anything left out is chosen by the backend (Auto) unless you set <code>default-model-id</code> or <code>default-effort</code>.</p>
+    <h3>Effort</h3>
+    <p class="muted">Effort goes after the agent or model: <code>low</code>, <code>medium</code> or <code>high</code>
+    (some OpenCode models also take <code>max</code>; Kimi K2.7 Code and MiniMax M3 take none). It only counts when a
+    space, <code>:</code>, <code>,</code> or the end of the line follows it, so <code>@netlify codex low-hanging fixes</code>
+    leaves effort on Auto. <code>effort:&lt;level&gt;</code> anywhere on the line wins over the positional word, and
+    <code>effort:auto</code> forces Auto. If a model doesn't support the level, the action uses Auto and says so.</p>
 
-  <h3>Follow-up prompts</h3>
-  <p>After the first run creates a PR, add follow-up <code>@netlify</code> comments on the PR to iterate. The agent continues from where it left off.</p>
+    <h3>Typos and aliases</h3>
+    <p class="muted">Common typos work: <code>@nelify</code>, <code>@netlfy</code>, <code>@netify</code>,
+    <code>@netlif</code>, <code>@netfly</code>. So do <code>@netlify-agent</code> and <code>@netlify-ai</code>. Mentions
+    inside code blocks or inline code are ignored, so you can quote <code>@netlify</code> without starting a run.</p>
+  </div>
+</section>
 
-  <h3>Execution modes</h3>
-  <p><code>dry-run</code> and <code>preflight-only</code> are different controls:</p>
-  <ul>
-    <li><code>dry-run: 'true'</code> still starts an agent run, but skips commit and PR creation.</li>
-    <li><code>preflight-only: 'true'</code> validates setup and exits before any agent run is created or resumed.</li>
-    <li>If both are <code>true</code>, preflight-only behavior wins and no agent run starts.</li>
-  </ul>
-  <pre><code>- uses: netlify-labs/agent-runner-action@v1
+<section id="ask-mode">
+  <div class="prose reveal">
+    <p class="kicker">Asking questions</p>
+    <h2>Ask about the code without changing it</h2>
+    <p class="section-lede">Ask mode answers in a comment. It never changes files or opens a PR.</p>
+    <pre class="mentions"><code>@netlify-ask How are webhooks retried?
+@netlify ask: why does the ingest job retry twice?
+@netlify claude sonnet mode:ask where is rate limiting configured?</code></pre>
+    <p class="muted">A plain "ask" isn't enough, because <code>@netlify ask the user to confirm…</code> is a request to
+    build something. Use the <code>-ask</code> suffix, <code>ask:</code> with its colon, or <code>mode:ask</code> right
+    after the mention. Agent, model and effort words work the same as for normal runs.</p>
+    <p class="muted">The answer appears as a result comment marked 💬 Answered. On a PR, the agent reads the PR branch.
+    On an issue, a later <code>@netlify</code> request continues from the same context, so "now build it" works. From
+    the workflow's <strong>Run workflow</strong> form, choose <code>runner_mode: ask</code>.</p>
+  </div>
+</section>
+
+<section id="checkpoints">
+  <div class="prose reveal">
+    <p class="kicker">Follow-ups and stopping</p>
+    <h2>Keep iterating on the same PR</h2>
+    <p class="section-lede">After the first run opens a PR, comment <code>@netlify</code> on the PR to ask for more. The
+    agent carries on from where it left off. A follow-up only changes the model or effort when it names one.</p>
+  </div>
+  <div class="grid2 reveal">
+    <div class="card">
+      <h3>Stop a run</h3>
+      <p>Comment exactly <code>@netlify stop</code>. The agent stops right away, and the comments say "Stopped by @you"
+      instead of "failed". Cancelling the workflow run also stops the agent.</p>
+      <p>This needs the stop-aware <code>concurrency</code> group from the current template, so the stop doesn't queue
+      behind the run it stops.</p>
+    </div>
+    <div class="card">
+      <h3>Run checkpoints</h3>
+      <p>When a run starts, the status comment links to the live run and stores an encrypted checkpoint. It's sealed with
+      a key derived from your Netlify token, bound to the thread and runner, and never holds the prompt or site ID in
+      plain text.</p>
+      <p>Set <code>job-timeout-minutes</code> to the job's <code>timeout-minutes</code> so the agent's own limit fits
+      inside the job.</p>
+    </div>
+  </div>
+</section>
+
+<section id="scope-guard">
+  <div class="prose reveal">
+    <p class="kicker">Scope guard</p>
+    <h2>Risky files get flagged for review</h2>
+    <p class="section-lede">After a run, the action checks which files it changed and adds a
+    <strong>⚠️ Review these changes</strong> table to the result comment, and to the PR for runs started from an issue.
+    It never blocks a run.</p>
+    <p class="muted">It flags workflows, <code>netlify.toml</code>, root <code>*.toml</code> files, lockfiles,
+    <code>AGENTS.md</code> and <code>CLAUDE.md</code>, <code>.env</code> files, new files at the repository root and new
+    top-level folders. Files the request names are listed as requested instead.</p>
+    <p class="muted">Change the list with <code>protected-paths</code> (globs; a pattern without <code>/</code> matches
+    only at the root; <code>default</code>, <code>none</code> and <code>!pattern</code> work), and escalate with
+    <code>protected-paths-action: comment,label,draft</code>. By default, <code>scope-instructions</code> also tells agents
+    to report unrelated build or deploy failures instead of working around them.</p>
+  </div>
+</section>
+
+<section id="recovery">
+  <div class="prose reveal">
+    <p class="kicker">Recovering runs</p>
+    <h2>Runs finish even if the job dies</h2>
+    <p class="section-lede">Sometimes the agent keeps working on Netlify after its GitHub job is gone. The checkpoint
+    records that the run never finished, and there are two ways it gets finished.</p>
+  </div>
+  <div class="grid2 reveal">
+    <div class="card">
+      <h3>On the next <code>@netlify</code> comment</h3>
+      <p>Before starting the new request, the action finishes the previous run. It waits for it if it's still working
+      (up to 40% of the agent time limit), then opens the PR or reports the result and mentions whoever asked.</p>
+      <p>If the branch changed since the run started, it reports the result instead of landing it. If the thread was
+      closed, the workflow was cancelled or the run ran out of time, it stops the run and lands nothing.</p>
+    </div>
+    <div class="card">
+      <h3>On a schedule (optional)</h3>
+      <p>Copy <a href="https://github.com/netlify-labs/agent-runner-action/blob/main/workflow-templates/netlify-agents-recover.yml"><code>netlify-agents-recover.yml</code></a>
+      into <code>.github/workflows/</code>. Every 30 minutes it checks threads updated in the last 48 hours and dispatches
+      your main workflow with <code>recover_thread</code> for each unfinished run.</p>
+      <p>A scan with nothing to do takes about 20–30 seconds of Actions time. The main workflow needs the
+      <code>recover_thread</code> input, the thread-scoped <code>concurrency</code> group and <code>actions: read</code>,
+      as in the current template.</p>
+    </div>
+  </div>
+</section>
+
+<section id="execution-modes">
+  <div class="prose reveal">
+    <p class="kicker">Dry runs and preflight</p>
+    <h2>Try it without landing anything</h2>
+    <p class="section-lede"><code>dry-run</code> and <code>preflight-only</code> are different controls.</p>
+    <ul class="muted">
+      <li><code>dry-run: 'true'</code> still starts an agent run, but skips commit and PR creation.</li>
+      <li><code>preflight-only: 'true'</code> validates setup and exits before any agent run is created or resumed.</li>
+      <li>If both are <code>true</code>, preflight-only wins and no agent run starts.</li>
+    </ul>
+    <pre class="yaml"><code>- uses: netlify-labs/agent-runner-action@v1
   with:
     netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
     netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
@@ -307,13 +779,16 @@ jobs:
     netlify-auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
     netlify-site-id: ${{ secrets.NETLIFY_SITE_ID }}
     dry-run: 'true' # run agent preview, skip commits/PR</code></pre>
-
-  <h3>Typo-tolerant</h3>
-  <p>Common typos are recognized: <code>@nelify</code>, <code>@netlfy</code>, <code>@netify</code>, <code>@netlif</code>, <code>@netfly</code>. Aliases like <code>@netlify-agent</code> and <code>@netlify-ai</code> also work.</p>
+  </div>
 </section>
 
 <section id="inputs">
-  <h2>Inputs</h2>
+  <div class="prose reveal">
+    <p class="kicker">Reference</p>
+    <h2>Inputs</h2>
+    <p class="section-lede">Only the token and site ID are required.</p>
+  </div>
+  <div class="table-wrap reveal">
   <table>
     <tr><th>Input</th><th>Required</th><th>Default</th><th>Description</th></tr>
     <tr><td><code>netlify-auth-token</code></td><td>Yes</td><td>&mdash;</td><td>Netlify personal access token</td></tr>
@@ -344,11 +819,16 @@ jobs:
     <tr><td><code>debug</code></td><td>No</td><td><code>false</code></td><td>Enable debug API logging</td></tr>
     <tr><td><code>timezone</code></td><td>No</td><td><code>America/Los_Angeles</code></td><td>Timezone used for date/time rendering in comments</td></tr>
   </table>
+  </div>
 </section>
 
 <section id="outputs">
-  <h2>Outputs</h2>
-  <p>Use these in subsequent workflow steps for custom automation:</p>
+  <div class="prose reveal">
+    <p class="kicker">Reference</p>
+    <h2>Outputs</h2>
+    <p class="section-lede">Use these in later steps of the same job.</p>
+  </div>
+  <div class="table-wrap reveal">
   <table>
     <tr><th>Output</th><th>Description</th></tr>
     <tr><td><code>agent-id</code></td><td>Agent run ID</td></tr>
@@ -374,8 +854,9 @@ jobs:
     <tr><td><code>scope-flag-count</code></td><td>Number of files the scope check flagged</td></tr>
     <tr><td><code>agent-error</code></td><td>Sanitized runtime error summary emitted by agent orchestration</td></tr>
   </table>
-  <h3>Example: run tests after agent</h3>
-  <pre><code>steps:
+  </div>
+  <h3 class="reveal">Example: act on the result</h3>
+  <pre class="yaml reveal"><code>steps:
   - uses: netlify-labs/agent-runner-action@v1
     id: agent
     with:
@@ -387,104 +868,378 @@ jobs:
     run: echo "PR created at ${{ steps.agent.outputs.agent-pr-url }}"</code></pre>
 </section>
 
-<section id="ask-mode">
-  <h2>Asking questions</h2>
-  <p>Ask mode answers a question about the code in a comment, without changing files or opening a PR. Use <code>@netlify-ask</code>, <code>@netlify ask:</code> (the colon is required), or <code>mode:ask</code> right after the mention: for example <code>@netlify-ask fable high how are webhooks retried?</code>. A plain "ask" isn't enough, because <code>@netlify ask the user to confirm…</code> is a build request. The answer appears as a result comment marked 💬 Answered. On a PR, the agent reads the PR branch, and a later <code>@netlify</code> request continues with the same context.</p>
-</section>
-
-<section id="scope-guard">
-  <h2>Scope guard</h2>
-  <p>After a successful run, the action checks which files that run changed and adds a <strong>⚠️ Review these changes</strong> table to the result comment (and to the PR, for runs started from an issue) when it touched workflows, <code>netlify.toml</code>, root <code>*.toml</code> files, lockfiles, <code>AGENTS.md</code>/<code>CLAUDE.md</code>, <code>.env</code> files, new root files, or new top-level folders. Files the request names are listed as requested instead. It never blocks a run.</p>
-  <p>Configure it with <code>protected-paths</code> (globs; a pattern without <code>/</code> matches only at the root; <code>default</code>, <code>none</code>, and <code>!pattern</code> are supported) and escalate with <code>protected-paths-action: comment,label,draft</code>. By default, <code>scope-instructions</code> also tells agents to report unrelated build or deploy failures instead of working around them.</p>
-</section>
-
-<section id="checkpoints">
-  <h2>Run checkpoints and stopping</h2>
-  <p>When a run starts, the status comment links to the live agent run and stores an encrypted checkpoint. The checkpoint is sealed with a key derived from your Netlify token, bound to this thread and runner, and never contains the prompt or site ID in plain text. Cancelling the workflow stops the agent run. Set <code>job-timeout-minutes</code> to your job's <code>timeout-minutes</code> so the agent's own limit fits inside the job. Transient API errors while waiting are retried until the run's time limit.</p>
-  <p>To stop a run, add a comment containing only <code>@netlify stop</code>. The action stops the agent right away, and the run's comments say "Stopped by @you" instead of "failed". This needs the stop-aware <code>concurrency</code> group from the current templates, so the stop doesn't wait behind the run it stops.</p>
+<section id="security">
+  <div class="prose reveal">
+    <p class="kicker">Security</p>
+    <h2>Who can start a run, and what runs where</h2>
+    <ul class="muted">
+      <li>Only repository collaborators, members and owners can start a run, and <code>allowed-users</code> can narrow that further.</li>
+      <li>Bot accounts (<code>github-actions[bot]</code>, <code>netlify-coding[bot]</code>, <code>netlify[bot]</code>) are skipped, so the action can't trigger itself.</li>
+      <li>One run per issue or PR at a time, through the workflow's <code>concurrency</code> group.</li>
+      <li>Only status comments carry run state. Result comments are scrubbed so prose from users or agents can't plant state markers.</li>
+    </ul>
+    <h3>The trust model behind <code>pull_request_target</code></h3>
+    <p class="muted">The workflow uses <code>pull_request_target</code> so PRs from forks can start runs. That trigger has
+    access to your secrets and a write-scoped token, which GitHub Security Lab warns can become a
+    <a href="https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/">"pwn request"</a>. The
+    action is safe under it because it checks the author's association before checkout and drops outside contributors,
+    and because it never runs PR code on the runner: the agent runs on Netlify.</p>
+    <div class="note warn"><p><strong>If you change the workflow, don't add steps that run PR code</strong>, such as
+    <code>npm install</code>, tests, linters or builds against the checkout. That turns it into a way to steal your
+    secrets. If you need to run PR code, use the two-workflow <code>pull_request</code> + <code>workflow_run</code>
+    pattern from the GitHub Security Lab article.</p></div>
+  </div>
 </section>
 
 <section id="versioning">
-  <h2>Versioning</h2>
-  <p>Releases are tagged <code>vX.Y.Z</code>, and <code>v1</code> always points at the latest <code>v1.Y.Z</code> release. Use <code>@v1</code> to follow minor and patch releases automatically, or pin a release commit with a version comment (<code>@&lt;sha&gt; # v1.2.0</code>) and let Dependabot's <code>github-actions</code> updates propose upgrades.</p>
-  <p>Breaking changes (removed or renamed inputs and outputs, incompatible comment markers, or mention syntax that selects something different) only ship in a new major version. Release notes call out behavior changes and any workflow-file updates needed to use new features.</p>
-</section>
-
-<section id="how-it-works">
-  <h2>How it Works</h2>
-  <ol>
-    <li>You mention <code>@netlify</code> in an issue, PR, or comment</li>
-    <li>The action reacts with eyes emoji and posts an in-progress status comment</li>
-    <li>It creates an agent run with your prompt</li>
-    <li>The selected agent builds or modifies your site</li>
-    <li>On completion, the action posts a full result comment, then updates the status comment with a short summary and a link to that result</li>
-    <li>If triggered from an issue, a pull request is automatically created with the changes</li>
-  </ol>
-  <h3>Comments</h3>
-  <ul>
-    <li><strong>Status comment</strong>: one mutable current-state comment with hidden state markers for follow-up runs</li>
-    <li><strong>Result comments</strong>: immutable full narratives for each Netlify session run</li>
-    <li><strong>History TOC</strong>: a newest-first PR table of contents linking to result comments</li>
-  </ul>
-  <h3>Security</h3>
-  <ul>
-    <li>Only repository collaborators, members, and owners can trigger</li>
-    <li>Bot accounts are excluded to prevent loops</li>
-    <li>Concurrency control ensures one run per issue/PR at a time</li>
-    <li>The <code>allowed-users</code> input can further restrict access</li>
-    <li>Only status comments carry runner/session state markers; result comments are scrubbed and carry only a result identifier marker</li>
-  </ul>
+  <div class="prose reveal">
+    <p class="kicker">Versioning</p>
+    <h2>Follow <code>@v1</code>, or pin a release</h2>
+    <p class="muted">Releases are tagged <code>vX.Y.Z</code>, and <code>v1</code> always points at the latest
+    <code>v1.Y.Z</code> release. Use <code>@v1</code> to follow minor and patch releases automatically, or pin a release
+    commit with a version comment (<code>@&lt;sha&gt; # v1.2.0</code>) and let Dependabot's <code>github-actions</code>
+    updates propose upgrades.</p>
+    <p class="muted">Breaking changes (removed or renamed inputs and outputs, incompatible comment markers, or mention
+    syntax that selects something different) only ship in a new major version. Release notes call out behavior changes
+    and any workflow-file updates needed to use new features.</p>
+  </div>
 </section>
 
 <section id="troubleshooting">
-  <h2>Troubleshooting</h2>
-
-  <div class="trouble-item">
-    <strong>Missing NETLIFY_AUTH_TOKEN or NETLIFY_SITE_ID</strong>
-    <p>Go to <strong>Settings &gt; Secrets</strong> in your repo and add both secrets. <a href="https://app.netlify.com/user/applications#personal-access-tokens">Create a token here</a>. Find your Site ID in the Netlify dashboard under Site configuration &gt; General.</p>
+  <div class="prose reveal">
+    <p class="kicker">Troubleshooting</p>
+    <h2>When something goes wrong</h2>
+    <details><summary>Missing NETLIFY_AUTH_TOKEN or NETLIFY_SITE_ID</summary><div><p>Add both secrets under
+      <strong>Settings &gt; Secrets and variables &gt; Actions</strong>.
+      <a href="https://app.netlify.com/user/applications#personal-access-tokens">Create a token here</a>, and find the
+      Site ID in the Netlify dashboard under Site configuration &gt; General.</p></div></details>
+    <details><summary>Preflight checks failed</summary><div><p>Read the <code>preflight-summary</code> and
+      <code>preflight-json</code> outputs. Common causes: a token and site ID that don't match, an invalid
+      <code>default-agent</code>, a non-positive <code>timeout-minutes</code>, or missing workflow permissions
+      (<code>contents: write</code>, <code>pull-requests: write</code>, <code>issues: write</code>).</p></div></details>
+    <details><summary>"The project can't be found"</summary><div><p><code>NETLIFY_SITE_ID</code> points to a site that
+      doesn't exist or that the token can't access. Check the site ID in the Netlify dashboard and regenerate the token
+      if needed.</p></div></details>
+    <details><summary>The agent timed out</summary><div><p>The default is 10 minutes. Raise it with
+      <code>timeout-minutes: '15'</code> for bigger requests, or split the work into smaller follow-up comments on the
+      PR.</p></div></details>
+    <details><summary>A dry run still contacted Netlify</summary><div><p>That's expected. <code>dry-run</code> only skips
+      the commit and PR. Use <code>preflight-only: 'true'</code> to validate with no agent run.</p></div></details>
+    <details><summary>"Requested agent is not available"</summary><div><p>That agent is temporarily unavailable. Try
+      another one: <code>@netlify claude</code>, <code>@netlify codex</code> or <code>@netlify gemini</code>.</p></div></details>
+    <details><summary>The workflow runs on bot comments</summary><div><p>Add the job-level <code>if:</code> guard from the
+      <a href="#setup">setup workflow</a>, which skips <code>github-actions[bot]</code>, <code>netlify-coding[bot]</code>
+      and <code>netlify[bot]</code>.</p></div></details>
+    <details><summary>A monorepo builds the wrong app</summary><div><p>Set <code>netlify-site-id</code> to the Netlify site
+      for that app. <code>netlify-filter</code> is only kept so existing workflows don't break.</p></div></details>
   </div>
 
-  <div class="trouble-item">
-    <strong>Preflight-only failed checks</strong>
-    <p>Use <code>preflight-summary</code> and <code>preflight-json</code> outputs to identify failing checks. Common fixes: token/site ID mismatch, invalid default agent, non-positive timeout, or missing workflow permissions.</p>
-  </div>
-
-  <div class="trouble-item">
-    <strong>"The project can't be found"</strong>
-    <p>The <code>NETLIFY_SITE_ID</code> secret points to a site that doesn't exist or that your token can't access. Verify the site ID in the Netlify dashboard and regenerate your token if needed.</p>
-  </div>
-
-  <div class="trouble-item">
-    <strong>Agent timed out</strong>
-    <p>The default timeout is 10 minutes. For complex prompts, increase it with <code>timeout-minutes: '15'</code>. You can also break large tasks into smaller follow-up prompts.</p>
-  </div>
-
-  <div class="trouble-item">
-    <strong>"dry-run" still contacted Netlify</strong>
-    <p>This is expected. <code>dry-run</code> skips commit and PR creation only. Use <code>preflight-only: 'true'</code> when you need validation with no agent run.</p>
-  </div>
-
-  <div class="trouble-item">
-    <strong>"Requested agent is not available"</strong>
-    <p>The selected agent is temporarily unavailable. Try a different agent: <code>@netlify claude</code>, <code>@netlify codex</code>, or <code>@netlify gemini</code>.</p>
-  </div>
-
-  <div class="trouble-item">
-    <strong>Bot triggered the workflow</strong>
-    <p>Add a job-level <code>if:</code> guard to skip bot senders. The example workflow includes this by default. See the <a href="#setup">setup section</a>.</p>
-  </div>
-
-  <div class="trouble-item">
-    <strong>Node.js 20 deprecation warning</strong>
-    <p>Update the action dependencies in <code>action.yml</code> to their latest versions (v5/v6/v8). The published action already uses Node 24-compatible versions.</p>
-  </div>
+  <footer>
+    <span>Netlify Agent Runners · GitHub Action (beta)</span>
+    <span><a href="https://github.com/netlify-labs/agent-runner-action">GitHub</a> ·
+    <a href="https://github.com/netlify-labs/agent-runner-action-example">Example repo</a> ·
+    <a href="https://www.netlify.com/products/agents/">Netlify Agent Runners</a></span>
+  </footer>
 </section>
 
+</main>
 </div>
 
-<footer>
-  <p>Netlify Agent Runners &middot; <a href="https://github.com/netlify-labs/agent-runner-action">GitHub</a> &middot; <a href="https://www.netlify.com/products/agents/">Netlify Agent Runners</a></p>
-</footer>
+<button type="button" class="agent-prompt" id="agent-prompt-btn" aria-describedby="agent-prompt-desc">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/></svg>
+  <span>Copy prompt for your agent</span>
+</button>
+<p id="agent-prompt-desc" hidden>Copies instructions your AI coding agent can follow to set up this action in your repository.</p>
 
+<!-- What the "Copy prompt for your agent" button copies. Plain text; keep it in step with the setup section. -->
+<script type="text/plain" id="agent-prompt">Set up the Netlify Agent Runners GitHub Action (beta, Netlify Labs) in this repository.
+
+What it does: anyone with write access can comment "@netlify <request>" on an issue or pull request, and a Netlify Agent Runner (Claude, Codex, Gemini or OpenCode) makes the change on Netlify and opens a pull request with a deploy preview. It never merges anything itself.
+
+Docs: https://agent-runner-github-action.netlify.app
+Source and README: https://github.com/netlify-labs/agent-runner-action
+
+Work through these steps. Stop and ask me whenever a step needs me (anything in a browser, or a secret).
+
+1. Netlify site. Check whether this repo is linked to a Netlify site: read the site ID from .netlify/state.json if it exists. If not, run `netlify link` (or `netlify init` to create a site) with the Netlify CLI, and tell me which site you linked.
+
+2. GitHub App. Ask me to install the netlify-coding GitHub App on this repository: https://github.com/apps/netlify-coding
+   It's what creates the commits and pull requests.
+
+3. Secrets. The workflow needs two repository secrets:
+   - NETLIFY_SITE_ID: set it yourself with `gh secret set NETLIFY_SITE_ID --body "<site ID from step 1>"`.
+   - NETLIFY_AUTH_TOKEN: a Netlify personal access token. Don't handle the token yourself. Ask me to create one at https://app.netlify.com/user/applications#personal-access-tokens and run `gh secret set NETLIFY_AUTH_TOKEN` myself (it prompts for the value).
+
+4. Workflow. Create .github/workflows/netlify-agents.yml with the exact contents of the template:
+   https://raw.githubusercontent.com/netlify-labs/agent-runner-action/main/workflow-templates/netlify-agents.yml
+   Keep `uses: netlify-labs/agent-runner-action@v1`, the `concurrency` group, the job's `if:` (it skips bot comments) and the `permissions` as they are. Keep `job-timeout-minutes` equal to the job's `timeout-minutes`. Optional settings are in the commented lines; see https://agent-runner-github-action.netlify.app/#inputs
+
+5. Optional recovery. To finish runs whose GitHub job died, also add .github/workflows/netlify-agents-recover.yml from:
+   https://raw.githubusercontent.com/netlify-labs/agent-runner-action/main/workflow-templates/netlify-agents-recover.yml
+   Ask me first: it runs every 30 minutes (about 20-30 seconds of Actions time when there's nothing to do).
+
+6. Safety. Don't add steps to this workflow that install or run code from the repository (npm install, tests, linters, builds). It uses pull_request_target and can read secrets. Why: https://agent-runner-github-action.netlify.app/#security
+
+7. Ship and test. Commit the workflow(s) on a branch and open a pull request. Issue and comment workflows only run from the default branch, so testing waits until it's merged. Then I can open an issue whose body starts with "@netlify" and a small request; a 👀 reaction and a status comment should appear within a minute. To check the setup without starting an agent run, set `preflight-only: 'true'` on the action for one run.
+
+When you're done, tell me what you changed and exactly what I still need to do.
+
+More:
+- Talking to it (agents, models, effort): https://agent-runner-github-action.netlify.app/#usage
+- Asking questions without code changes: https://agent-runner-github-action.netlify.app/#ask-mode
+- Troubleshooting: https://agent-runner-github-action.netlify.app/#troubleshooting
+</script>
+
+<script>
+(() => {
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+  const $ = (s, r = document) => r.querySelector(s)
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)]
+
+  // Theme switch: a sun in dark mode (go light), a moon in light mode (go dark). Remembered on this device.
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>'
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z"/></svg>'
+  const themeBtn = $('#theme-toggle')
+  const isDark = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches
+  const paintToggle = () => {
+    themeBtn.innerHTML = isDark() ? SUN : MOON
+    themeBtn.setAttribute('aria-label', isDark() ? 'Switch to light theme' : 'Switch to dark theme')
+  }
+  themeBtn.addEventListener('click', () => {
+    const next = isDark() ? 'light' : 'dark'
+    document.documentElement.dataset.theme = next
+    try { localStorage.setItem('arga-theme', next) } catch {}
+    paintToggle()
+  })
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintToggle)
+  paintToggle()
+
+  // Code: light highlighting for YAML and @netlify mentions, and a copy button on every block.
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  $$('pre.yaml code').forEach((code) => {
+    code.innerHTML = code.textContent.split('\n').map((line) => {
+      const hash = line.search(/(^|\s)#/)
+      const body = hash === -1 ? line : line.slice(0, hash)
+      const comment = hash === -1 ? '' : line.slice(hash)
+      const b = esc(body)
+        .replace(/^(\s*-?\s*)([\w-]+)(:)/, '$1<span class="k">$2</span>$3')
+        .replace(/('[^']*')/g, '<span class="s">$1</span>')
+      return b + (comment ? `<span class="c">${esc(comment)}</span>` : '')
+    }).join('\n')
+  })
+  $$('pre.mentions code').forEach((code) => {
+    code.innerHTML = code.textContent.split('\n').map((line) => {
+      const hash = line.search(/\s{2,}#/)
+      const body = hash === -1 ? line : line.slice(0, hash)
+      const comment = hash === -1 ? '' : line.slice(hash)
+      return esc(body).replace(/^(@netlify[\w-]*)/, '<span class="m">$1</span>') + (comment ? `<span class="c">${esc(comment)}</span>` : '')
+    }).join('\n')
+  })
+  $$('pre').forEach((pre) => {
+    const box = document.createElement('div')
+    box.className = 'code-block' + (pre.classList.contains('reveal') ? ' reveal' : '')
+    pre.classList.remove('reveal')
+    pre.replaceWith(box)
+    box.append(pre)
+    const btn = Object.assign(document.createElement('button'), { type: 'button', className: 'copy', textContent: 'Copy' })
+    btn.setAttribute('aria-label', 'Copy code')
+    btn.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(pre.textContent); btn.textContent = 'Copied' } catch { btn.textContent = 'Press ⌘C' }
+      setTimeout(() => (btn.textContent = 'Copy'), 1600)
+    })
+    box.append(btn)
+  })
+
+  // Entrances: each block fades up the first time it scrolls into view.
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((es) => {
+      for (const e of es) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target) }
+    }, { rootMargin: '0px 0px -8% 0px' })
+    $$('.reveal').forEach((el) => io.observe(el))
+  } else {
+    $$('.reveal').forEach((el) => el.classList.add('in'))
+  }
+
+  // Contents: the link for the section in view is highlighted, and clicking one scrolls there.
+  const tocLinks = $$('.toc a')
+  const tocTargets = tocLinks.map((a) => document.getElementById(a.hash.slice(1))).filter(Boolean)
+  const markCurrent = (id) => tocLinks.forEach((a) => (a.hash === `#${id}` ? a.setAttribute('aria-current', 'location') : a.removeAttribute('aria-current')))
+  let jumping = null
+  const inView = new Set()
+  const atBottom = () => innerHeight + scrollY >= document.documentElement.scrollHeight - 4
+  const spy = new IntersectionObserver((es) => {
+    for (const e of es) e.isIntersecting ? inView.add(e.target.id) : inView.delete(e.target.id)
+    if (jumping) return
+    const current = atBottom() ? tocTargets.at(-1) : tocTargets.find((t) => inView.has(t.id))
+    if (current) markCurrent(current.id)
+  }, { rootMargin: '-20% 0px -55% 0px' })
+  tocTargets.forEach((t) => spy.observe(t))
+  addEventListener('scroll', () => { if (!jumping && atBottom()) markCurrent(tocTargets.at(-1).id) }, { passive: true })
+  tocLinks.forEach((a) => a.addEventListener('click', (e) => {
+    const t = document.getElementById(a.hash.slice(1))
+    if (!t) return
+    e.preventDefault()
+    jumping = t.id
+    markCurrent(t.id)
+    t.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' })
+    history.replaceState(null, '', a.hash)
+    const done = () => { jumping = null; removeEventListener('scrollend', done) }
+    addEventListener('scrollend', done)
+    setTimeout(done, 1200)
+  }))
+  markCurrent(location.hash && document.getElementById(location.hash.slice(1)) ? location.hash.slice(1) : 'overview')
+
+  // How it works: a run, one step at a time. Each step says which places are busy, which way work moves along
+  // each wire (fwd = toward Netlify, back = toward GitHub), and what the status comment says at that moment.
+  const STEPS = [
+    { on: ['github'], wires: {},
+      title: 'You mention <code>@netlify</code>',
+      body: 'Write <code>@netlify</code> and your request in an issue, a PR, a review or a comment. You can name an agent, a model and an effort level first: <code>@netlify claude</code>, <code>@netlify fable high</code>.' },
+    { on: ['github', 'actions'], wires: { 1: 'fwd' },
+      title: 'GitHub starts your workflow',
+      body: 'The job checks that you’re a collaborator and not a bot, then reacts with 👀. Only one job runs per issue or PR at a time.' },
+    { on: ['actions', 'netlify'], wires: { 1: 'back', 2: 'fwd' },
+      status: '<span class="spin"></span>Starting <b>Claude · Fable 5</b>… <a href="#checkpoints">live run</a><small>Encrypted checkpoint saved</small>',
+      title: 'The action starts an agent run',
+      body: 'Using <code>nax-agent-runner-sdk</code>, on your Netlify site. A status comment links to the live run and stores an encrypted checkpoint, so the run can be finished later if the job dies.' },
+    { on: ['netlify'], wires: { 2: 'back' },
+      status: '<span class="spin"></span><b>Claude · Fable 5</b> is working… 4m <a href="#checkpoints">live run</a><small>Comment <code>@netlify stop</code> to stop it</small>',
+      title: 'The agent works on Netlify',
+      body: 'No code from the PR runs on your Actions runner. The job waits for that exact run, and <code>@netlify stop</code> or cancelling the workflow stops the agent.' },
+    { on: ['netlify', 'github'], wires: { 1: 'back', 2: 'back' },
+      status: '<span class="spin"></span>Opening a pull request…<small>Checking which files changed</small>',
+      title: 'The changes land as a pull request',
+      body: 'On a new branch, with a deploy preview. If the agent touched risky files like workflows, lockfiles or <code>netlify.toml</code>, they’re flagged for review. Nothing is ever merged for you.' },
+    { on: ['github'], wires: {},
+      status: '<span class="ok-text">Completed ✓</span> · PR #128 · <a href="#how-it-works">see the result</a><small>Claude · Fable 5 · 6m 12s</small>',
+      title: 'It reports back',
+      body: 'A result comment says what the agent did, with a screenshot and links, and the status comment becomes a short summary. Comment <code>@netlify</code> on the PR to keep going from there.' },
+  ]
+  const viz = $('#run-viz')
+  if (viz) {
+    const STEP_MS = 4200
+    viz.style.setProperty('--step-ms', `${STEP_MS}ms`)
+    const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg>'
+    const PAUSE = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>'
+    const places = $$('.place', viz), wires = $$('.wire', viz), items = $$('[data-from]', viz)
+    const copy = $('#viz-copy'), status = $('#viz-status'), dots = $('#viz-dots')
+    const prev = $('#viz-prev'), next = $('#viz-next'), play = $('#viz-play')
+    const plain = (html) => html.replace(/<[^>]+>/g, '')
+    STEPS.forEach((st, i) => {
+      const b = Object.assign(document.createElement('button'), { type: 'button', innerHTML: '<i></i>' })
+      b.setAttribute('aria-label', `Step ${i + 1}: ${plain(st.title)}`)
+      b.addEventListener('click', () => { stop(); go(i) })
+      dots.append(b)
+    })
+    let step = -1, timer = null
+    const go = (i) => {
+      const n = (i + STEPS.length) % STEPS.length
+      const back = n < step
+      step = n
+      const st = STEPS[n]
+      places.forEach((p) => p.classList.toggle('on', st.on.includes(p.dataset.place)))
+      wires.forEach((w) => { const d = st.wires[w.dataset.wire]; w.classList.toggle('fwd', d === 'fwd'); w.classList.toggle('back', d === 'back') })
+      for (const el of items) {
+        const show = n + 1 >= Number(el.dataset.from)
+        const was = !el.hidden
+        el.hidden = !show
+        if (show && !was && !back) { el.classList.remove('enter'); void el.offsetWidth; el.classList.add('enter') }
+      }
+      if (st.status && status.innerHTML !== st.status) {
+        status.innerHTML = st.status
+        const card = status.closest('.gh-item')
+        if (!card.classList.contains('enter') || n > 2) { card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash') }
+      }
+      copy.innerHTML = `<div class="swap"><p class="count">Step ${n + 1} of ${STEPS.length}</p><h3>${st.title}</h3><p>${st.body}</p></div>`
+      $$('button', dots).forEach((b, k) => {
+        k === n ? b.setAttribute('aria-current', 'step') : b.removeAttribute('aria-current')
+        b.classList.toggle('done', k < n)
+        const bar = b.firstChild; bar.replaceWith(bar.cloneNode()) // restart the progress fill
+      })
+    }
+    const paintPlay = () => { play.innerHTML = timer ? PAUSE : PLAY; play.setAttribute('aria-label', timer ? 'Pause' : 'Play'); viz.classList.toggle('playing', !!timer) }
+    const start = () => {
+      if (timer) return
+      if (step === STEPS.length - 1) go(0)
+      timer = setInterval(() => go(step + 1), STEP_MS)
+      paintPlay(); go(step) // restart the current dot's fill in time with the timer
+    }
+    const stop = () => { clearInterval(timer); timer = null; paintPlay() }
+    prev.addEventListener('click', () => { stop(); go(step - 1) })
+    next.addEventListener('click', () => { stop(); go(step + 1) })
+    play.addEventListener('click', () => (timer ? stop() : start()))
+    viz.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); stop(); go(step + 1) }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); stop(); go(step - 1) }
+      else if (e.key === ' ' && e.target === viz) { e.preventDefault(); timer ? stop() : start() }
+    })
+    // Reserve the thread's final height so the page below doesn't jump as comments appear.
+    // The step text gets its tallest step's height for the same reason (it sits above the thread on narrow screens).
+    const gh = $('.gh', viz), text = $('.viz-text', viz)
+    const fit = () => {
+      const at = step
+      gh.style.minHeight = text.style.minHeight = ''
+      let tallest = 0
+      STEPS.forEach((_, i) => { go(i); tallest = Math.max(tallest, text.offsetHeight) })
+      if (matchMedia('(min-width: 861px)').matches) gh.style.minHeight = `${gh.offsetHeight}px`
+      text.style.minHeight = `${tallest}px`
+      go(Math.max(at, 0))
+    }
+    fit()
+    let resizeTimer
+    addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(fit, 150) })
+    paintPlay()
+    // Plays by itself while on screen (never with reduced motion), and pauses when scrolled away or the tab is hidden.
+    let userStopped = false
+    ;[prev, next, play, dots].forEach((el) => el.addEventListener('click', () => { userStopped = !timer }))
+    viz.addEventListener('keydown', () => { userStopped = !timer })
+    if (!reduced && 'IntersectionObserver' in window) {
+      new IntersectionObserver(([e]) => { e.isIntersecting ? (!userStopped && start()) : stop() }, { threshold: 0.45 }).observe(viz)
+      document.addEventListener('visibilitychange', () => { if (document.hidden) stop() })
+    }
+  }
+
+  // "Copy prompt for your agent": copies the setup prompt, with a fallback for browsers without the clipboard API.
+  const promptBtn = $('#agent-prompt-btn'), promptText = $('#agent-prompt')
+  if (promptBtn && promptText) {
+    const label = $('span', promptBtn)
+    const text = promptText.textContent.trim() + '\n'
+    const copyFallback = () => {
+      const ta = Object.assign(document.createElement('textarea'), { value: text, readOnly: true })
+      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0'
+      document.body.append(ta); ta.select()
+      const ok = document.execCommand('copy'); ta.remove()
+      if (!ok) throw new Error('copy failed')
+    }
+    let resetTimer
+    promptBtn.addEventListener('click', async () => {
+      try {
+        try { await navigator.clipboard.writeText(text) } catch { copyFallback() }
+        label.textContent = 'Copied. Paste it into your agent'
+        promptBtn.classList.add('copied')
+      } catch {
+        label.textContent = 'Couldn’t copy. Try again'
+      }
+      clearTimeout(resetTimer)
+      resetTimer = setTimeout(() => { label.textContent = 'Copy prompt for your agent'; promptBtn.classList.remove('copied') }, 2600)
+    })
+  }
+
+  // The hero video: shown once its MP4 is set on the panel's data-src.
+  const hero = $('#hero-video')
+  if (hero.dataset.src) {
+    hero.innerHTML = ''
+    const v = document.createElement('video')
+    Object.assign(v, { src: hero.dataset.src, controls: true, playsInline: true, preload: 'metadata' })
+    if (hero.dataset.poster) v.poster = hero.dataset.poster
+    if (hero.dataset.captions) {
+      const tr = document.createElement('track')
+      Object.assign(tr, { kind: 'captions', srclang: 'en', label: 'English', src: hero.dataset.captions })
+      v.append(tr)
+    }
+    hero.append(v)
+  }
+})()
+</script>
 </body>
 </html>
