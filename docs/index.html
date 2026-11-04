@@ -87,6 +87,8 @@
     .hero h1 .at { color: var(--accent); }
     .badge-row { margin: 0 0 16px; }
     .badge-row .badge { margin-left: 0; }
+    .badge-row .badge + .badge { margin-left: 6px; }
+    .badge.labs { background: var(--accent-soft); color: var(--accent); }
     .lede { font-size: 19px; color: var(--muted); margin: 0 0 28px; }
     .badge { display: inline-block; vertical-align: middle; margin-left: 8px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: .02em;
       background: var(--warn-soft); color: var(--warn); }
@@ -334,7 +336,7 @@
 
 <header class="hero" id="overview">
   <div>
-    <p class="badge-row"><span class="badge">Beta</span></p>
+    <p class="badge-row"><span class="badge">Beta</span> <span class="badge labs">Labs</span></p>
     <h1>Netlify Agent Runners <span class="at">GitHub Action</span></h1>
     <p class="lede">Mention <code>@netlify</code> with a request in any issue or pull request. A Netlify Agent Runner
     (Claude, Codex, Gemini or OpenCode) makes the change on Netlify and opens a pull request with a deploy preview.
