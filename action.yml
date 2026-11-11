@@ -322,6 +322,9 @@ runs:
       if: steps.trigger-check.outputs.should-run == 'true'
       shell: bash
       env:
+        # The byte count, not the text: the text is user-controlled, and an
+        # oversized TRIGGER_TEXT env var would fail the step before it can check.
+        TRIGGER_TEXT_BYTES: ${{ steps.context-info.outputs.trigger-text-bytes }}
         SCOPE_BLOCK: ${{ steps.context-info.outputs.scope-block }}
       run: |
         set -euo pipefail
@@ -329,13 +332,8 @@ runs:
         SAFE_MAX_BYTES=120000
         WARN_BYTES=98304
         ENV_PREFIX_BYTES=13
-        TRIGGER_TEXT_FILE="${RUNNER_TEMP:-/tmp}/netlify-agent-trigger-text.txt"
 
-        cat > "$TRIGGER_TEXT_FILE" <<'NETLIFY_AGENT_TRIGGER_TEXT_EOF'
-        ${{ steps.context-info.outputs.trigger-text }}
-        NETLIFY_AGENT_TRIGGER_TEXT_EOF
-
-        BODY_BYTES=$(wc -c < "$TRIGGER_TEXT_FILE" | tr -d '[:space:]')
+        BODY_BYTES="${TRIGGER_TEXT_BYTES:-0}"
         # The scope-instructions block is appended to the prompt the agent receives.
         SCOPE_BYTES=$(printf '%s' "${SCOPE_BLOCK:-}" | wc -c | tr -d '[:space:]')
         BODY_BYTES=$((BODY_BYTES + SCOPE_BYTES))
@@ -572,7 +570,7 @@ runs:
 
     - name: Find existing status comment
       if: steps.trigger-check.outputs.should-run == 'true' && (github.event_name != 'workflow_dispatch' || steps.context-info.outputs.command == 'recover') && steps.context-info.outputs.issue-number != ''
-      uses: peter-evans/find-comment@v4
+      uses: peter-evans/find-comment@b30e6a3c0ed37e7c023ccd3f1db5c6c0b0c23aad # v4.0.0
       id: find_comment
       with:
         token: ${{ inputs.github-token }}
@@ -583,7 +581,7 @@ runs:
 
     - name: Find existing history comment
       if: steps.trigger-check.outputs.should-run == 'true' && (github.event_name != 'workflow_dispatch' || steps.context-info.outputs.command == 'recover') && steps.context-info.outputs.is-pr == 'true'
-      uses: peter-evans/find-comment@v4
+      uses: peter-evans/find-comment@b30e6a3c0ed37e7c023ccd3f1db5c6c0b0c23aad # v4.0.0
       id: find_history_comment
       with:
         token: ${{ inputs.github-token }}
@@ -711,8 +709,11 @@ runs:
     - name: Fail on preflight failure
       if: steps.trigger-check.outputs.should-run == 'true' && (steps.trigger-text-size.outputs.safe == 'false' || steps.preflight.outputs.preflight-ok != 'true')
       shell: bash
+      env:
+        PREFLIGHT_SUMMARY: ${{ steps.trigger-text-size.outputs.preflight-summary || steps.preflight.outputs.preflight-summary }}
       run: |
-        echo "::error title=Preflight failed::${{ steps.trigger-text-size.outputs.preflight-summary || steps.preflight.outputs.preflight-summary }}"
+        # Workflow commands end at a newline; keep a multi-line summary in one annotation.
+        echo "::error title=Preflight failed::${PREFLIGHT_SUMMARY//$'\n'/ }"
         exit 1
 
     # -----------------------------------------------------------------------
@@ -722,15 +723,16 @@ runs:
       id: should-continue
       if: steps.trigger-check.outputs.should-run == 'true'
       shell: bash
+      env:
+        PREFLIGHT_CONTINUE: ${{ steps.trigger-text-size.outputs.safe == 'false' && 'false' || steps.preflight.outputs.should-continue }}
+        IS_PR: ${{ steps.context-info.outputs.is-pr }}
+        HAS_LINKED_PR: ${{ steps.extract-agent-id.outputs.has-linked-pr == 'true' && 'true' || 'false' }}
+        COMMAND: ${{ steps.context-info.outputs.command }}
       run: |
-        PREFLIGHT_CONTINUE="${{ steps.trigger-text-size.outputs.safe == 'false' && 'false' || steps.preflight.outputs.should-continue }}"
         if [[ "$PREFLIGHT_CONTINUE" != "true" ]]; then
           echo "should-continue=false" >> $GITHUB_OUTPUT
           exit 0
         fi
-        IS_PR="${{ steps.context-info.outputs.is-pr }}"
-        HAS_LINKED_PR="${{ steps.extract-agent-id.outputs.has-linked-pr == 'true' && 'true' || 'false' }}"
-        COMMAND="${{ steps.context-info.outputs.command }}"
         if [[ "$COMMAND" == stop* ]]; then
           # @netlify stop is handled by its own step; it never starts a run.
           echo "should-continue=false" >> $GITHUB_OUTPUT
@@ -746,7 +748,7 @@ runs:
 
     - name: Redirect to PR if issue has linked PR
       if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'false' && steps.extract-agent-id.outputs.linked-pr-number != '' && !startsWith(steps.context-info.outputs.command, 'stop')
-      uses: peter-evans/create-or-update-comment@v5
+      uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5.0.0
       with:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.context-info.outputs.issue-number }}
@@ -941,7 +943,7 @@ runs:
     # -----------------------------------------------------------------------
     - name: Setup Bun
       if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
-      uses: oven-sh/setup-bun@v2
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
     - name: Cache Netlify CLI
       if: steps.trigger-check.outputs.should-run == 'true' && steps.should-continue.outputs.should-continue == 'true'
@@ -959,7 +961,9 @@ runs:
         && steps.should-continue.outputs.should-continue == 'true'
         && steps.cache-netlify.outputs.cache-hit != 'true'
       shell: bash
-      run: bun install -g netlify-cli@${{ inputs.netlify-cli-version }}
+      env:
+        NETLIFY_CLI_VERSION: ${{ inputs.netlify-cli-version }}
+      run: bun install -g "netlify-cli@${NETLIFY_CLI_VERSION}"
 
     # -----------------------------------------------------------------------
     # 11. Resolve Netlify site name
@@ -1371,7 +1375,7 @@ runs:
         && steps.generate_status_comment.outputs.comment-body
         && (steps.find_comment.outputs.comment-id || steps.create_comment.outputs.comment-id) != ''
       continue-on-error: true
-      uses: peter-evans/create-or-update-comment@v5
+      uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5.0.0
       with:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.context-info.outputs.issue-number }}
@@ -1408,7 +1412,7 @@ runs:
         && steps.generate_history_comment.outputs.comment-body != ''
         && steps.context-info.outputs.issue-number != ''
       continue-on-error: true
-      uses: peter-evans/create-or-update-comment@v5
+      uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5.0.0
       with:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.context-info.outputs.issue-number }}
@@ -1469,7 +1473,7 @@ runs:
           || steps.post_result_comment.outcome == 'failure'
         )
       continue-on-error: true
-      uses: peter-evans/create-or-update-comment@v5
+      uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5.0.0
       with:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.context-info.outputs.issue-number }}
