@@ -41,6 +41,18 @@ function runScript(name) {
   return script.join('\n');
 }
 
+describe('action.yml shell safety', () => {
+  it('passes values to run: blocks through env, never ${{ }} in the script', () => {
+    // GitHub expands ${{ }} into the script text before bash parses it, so a
+    // comment body (or anything derived from one) would run as shell.
+    for (const step of steps()) {
+      const inline = /^      run: (?!\|$)(.*)$/m.exec(step.text);
+      if (inline) assert.doesNotMatch(inline[1], /\$\{\{/, `step "${step.name}"`);
+      else if (/^      run: \|$/m.test(step.text)) assert.doesNotMatch(runScript(step.name), /\$\{\{/, `step "${step.name}"`);
+    }
+  });
+});
+
 describe('action.yml runtime staging', () => {
   it('stages the action outside the workspace before any step needs dependencies', () => {
     const all = steps();
@@ -182,9 +194,9 @@ describe('action.yml scope guard wiring', () => {
     try {
       const output = path.join(temp, 'out');
       fs.writeFileSync(output, '');
-      const script = runScript('Check trigger text size').replace('${{ steps.context-info.outputs.trigger-text }}', 'hello');
+      const script = runScript('Check trigger text size');
       const result = spawnSync('bash', ['-c', script], {
-        env: { ...process.env, RUNNER_TEMP: temp, GITHUB_OUTPUT: output, SCOPE_BLOCK: 'x'.repeat(100) },
+        env: { ...process.env, RUNNER_TEMP: temp, GITHUB_OUTPUT: output, TRIGGER_TEXT_BYTES: '6', SCOPE_BLOCK: 'x'.repeat(100) },
         encoding: 'utf8',
       });
       assert.equal(result.status, 0, result.stderr);

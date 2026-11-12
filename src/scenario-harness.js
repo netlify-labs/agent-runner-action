@@ -128,7 +128,9 @@ async function withScopedEnv(patch, fn) {
     await fn();
   } finally {
     for (const key of Object.keys(patch || {})) {
-      if (hadKey[key]) {
+      // `bun test` reports TZ as an own key with an undefined value; assigning
+      // undefined back stores the string "undefined" (Bun 1.4+, Node), so delete.
+      if (hadKey[key] && previous[key] !== undefined) {
         process.env[key] = previous[key];
       } else {
         delete process.env[key];

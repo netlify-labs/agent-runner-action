@@ -205,6 +205,8 @@ module.exports = async function getContext({ github, context, core }) {
   core.setOutput('head-sha', headSha || '');
   core.setOutput('is-pr', isPR.toString());
   core.setOutput('trigger-text', triggerText);
+  // Measured here so the size check never has to put the text in a shell script or env var.
+  core.setOutput('trigger-text-bytes', String(Buffer.byteLength(triggerText, 'utf8')));
   core.setOutput('has-linked-pr', hasLinkedPR.toString());
   core.setOutput('linked-pr-number', linkedPrNumber);
   core.setOutput('agent', agent);
